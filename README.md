@@ -2,6 +2,8 @@
 
 Req2Web is an Agent + RAG prototype that turns a vague software requirement into a frontend prototype or webpage implementation, together with a concise explanation, UI references, and an interaction flow.
 
+Private project backup: `https://github.com/aszz007/Req2Web`.
+
 ## Current Stage
 
 The first traceable Demo corpus is ready; the next step is to build a unified RAG indexing and retrieval skeleton before implementing the Agent chain.
