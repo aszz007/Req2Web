@@ -85,3 +85,11 @@
 ```powershell
 .\.venv\Scripts\python.exe .\scripts\run_agent_chain.py "一句模糊软件需求"
 ```
+
+Agent context 到结构化页面契约的入口：
+
+```powershell
+.\.venv\Scripts\python.exe .\scripts\run_page_spec.py "一句模糊软件需求"
+```
+
+PageSpec 只保留五类检索结果的轻量证据引用，不复制 RAG 正文或原始资产。字段和边界见 `docs/page_spec.md`。

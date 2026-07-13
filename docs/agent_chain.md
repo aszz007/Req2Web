@@ -15,6 +15,8 @@
 
 本阶段不生成最终 HTML、前端页面、截图或一致性报告，也不依赖外部 LLM 服务。
 
+该 context bundle 的下一节点是 `PageSpecBuilder`。PageSpec 契约、字段映射和 CLI 见 `docs/page_spec.md`；后续页面渲染器应消费 PageSpec，而不是直接消费原始需求。
+
 ## 2. 稳定输出结构
 
 `AgentContextBundle` 位于 `src/req2web_agent/schema.py`，JSON schema 标识为 `req2web.agent.context.v1`。稳定字段包括：
