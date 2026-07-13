@@ -10,7 +10,8 @@
 -> req2web.agent.context.v1
 -> PageSpecBuilder
 -> req2web.page_spec.v1
--> 页面渲染器（下一任务）
+-> DeterministicPageRenderer
+-> 离线静态页面
 ```
 
 当前实现位于 `src/req2web_generation/`。`PageSpecBuilder` 只消费已经完成需求理解和五类检索的 `AgentContextBundle`，不会重新理解需求、重复检索、调用外部 LLM 或读取 `data/raw`。
@@ -57,7 +58,9 @@ RAG 证据只保留 `role`、`doc_id`、`title` 和最多 3 个必要的 `refere
 - 2–4 个核心用例；
 - section、component、state、interaction、constraint 和 acceptance check ID 的唯一性；
 - layout、section、component、state 和 interaction 的引用完整性；
+- 每个组件必须被其所属 section 的 `component_ids` 收录，且 section 内不得重复；
 - interaction 的触发组件、源状态和目标状态真实存在；
+- interaction 允许源状态和目标状态相同，以表达刷新、重试或原地反馈；
 - acceptance checks 覆盖全部核心用例；
 - 五类轻量证据齐全；
 - 每个用例对 section、component、interaction 和 RAG `doc_id` 的追溯有效。
@@ -86,6 +89,6 @@ CLI 先通过现有 `MinimalAgentChain` 产生 `AgentContextBundle`，再把该�
 
 ## 6. 当前不包含的内容
 
-本任务不生成 HTML、CSS、JavaScript、前端框架项目或截图，也不实现完整一致性检查器。PageSpec 仍是内部中间产物，不是最终用户页面。
+PageSpec 构建器本身不生成 HTML、CSS、JavaScript 或截图。下游确定性页面渲染器见 `docs/page_renderer.md`；PageSpec 仍是内部中间产物，不是最终用户页面。
 
-下一任务应实现确定性页面渲染器，并以 `req2web.page_spec.v1` 为唯一上游输入；渲染器不应直接消费原始模糊需求，也不应重复执行 Agent 或 RAG。
+渲染器以 `req2web.page_spec.v1` 为唯一业务输入，不直接消费原始模糊需求，也不重复执行 Agent 或 RAG。当前仍未实现自动截图和完整一致性检查器。

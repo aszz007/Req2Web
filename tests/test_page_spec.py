@@ -101,6 +101,30 @@ class PageSpecTest(unittest.TestCase):
             self.assertIn(interaction.source_state_id, state_ids)
             self.assertIn(interaction.target_state_id, state_ids)
 
+    def test_every_component_is_listed_by_its_owning_section(self) -> None:
+        sections = {item.section_id: item for item in self.spec.sections}
+        for component in self.spec.components:
+            self.assertIn(
+                component.component_id,
+                sections[component.section_id].component_ids,
+            )
+
+        removed = self.spec.sections[0].component_ids.pop()
+        with self.assertRaisesRegex(ValueError, "not listed in its owning section"):
+            self.spec.validate()
+        self.assertTrue(removed)
+
+    def test_section_component_ids_cannot_repeat(self) -> None:
+        component_id = self.spec.sections[0].component_ids[0]
+        self.spec.sections[0].component_ids.append(component_id)
+        with self.assertRaisesRegex(ValueError, "component_ids must be unique"):
+            self.spec.validate()
+
+    def test_interaction_may_keep_the_same_source_and_target_state(self) -> None:
+        interaction = self.spec.interactions[0]
+        interaction.target_state_id = interaction.source_state_id
+        self.spec.validate()
+
     def test_preserves_core_use_cases_and_five_role_evidence(self) -> None:
         self.assertGreaterEqual(len(self.spec.use_cases), 2)
         self.assertLessEqual(len(self.spec.use_cases), 4)

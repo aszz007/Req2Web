@@ -1,6 +1,12 @@
 """Deterministic PageSpec generation for Req2Web."""
 
 from .builder import PageSpecBuilder
+from .renderer import (
+    RENDER_MANIFEST_SCHEMA_VERSION,
+    SUPPORTED_COMPONENT_TYPES,
+    DeterministicPageRenderer,
+    RenderResult,
+)
 from .schema import (
     PAGE_SPEC_SCHEMA_VERSION,
     AcceptanceCheck,
@@ -22,6 +28,7 @@ __all__ = [
     "AcceptanceCheck",
     "ComponentSpec",
     "ConstraintSpec",
+    "DeterministicPageRenderer",
     "EvidenceReference",
     "InteractionSpec",
     "LayoutSpec",
@@ -29,7 +36,10 @@ __all__ = [
     "PageSpecBuilder",
     "PageState",
     "PageUseCase",
+    "RENDER_MANIFEST_SCHEMA_VERSION",
+    "RenderResult",
     "SectionSpec",
+    "SUPPORTED_COMPONENT_TYPES",
     "TraceabilitySpec",
     "UseCaseTrace",
 ]

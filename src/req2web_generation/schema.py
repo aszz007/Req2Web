@@ -257,6 +257,14 @@ class PageSpec:
                     f"component {component.component_id} references unknown section: "
                     f"{component.section_id}"
                 )
+            if (
+                component.component_id
+                not in sections_by_id[component.section_id].component_ids
+            ):
+                raise ValueError(
+                    f"component {component.component_id} is not listed in its owning "
+                    f"section {component.section_id} component_ids"
+                )
 
         for state in self.states:
             for field_name in ("state_id", "name", "description"):
@@ -285,11 +293,19 @@ class PageSpec:
                     f"interaction {interaction.interaction_id} references unknown component: "
                     f"{interaction.trigger_component_id}"
                 )
-            _validate_references(
-                (interaction.source_state_id, interaction.target_state_id),
-                set(state_ids),
-                f"interaction {interaction.interaction_id} state references",
-            )
+            missing_states = [
+                state_id
+                for state_id in (
+                    interaction.source_state_id,
+                    interaction.target_state_id,
+                )
+                if state_id not in set(state_ids)
+            ]
+            if missing_states:
+                raise ValueError(
+                    f"interaction {interaction.interaction_id} state references contain "
+                    f"unknown references: {missing_states}"
+                )
             _validate_references(
                 interaction.use_case_ids,
                 valid_use_cases,
