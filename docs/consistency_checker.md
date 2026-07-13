@@ -152,7 +152,7 @@ CLI 依次复用 `MinimalAgentChain`、`PageSpecBuilder`、`DeterministicPageRen
 - 服务端、数据库或真实外部 API 行为；
 - 最终 Demo 控制台、结果页和用户结果包。
 
-因此 `passed=true` 只表示静态产物通过当前结构、状态、交互、验收、manifest 和离线边界检查，不表示完整视觉一致性已经验证。
+因此 `passed=true` 只表示静态产物通过当前结构、状态、交互、验收、manifest 和离线边界检查，不表示完整视觉一致性已经验证。需要浏览器中的人工开发验收时，按 [本地页面可视化验收手册](local_visual_acceptance.md) 执行；其结果不得回填或扩大 `passed` 的含义。
 
 ## 7. 测试与下一阶段
 

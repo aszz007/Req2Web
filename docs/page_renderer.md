@@ -101,8 +101,8 @@ CLI 位于渲染器外层，可以依次编排现有 `MinimalAgentChain`、`Page
   --output-dir .\output\pet-recognition
 ```
 
-`--output-dir` 必须显式提供。CLI 输出 `RenderResult` JSON；直接用浏览器打开对应 `index.html` 即可离线使用。
+`--output-dir` 必须显式提供。CLI 输出 `RenderResult` JSON；对应 `index.html` 可离线使用。若 in-app Browser 因 URL 安全策略拒绝 `file://`，按 [本地页面可视化验收手册](local_visual_acceptance.md) 启动仅绑定 `127.0.0.1` 的临时服务，不要把该问题误判为工作区文件权限不足。
 
 ## 8. 当前不包含
 
-当前渲染层不包含自动截图管线或视觉一致性比较，也不包含服务器、数据库、React / Vue / Vite 项目或最终 Demo 控制台。下游 `MinimalConsistencyChecker` 与 `req2web.consistency.report.v1` 见 `docs/consistency_checker.md`；静态页面和结构报告已由 `DeterministicResultPackager` 整合进端到端结果包，见 `docs/result_package.md`。
+当前渲染层不包含自动截图管线或视觉一致性比较，也不包含服务器、数据库、React / Vue / Vite 项目或最终 Demo 控制台。临时 loopback 服务只用于人工开发验收，不属于渲染器产物或运行时依赖。下游 `MinimalConsistencyChecker` 与 `req2web.consistency.report.v1` 见 `docs/consistency_checker.md`；静态页面和结构报告已由 `DeterministicResultPackager` 整合进端到端结果包，见 `docs/result_package.md`。
