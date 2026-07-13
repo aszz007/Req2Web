@@ -1,0 +1,30 @@
+/.*/
+!/.github/
+# Local development environments
+.venv/
+node_modules/
+
+# Python caches and local secrets
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.env
+.env.*
+
+# Raw datasets and downloaded archives stay local
+data/raw/
+*.zip
+*.tar
+*.tar.gz
+*.tgz
+*.7z
+*.rar
+
+# Machine-specific workspace state and generated outputs
+.vscode/
+outputs/
+
+# Temporary audit output
+*.tmp
