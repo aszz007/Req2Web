@@ -158,4 +158,4 @@ CLI 依次复用 `MinimalAgentChain`、`PageSpecBuilder`、`DeterministicPageRen
 
 `tests/test_consistency_checker.py` 覆盖正常电商与宠物页面、JSON 序列化、确定性、文件删除、哈希篡改、RenderResult/manifest page_id 篡改、section/component 删除或错位、interaction/state 删除、目标状态修改、同状态交互、warning、未知类型降级、`innerHTML`、外部网络依赖和非法 PageSpec。
 
-下一阶段是端到端结果包整合：以现有 `AgentContextBundle`、PageSpec、`RenderResult`、静态页面和 `ConsistencyReport` 为输入，组合面向 Demo 的稳定结果目录与说明元数据。该阶段不在一致性检查器内部重新生成或自动修复任何上游产物。
+端到端结果包整合已经完成：`DeterministicResultPackager` 以现有 `AgentContextBundle`、PageSpec、`RenderResult`、静态页面和 `ConsistencyReport` 为输入，组合面向 Demo 的稳定结果目录与说明元数据，见 `docs/result_package.md`。它不会在一致性检查器内部重新生成或自动修复任何上游产物。下一工作对话先做 Demo 里程碑验收和缺口决策。

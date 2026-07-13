@@ -91,4 +91,4 @@ CLI 先通过现有 `MinimalAgentChain` 产生 `AgentContextBundle`，再把该�
 
 PageSpec 构建器本身不生成 HTML、CSS、JavaScript 或截图。下游确定性页面渲染器见 `docs/page_renderer.md`；PageSpec 仍是内部中间产物，不是最终用户页面。
 
-渲染器以 `req2web.page_spec.v1` 为唯一业务输入，不直接消费原始模糊需求，也不重复执行 Agent 或 RAG。下游最小结构一致性检查器见 `docs/consistency_checker.md`；当前仍未实现自动截图或视觉一致性比较。
+渲染器以 `req2web.page_spec.v1` 为唯一业务输入，不直接消费原始模糊需求，也不重复执行 Agent 或 RAG。下游最小结构一致性检查器见 `docs/consistency_checker.md`，最终确定性组合节点见 `docs/result_package.md`；当前仍未实现自动截图或视觉一致性比较。

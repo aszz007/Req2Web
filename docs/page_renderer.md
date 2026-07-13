@@ -105,4 +105,4 @@ CLI 位于渲染器外层，可以依次编排现有 `MinimalAgentChain`、`Page
 
 ## 8. 当前不包含
 
-当前渲染层不包含自动截图管线或视觉一致性比较，也不包含服务器、数据库、React / Vue / Vite 项目或最终 Demo 控制台。下游 `MinimalConsistencyChecker` 与 `req2web.consistency.report.v1` 见 `docs/consistency_checker.md`；下一阶段把静态页面和结构报告整合进端到端结果包。
+当前渲染层不包含自动截图管线或视觉一致性比较，也不包含服务器、数据库、React / Vue / Vite 项目或最终 Demo 控制台。下游 `MinimalConsistencyChecker` 与 `req2web.consistency.report.v1` 见 `docs/consistency_checker.md`；静态页面和结构报告已由 `DeterministicResultPackager` 整合进端到端结果包，见 `docs/result_package.md`。
