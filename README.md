@@ -6,7 +6,7 @@ Private project backup: `https://github.com/aszz007/Req2Web`.
 
 ## Current Stage
 
-The first traceable Demo corpus is ready; the next step is to build a unified RAG indexing and retrieval skeleton before implementing the Agent chain.
+The first traceable Demo corpus and the unified RAG indexing and retrieval skeleton are ready; the next step is the minimal Agent chain.
 
 - Vision2Web: 100 responsive webpage implementations and 93 requirement tasks retained.
 - RICO combined: 42 UI reference screens retained.
@@ -19,6 +19,17 @@ The first traceable Demo corpus is ready; the next step is to build a unified RA
 The manifest currently contains 283 unique records across requirement, UI reference, interaction flow, implementation, and validation roles.
 
 The authoritative screening decisions are stored in `data/processed/selection_manifest.csv`. Dataset audit and finalization scripts are in `scripts/`.
+
+## Minimal RAG Retrieval
+
+Build the unified 283-document corpus and the offline TF-IDF index, then run the five-role retrieval smoke test:
+
+```powershell
+.\.venv\Scripts\python.exe .\scripts\build_rag_index.py
+.\.venv\Scripts\python.exe .\scripts\search_rag.py
+```
+
+The unified schema, index files, query options, and test command are documented in `docs/rag_retrieval.md`. The TF-IDF backend is intentionally dependency-free and can later be replaced by a multilingual embedding backend such as bge-m3 without changing the document envelope.
 
 ## Repository Scope
 
