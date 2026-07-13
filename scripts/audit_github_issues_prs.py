@@ -57,6 +57,21 @@ CURATED = {
     ],
 }
 
+AUTO_SELECTED_IDS = {
+    "GHP-UI-01",
+    "GHP-UI-02",
+    "GHP-INP-01",
+    "GHP-INP-02",
+    "GHP-AUTH-01",
+    "GHP-AUTH-02",
+    "GHP-STA-01",
+    "GHP-STA-02",
+    "GHP-REL-01",
+    "GHP-REL-02",
+    "GHP-CMP-01",
+    "GHP-CMP-02",
+}
+
 
 def write_csv_atomic(path: Path, rows: list[dict[str, Any]], fields: list[str]) -> None:
     temporary = path.with_suffix(path.suffix + ".tmp")
@@ -131,12 +146,14 @@ def main() -> int:
             if key not in source_rows:
                 raise ValueError(f"curated relation missing from source: {key}")
             row = source_rows[key]
+            review_id = f"GHP-{prefixes[category]}-{index:02d}"
+            repository = REPOSITORIES.get(repo_id, repo_id)
             candidates.append(
                 {
-                    "review_id": f"GHP-{prefixes[category]}-{index:02d}",
+                    "review_id": review_id,
                     "category": category,
                     "category_label": CATEGORIES[category][0],
-                    "repository": REPOSITORIES.get(repo_id, repo_id),
+                    "repository": repository,
                     "repo_id": repo_id,
                     "issue_number": issue_number,
                     "pull_number": pull_number,
@@ -150,7 +167,9 @@ def main() -> int:
                     "pull_additions": number(row["pull_additions"]),
                     "pull_deletions": number(row["pull_deletions"]),
                     "pull_changed_files": number(row["pull_changed_files"]),
-                    "review_status": "pending",
+                    "issue_url": f"https://github.com/{repository}/issues/{issue_number}",
+                    "pull_url": f"https://github.com/{repository}/pull/{pull_number}",
+                    "review_status": "auto_selected" if review_id in AUTO_SELECTED_IDS else "reserve",
                 }
             )
     write_csv_atomic(candidate_path, candidates, list(candidates[0]))
@@ -160,17 +179,17 @@ def main() -> int:
         cards: list[str] = []
         for row in (item for item in candidates if item["category"] == category):
             excerpt = " ".join(row["issue_body_plain"].split())[:900]
+            status_label = "自动保留" if row["review_status"] == "auto_selected" else "备用"
             cards.append(
-                f"""<article class="candidate"><div class="card-head"><h3>{html.escape(row['review_id'])}</h3><label><input type="checkbox" value="{html.escape(row['review_id'])}"> 选择</label></div><div class="body"><strong>{html.escape(row['chinese_summary'])}</strong><p class="focus">验收重点：{html.escape(row['validation_focus'])}</p><details><summary>查看英文原始信息</summary><p><b>{html.escape(row['issue_title'])}</b></p><p>{html.escape(excerpt)}</p></details><p class="meta">{html.escape(row['repository'])} · Issue #{row['issue_number']} → PR #{row['pull_number']}<br>提交 {row['pull_commits']} · 文件 {row['pull_changed_files']} · +{row['pull_additions']} / -{row['pull_deletions']}</p></div></article>"""
+                f"""<article class="candidate {html.escape(row['review_status'])}"><div class="card-head"><h3>{html.escape(row['review_id'])}</h3><span class="badge">{status_label}</span></div><div class="body"><strong>{html.escape(row['chinese_summary'])}</strong><p class="focus">验收重点：{html.escape(row['validation_focus'])}</p><p class="links"><a href="{html.escape(row['issue_url'])}" target="_blank" rel="noreferrer">原始 Issue</a><a href="{html.escape(row['pull_url'])}" target="_blank" rel="noreferrer">对应 PR</a></p><details><summary>可选：查看英文原始描述</summary><p><b>{html.escape(row['issue_title'])}</b></p><p>{html.escape(excerpt)}</p></details><p class="meta">{html.escape(row['repository'])} · Issue #{row['issue_number']} → PR #{row['pull_number']}<br>提交 {row['pull_commits']} · 文件 {row['pull_changed_files']} · +{row['pull_additions']} / -{row['pull_deletions']}<br>本地数据仅证明该 PR 修复了该 Issue，不包含修复代码或 diff。</p></div></article>"""
             )
         sections.append(
-            f"""<section data-quota="2"><div class="group-head"><div><h2>{html.escape(label)}</h2><p>{html.escape(standard)}</p></div><strong>请选择 2 条 · 已选 <span class="group-count">0</span> / 2</strong></div><div class="grid">{''.join(cards)}</div></section>"""
+            f"""<section><div class="group-head"><div><h2>{html.escape(label)}</h2><p>{html.escape(standard)}</p></div><strong>自动保留 2 条 · 备用 1 条</strong></div><div class="grid">{''.join(cards)}</div></section>"""
         )
 
     document = f"""<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>GitHub Issues / PRs 人工挑选</title><style>
-:root{{font-family:"Segoe UI","Microsoft YaHei",sans-serif;color:#182226}}*{{box-sizing:border-box}}body{{margin:0;background:#f2f4f5}}header{{position:sticky;top:0;z-index:5;display:grid;grid-template-columns:minmax(0,1fr) minmax(440px,.8fr);gap:20px;padding:14px 24px;background:#fff;border-bottom:1px solid #bdc7ca}}h1{{margin:0;font-size:22px}}header p{{margin:5px 0;color:#5b696f}}.result{{display:grid;grid-template-columns:auto 1fr auto;gap:10px;align-items:center}}textarea{{width:100%;min-height:68px;padding:7px;border:1px solid #87969c;font:12px Consolas,monospace}}button{{min-height:36px;background:#fff;border:1px solid #68787f;padding:7px 11px}}main{{width:min(1500px,100%);margin:auto;padding:20px 24px 48px}}section{{margin-bottom:38px}}.group-head{{display:flex;justify-content:space-between;align-items:flex-start;gap:18px;padding:14px;background:#fff;border:1px solid #c6d0d4;border-left:5px solid #176f55}}.group-head p{{margin:6px 0 0;color:#56666c}}h2,h3{{margin:0}}.grid{{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px;margin-top:12px}}.candidate{{background:#fff;border:1px solid #c5cfd3;min-width:0}}.candidate.selected{{border:3px solid #177b59}}.card-head{{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:11px 13px;border-bottom:1px solid #d5dcdf}}label{{font-weight:700;white-space:nowrap}}input{{width:18px;height:18px;vertical-align:middle}}.body{{padding:14px;line-height:1.55}}.focus{{min-height:74px;padding:10px;background:#edf3f1;border-left:4px solid #277760}}details{{margin:12px 0}}details p{{font-size:12px;color:#536268}}.meta{{font-size:12px;color:#607078}}@media(max-width:1050px){{header{{position:static;grid-template-columns:1fr}}.grid{{grid-template-columns:1fr}}}}@media(max-width:680px){{header,main{{padding:14px}}.result{{grid-template-columns:1fr}}.group-head{{flex-direction:column}}}}</style></head><body>
-<header><div><h1>GitHub Issues / PRs 验收案例精筛</h1><p>已从 14,384 条 Issue—PR 关系中按描述完整度和项目用途初筛。每类 3 选 2，共保留 12 条；只需阅读中文概括和验收重点。</p></div><div class="result"><strong>已选 <span id="total">0</span> / 12</strong><textarea id="output" readonly></textarea><button id="clear" type="button">清空</button></div></header><main>{''.join(sections)}</main>
-<script>const key='github-issues-prs-review-v1';const boxes=[...document.querySelectorAll('input[type="checkbox"]')];function update(){{let total=0;const lines=[];document.querySelectorAll('section').forEach(section=>{{const picked=[...section.querySelectorAll('input:checked')];total+=picked.length;section.querySelector('.group-count').textContent=picked.length;lines.push(`${{section.querySelector('h2').textContent}}: ${{picked.map(x=>x.value).join(', ')}}`);}});boxes.forEach(box=>box.closest('.candidate').classList.toggle('selected',box.checked));document.getElementById('total').textContent=total;document.getElementById('output').value=lines.join('\\n');localStorage.setItem(key,JSON.stringify(boxes.filter(x=>x.checked).map(x=>x.value)));}}boxes.forEach(box=>box.addEventListener('change',update));document.getElementById('clear').addEventListener('click',()=>{{boxes.forEach(box=>box.checked=false);update();}});try{{const saved=new Set(JSON.parse(localStorage.getItem(key)||'[]'));boxes.forEach(box=>box.checked=saved.has(box.value));}}catch(_){{}}update();</script></body></html>"""
+:root{{font-family:"Segoe UI","Microsoft YaHei",sans-serif;color:#182226}}*{{box-sizing:border-box}}body{{margin:0;background:#f2f4f5}}header{{padding:18px 24px;background:#fff;border-bottom:1px solid #bdc7ca}}h1{{margin:0;font-size:24px}}header p{{margin:7px 0;color:#5b696f}}.notice{{max-width:1100px;padding:11px 13px;background:#edf3f1;border-left:4px solid #277760;color:#29453c}}main{{width:min(1500px,100%);margin:auto;padding:20px 24px 48px}}section{{margin-bottom:38px}}.group-head{{display:flex;justify-content:space-between;align-items:flex-start;gap:18px;padding:14px;background:#fff;border:1px solid #c6d0d4;border-left:5px solid #176f55}}.group-head p{{margin:6px 0 0;color:#56666c}}h2,h3{{margin:0}}.grid{{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px;margin-top:12px}}.candidate{{background:#fff;border:1px solid #c5cfd3;min-width:0}}.candidate.auto_selected{{border-top:5px solid #177b59}}.candidate.reserve{{border-top:5px solid #9aa5aa}}.card-head{{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:11px 13px;border-bottom:1px solid #d5dcdf}}.badge{{padding:4px 8px;border:1px solid #78878d;font-size:12px;font-weight:700}}.auto_selected .badge{{background:#e4f2ec;border-color:#43836c}}.reserve .badge{{background:#eef0f1}}.body{{padding:14px;line-height:1.55}}.focus{{min-height:74px;padding:10px;background:#edf3f1;border-left:4px solid #277760}}.links{{display:flex;gap:12px}}.links a{{font-weight:700}}details{{margin:12px 0}}details p{{font-size:12px;color:#536268}}.meta{{font-size:12px;color:#607078}}@media(max-width:1050px){{.grid{{grid-template-columns:1fr}}}}@media(max-width:680px){{header,main{{padding:14px}}.group-head{{flex-direction:column}}}}</style></head><body>
+<header><h1>GitHub Issues / PRs 自动筛选审计报告</h1><p>14,384 条关系已完成结构清点；18 条候选中自动保留 12 条，另外 6 条作为备用。</p><div class="notice">无需人工逐条筛选。中文概括和验收重点已作为 RAG 内容；原始 Issue / PR 链接只用于可选的来源核对。本地 GHPR 不包含 PR 解决方案、代码或 diff。</div></header><main>{''.join(sections)}</main></body></html>"""
     review_path.write_text(document, encoding="utf-8")
 
     complete = sum(row["has_issue_body"] for row in inventory)

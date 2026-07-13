@@ -11,7 +11,7 @@ The project is preparing a traceable Demo retrieval corpus before implementing t
 - RICO filtered traces: 12 interaction flows retained.
 - Design2Code: 12 standard and 4 HARD implementation references retained.
 - Sketch2Code: 8 sketch-to-webpage pairs retained.
-- GitHub Issues / PRs: full inventory and a validation-case review batch prepared.
+- GitHub Issues / PRs: 12 validation cases retained from a 14,384-row inventory.
 - Topcoder: not downloaded yet and does not block the first Demo.
 
 The authoritative screening decisions are stored in `data/processed/selection_manifest.csv`. Dataset audit and finalization scripts are in `scripts/`.
