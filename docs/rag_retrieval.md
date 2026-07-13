@@ -47,6 +47,12 @@
 
 这一后端是 Demo 骨架，不等于最终语义检索质量。后续接入 `bge-m3` 时保留统一文档和检索返回结构，只替换向量生成及存储层。
 
+### 2.1 统一检索接口
+
+`src/req2web_rag/retriever.py` 在具体索引之上定义 `Retriever` Protocol、`RetrieverConfig` 和 `RetrieverRegistry`。默认注册的 `tfidf` 后端通过 `TfidfRetriever` 复用现有 `TfidfIndex`；`scripts/search_rag.py` 和最小 Agent 链都通过该接口调用检索，不直接绑定具体索引类。
+
+注册表只提供未来后端的接入位置。当前未注册语义向量后端，也未安装、下载或调用 `bge-m3`。完整的 Agent 链结构与 CLI 用法见 `docs/agent_chain.md`。
+
 ## 3. 运行方式
 
 在项目根目录运行：
@@ -73,3 +79,9 @@
 ```
 
 测试会验证 webpage JSONL 恰好 100 条且未伪造 requirement_text、统一文档正常使用该 JSONL、283 条 manifest 全覆盖、文档键唯一、五类数量正确，以及一条模糊需求能够在五个 role 中分别得到正分召回。当前 webpage JSONL、统一文档、压缩索引和构建清单已验证连续两次构建 SHA-256 一致。
+
+最小 Agent 链入口：
+
+```powershell
+.\.venv\Scripts\python.exe .\scripts\run_agent_chain.py "一句模糊软件需求"
+```

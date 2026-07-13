@@ -10,7 +10,7 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "src"))
 
 from req2web_rag.corpus import ROLE_ORDER  # noqa: E402
-from req2web_rag.index import TfidfIndex  # noqa: E402
+from req2web_rag.retriever import RetrieverConfig, create_retriever  # noqa: E402
 
 
 DEFAULT_QUERY = (
@@ -31,13 +31,19 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> int:
     args = parse_args()
-    index = TfidfIndex.load(args.index_dir.resolve())
+    retriever = create_retriever(
+        RetrieverConfig(index_dir=args.index_dir.resolve(), backend="tfidf")
+    )
     if args.role:
-        result = {args.role: index.search(args.query, top_k=args.top_k, roles=[args.role])}
+        result = {
+            args.role: retriever.search(
+                args.query, top_k=args.top_k, roles=[args.role]
+            )
+        }
     elif args.all:
-        result = {"all": index.search(args.query, top_k=args.top_k)}
+        result = {"all": retriever.search(args.query, top_k=args.top_k)}
     else:
-        result = index.search_by_role(args.query, top_k=args.top_k)
+        result = retriever.search_by_role(args.query, top_k=args.top_k)
     print(json.dumps({"query": args.query, "results": result}, ensure_ascii=False, indent=2))
     return 0 if all(result.values()) else 2
 
