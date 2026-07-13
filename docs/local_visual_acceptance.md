@@ -103,6 +103,14 @@ Get-Process -Id $server.Id | Select-Object Id, ProcessName, Path
 7. 检查浏览器控制台的 error 和 warning；两者均应为空。
 8. 检查页面未请求 CDN、网络字体或外部服务，静态资源均来自 localhost 页面目录。
 
+若 PageSpec 声明明确错误恢复约束，还必须在同一 `390 x 844` 移动视口完成三条实际点击链：
+
+1. 从 initial 执行原有主操作，确认正常进入 success。
+2. 重新回到 initial，点击独立异常模拟入口，确认进入 error、原因与恢复提示可见，并核对 feedback / section 上的 interaction ID。
+3. 点击 error 中唯一恢复入口，确认返回 initial、主操作重新可见且可再次进入 success。
+
+输入错误场景不得用空字符串或随机行为隐式触发；权限拒绝场景不得接受真实浏览器权限提示。验收的是 PageSpec 驱动的确定性离线模拟。
+
 建议为每个样例至少记录以下证据：
 
 | 维度 | 应记录内容 |
@@ -113,6 +121,8 @@ Get-Process -Id $server.Id | Select-Object Id, ProcessName, Path
 | 交互 | 点击的组件、interaction ID、目标 state ID |
 | 反馈 | `user_feedback` 文本与状态样式 |
 | 运行质量 | 控制台 error/warning 数量 |
+
+横向溢出应以浏览器实际布局值核对：在包含垂直滚动条时，`document.documentElement.scrollWidth` 应等于 `clientWidth`，不要求它等于完整的 390 像素视口宽度。
 
 浏览器截图可以在当前对话中辅助人工观察，但不要保存、提交或扩展为自动截图管线。
 

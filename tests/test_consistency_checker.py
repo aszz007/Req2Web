@@ -32,6 +32,7 @@ PET_REQUIREMENT = (
     "做一个宠物情绪识别 App，用户拍照后系统分析宠物情绪并展示结果，"
     "相机权限被拒绝时要给出恢复提示。"
 )
+ECOMMERCE_RECOVERY_CONSTRAINT = "输入错误时给出可恢复提示"
 _PAGE_DATA_PREFIX = "const PAGE_DATA = Object.freeze("
 
 
@@ -68,12 +69,12 @@ class FixtureRetriever:
         }
 
 
-def build_spec(requirement: str):
+def build_spec(requirement: str, *, constraints: Iterable[str] = ()):
     context = MinimalAgentChain(
         DeterministicRequirementProvider(),
         FixtureRetriever(),
         top_k_per_role=2,
-    ).run(requirement)
+    ).run(requirement, constraints=list(constraints))
     return PageSpecBuilder().build(context)
 
 
@@ -101,6 +102,10 @@ class ConsistencyCheckerTest(unittest.TestCase):
         self.renderer = DeterministicPageRenderer()
         self.checker = MinimalConsistencyChecker()
         self.ecommerce_spec = build_spec(ECOMMERCE_REQUIREMENT)
+        self.ecommerce_recovery_spec = build_spec(
+            ECOMMERCE_REQUIREMENT,
+            constraints=(ECOMMERCE_RECOVERY_CONSTRAINT,),
+        )
         self.pet_spec = build_spec(PET_REQUIREMENT)
 
     def tearDown(self) -> None:
@@ -134,6 +139,14 @@ class ConsistencyCheckerTest(unittest.TestCase):
         result.render_manifest.write_text(
             json.dumps(manifest, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
             encoding="utf-8",
+        )
+
+    @staticmethod
+    def _recovery_constraint_id(spec) -> str:
+        return next(
+            item.constraint_id
+            for item in spec.constraints
+            if "可恢复" in item.description or "恢复提示" in item.description
         )
 
     def _mutate_page_data(
@@ -174,6 +187,67 @@ class ConsistencyCheckerTest(unittest.TestCase):
         report = self._check(self.pet_spec, result)
         self.assertTrue(report.passed)
         self.assertEqual(report.summary["fail"], 0)
+
+    def test_explicit_recovery_constraint_requires_reachable_closed_loop(self) -> None:
+        result = self._render(self.ecommerce_recovery_spec, "recovery")
+        report = self._check(self.ecommerce_recovery_spec, result)
+        constraint_id = self._recovery_constraint_id(self.ecommerce_recovery_spec)
+        self.assertTrue(report.passed)
+        for suffix in ("entry", "feedback", "return", "acceptance"):
+            self.assertEqual(
+                self._status(report, f"error-recovery.{suffix}:{constraint_id}"),
+                "pass",
+            )
+        self.assertFalse(
+            any(
+                item.check_id == "warning.unreachable-state:state-error"
+                for item in report.checks
+            )
+        )
+
+    def test_recovery_constraint_without_error_entry_is_fail(self) -> None:
+        spec = self.ecommerce_recovery_spec
+        removed_ids = {
+            item.interaction_id
+            for item in spec.interactions
+            if item.target_state_id == "state-error"
+        }
+        spec.interactions = [
+            item for item in spec.interactions if item.interaction_id not in removed_ids
+        ]
+        for trace in spec.traceability.use_cases:
+            trace.interaction_ids = [
+                item for item in trace.interaction_ids if item not in removed_ids
+            ]
+        report = self._check(spec, self._render(spec, "missing-entry"))
+        constraint_id = self._recovery_constraint_id(spec)
+        self.assertFalse(report.passed)
+        self.assertEqual(
+            self._status(report, f"error-recovery.entry:{constraint_id}"),
+            "fail",
+        )
+
+    def test_recovery_constraint_without_return_path_is_fail(self) -> None:
+        spec = self.ecommerce_recovery_spec
+        removed_ids = {
+            item.interaction_id
+            for item in spec.interactions
+            if item.source_state_id == "state-error"
+        }
+        spec.interactions = [
+            item for item in spec.interactions if item.interaction_id not in removed_ids
+        ]
+        for trace in spec.traceability.use_cases:
+            trace.interaction_ids = [
+                item for item in trace.interaction_ids if item not in removed_ids
+            ]
+        report = self._check(spec, self._render(spec, "missing-return"))
+        constraint_id = self._recovery_constraint_id(spec)
+        self.assertFalse(report.passed)
+        self.assertEqual(
+            self._status(report, f"error-recovery.return:{constraint_id}"),
+            "fail",
+        )
 
     def test_report_is_json_serializable_and_deterministic(self) -> None:
         first = self._check(result=self._render(name="first"))
@@ -385,6 +459,10 @@ class ConsistencyCheckerTest(unittest.TestCase):
         self.assertGreater(report.summary["warning"], 0)
         self.assertEqual(
             self._status(report, "warning.unreachable-state:state-loading"),
+            "warning",
+        )
+        self.assertEqual(
+            self._status(report, "warning.unreachable-state:state-empty"),
             "warning",
         )
 

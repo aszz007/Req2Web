@@ -27,6 +27,8 @@ PET_REQUIREMENT = (
     "做一个宠物情绪识别 App，用户拍照后系统分析宠物情绪并展示结果，"
     "相机权限被拒绝时要给出恢复提示。"
 )
+ECOMMERCE_RECOVERY_CONSTRAINT = "输入错误时给出可恢复提示"
+PET_RECOVERY_CONSTRAINT = "相机权限被拒绝时给出恢复提示"
 
 
 class FixtureRetriever:
@@ -63,12 +65,12 @@ class FixtureRetriever:
         }
 
 
-def build_context(requirement: str):
+def build_context(requirement: str, *, constraints: Iterable[str] = ()):
     return MinimalAgentChain(
         DeterministicRequirementProvider(),
         FixtureRetriever(),
         top_k_per_role=2,
-    ).run(requirement)
+    ).run(requirement, constraints=list(constraints))
 
 
 class PageSpecTest(unittest.TestCase):
@@ -153,6 +155,89 @@ class PageSpecTest(unittest.TestCase):
             {item.component_type for item in recognition_spec.components},
         )
         recognition_spec.validate()
+
+    def test_ecommerce_input_error_and_recovery_are_traceable(self) -> None:
+        spec = PageSpecBuilder().build(
+            build_context(
+                ECOMMERCE_REQUIREMENT,
+                constraints=(ECOMMERCE_RECOVERY_CONSTRAINT,),
+            )
+        )
+        error = next(
+            item
+            for item in spec.interactions
+            if item.source_state_id == "state-initial"
+            and item.target_state_id == "state-error"
+        )
+        recovery = next(
+            item
+            for item in spec.interactions
+            if item.source_state_id == "state-error"
+            and item.target_state_id == "state-initial"
+        )
+        components = {item.component_id: item for item in spec.components}
+        self.assertEqual(components[error.trigger_component_id].label, "模拟输入错误")
+        self.assertEqual(
+            components[recovery.trigger_component_id].label,
+            "修改输入并重试",
+        )
+        self.assertIn("输入内容无效", error.user_feedback)
+        self.assertIn("重新搜索", recovery.user_feedback)
+        error_state = next(item for item in spec.states if item.name == "error")
+        self.assertIn(recovery.trigger_component_id, error_state.visible_component_ids)
+        acceptance_states = {
+            item.state_id
+            for item in spec.acceptance_checks
+            if set(item.use_case_ids).intersection(error.use_case_ids)
+        }
+        self.assertIn("state-error", acceptance_states)
+        self.assertIn("state-initial", acceptance_states)
+
+    def test_pet_permission_denial_and_recovery_are_traceable(self) -> None:
+        spec = PageSpecBuilder().build(
+            build_context(
+                PET_REQUIREMENT,
+                constraints=(PET_RECOVERY_CONSTRAINT,),
+            )
+        )
+        error = next(
+            item
+            for item in spec.interactions
+            if item.target_state_id == "state-error"
+        )
+        recovery = next(
+            item
+            for item in spec.interactions
+            if item.source_state_id == "state-error"
+        )
+        components = {item.component_id: item for item in spec.components}
+        self.assertEqual(
+            components[error.trigger_component_id].label,
+            "模拟相机权限拒绝",
+        )
+        self.assertEqual(
+            components[recovery.trigger_component_id].label,
+            "返回并改用示例输入",
+        )
+        self.assertIn("相机权限已被拒绝", error.user_feedback)
+        self.assertIn("示例输入继续识别", recovery.user_feedback)
+
+    def test_page_without_recovery_constraint_gets_no_error_controls(self) -> None:
+        self.assertFalse(
+            any(item.target_state_id == "state-error" for item in self.spec.interactions)
+        )
+        self.assertFalse(
+            any(item.label.startswith("模拟") for item in self.spec.components)
+        )
+
+    def test_explicit_recovery_page_spec_is_deterministic(self) -> None:
+        context = build_context(
+            ECOMMERCE_REQUIREMENT,
+            constraints=(ECOMMERCE_RECOVERY_CONSTRAINT,),
+        )
+        first = PageSpecBuilder().build(context)
+        second = PageSpecBuilder().build(context)
+        self.assertEqual(first.to_dict(), second.to_dict())
 
     def test_empty_context_input_is_rejected(self) -> None:
         empty = replace(self.context, original_requirement="")

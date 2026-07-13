@@ -64,9 +64,11 @@ report = MinimalConsistencyChecker().check(
 
 当前 warning 包括：
 
-- loading、error、empty 等非验收目标状态没有可达 interaction；
+- loading、error、empty 等与明确错误恢复验收无关的非验收目标状态没有可达 interaction；
 - PageSpec 使用当前渲染器只能以可见通用控件降级的组件类型；
 - 输出目录存在 manifest 未声明的额外本地文件。
+
+如果 `agent_context` 约束明确同时要求错误和恢复，error 不再属于可忽略的非验收状态。检查器会为该约束输出四个稳定的 `error-recovery.*` 检查项；缺少异常入口、可见错误反馈、error 返回 initial/success 的恢复路径或对应 acceptance coverage 时均为结构化 `fail`。loading、empty 若没有明确验收要求，仍保持原 warning 语义。
 
 CLI 自己生成的 `consistency_report.json` 是检查器 sidecar，不作为额外文件 warning，保证对同一目录重复运行仍能生成相同报告。
 
@@ -112,6 +114,13 @@ CLI 自己生成的 `consistency_report.json` 是检查器 sidecar，不作为�
 - 验收状态存在于渲染运行时；
 - 至少一个相关的已渲染 interaction 能到达验收目标状态；
 - 每个核心用例均有实际 section、component、interaction 和 acceptance check 覆盖。
+- 对明确错误恢复约束，按结构化约束类型定位相关用例，并核验：
+  - 运行时存在触发组件在 initial 可见的 `initial -> error` 交互；
+  - error 中同 section 的 status panel 可见，且运行时反馈与 PageSpec 一致；
+  - error 中恢复触发组件可见，运行时存在 `error -> initial/success` 交互；
+  - error 入口和恢复目标各有相关 acceptance check。
+
+上述判断只使用 `ConstraintSpec`、PageState、ComponentSpec、InteractionSpec、AcceptanceCheck 和解析后的 `PAGE_DATA`，不以模糊扫描 HTML 文案代替结构证据。
 
 ### 4.6 `capability_boundary`
 
@@ -156,6 +165,6 @@ CLI 依次复用 `MinimalAgentChain`、`PageSpecBuilder`、`DeterministicPageRen
 
 ## 7. 测试与下一阶段
 
-`tests/test_consistency_checker.py` 覆盖正常电商与宠物页面、JSON 序列化、确定性、文件删除、哈希篡改、RenderResult/manifest page_id 篡改、section/component 删除或错位、interaction/state 删除、目标状态修改、同状态交互、warning、未知类型降级、`innerHTML`、外部网络依赖和非法 PageSpec。
+`tests/test_consistency_checker.py` 覆盖正常电商与宠物页面、明确错误恢复闭环、缺少错误入口、缺少恢复路径、JSON 序列化、确定性、文件删除、哈希篡改、RenderResult/manifest page_id 篡改、section/component 删除或错位、interaction/state 删除、目标状态修改、同状态交互、loading/empty warning、未知类型降级、`innerHTML`、外部网络依赖和非法 PageSpec。
 
 端到端结果包整合已经完成：`DeterministicResultPackager` 以现有 `AgentContextBundle`、PageSpec、`RenderResult`、静态页面和 `ConsistencyReport` 为输入，组合面向 Demo 的稳定结果目录与说明元数据，见 `docs/result_package.md`。它不会在一致性检查器内部重新生成或自动修复任何上游产物。下一工作对话先做 Demo 里程碑验收和缺口决策。

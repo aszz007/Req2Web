@@ -15,6 +15,7 @@ from .renderer import (
     SUPPORTED_COMPONENT_TYPES,
     RenderResult,
 )
+from .recovery import match_error_recovery_constraint
 from .schema import PAGE_SPEC_SCHEMA_VERSION, PageSpec
 
 
@@ -1113,6 +1114,199 @@ class MinimalConsistencyChecker:
                     acceptance.check_id,
                     acceptance.state_id,
                     *(item.interaction_id for item in related_interactions),
+                ],
+            )
+
+        states_by_name = {item.name: item for item in page_spec.states}
+        components_by_id = {
+            item.component_id: item for item in page_spec.components
+        }
+        sections_by_id = {item.section_id: item for item in page_spec.sections}
+
+        def runtime_has_interaction(interaction) -> bool:
+            expected = {
+                "action": interaction.action,
+                "interaction_id": interaction.interaction_id,
+                "source_state_id": interaction.source_state_id,
+                "target_state_id": interaction.target_state_id,
+                "trigger_component_id": interaction.trigger_component_id,
+                "user_feedback": interaction.user_feedback,
+            }
+            return runtime_interactions_by_id.get(interaction.interaction_id) == [
+                expected
+            ]
+
+        for constraint in page_spec.constraints:
+            if constraint.source != "agent_context":
+                continue
+            scenario = match_error_recovery_constraint(constraint.description)
+            if scenario is None:
+                continue
+
+            target_component = None
+            for component_type in scenario.preferred_component_types:
+                target_component = next(
+                    (
+                        item
+                        for item in page_spec.components
+                        if item.component_type == component_type
+                    ),
+                    None,
+                )
+                if target_component is not None:
+                    break
+            if target_component is None:
+                target_component = next(
+                    (
+                        item
+                        for item in page_spec.components
+                        if item.component_type != "status_panel"
+                    ),
+                    None,
+                )
+
+            relevant_use_case_ids: set[str] = set()
+            if target_component is not None:
+                target_section = sections_by_id.get(target_component.section_id)
+                if target_section is not None:
+                    relevant_use_case_ids.update(target_section.use_case_ids)
+
+            initial_state = states_by_name.get("initial")
+            error_state = states_by_name.get("error")
+            success_state = states_by_name.get("success")
+            initial_visible = (
+                set(initial_state.visible_component_ids) if initial_state else set()
+            )
+            error_visible = (
+                set(error_state.visible_component_ids) if error_state else set()
+            )
+
+            entry_interactions = [
+                item
+                for item in page_spec.interactions
+                if initial_state is not None
+                and error_state is not None
+                and item.source_state_id == initial_state.state_id
+                and item.target_state_id == error_state.state_id
+                and bool(set(item.use_case_ids).intersection(relevant_use_case_ids))
+                and item.trigger_component_id in initial_visible
+                and runtime_has_interaction(item)
+            ]
+            entry_ok = bool(entry_interactions)
+            add(
+                f"error-recovery.entry:{constraint.constraint_id}",
+                "acceptance_coverage",
+                "pass" if entry_ok else "fail",
+                (
+                    f"Constraint {constraint.constraint_id} has a rendered initial-to-error interaction."
+                    if entry_ok
+                    else f"Constraint {constraint.constraint_id} lacks a rendered initial-to-error interaction."
+                ),
+                [
+                    constraint.constraint_id,
+                    *(item.interaction_id for item in entry_interactions),
+                ],
+            )
+
+            feedback_interactions = []
+            if error_state is not None:
+                for interaction in entry_interactions:
+                    trigger = components_by_id.get(interaction.trigger_component_id)
+                    if trigger is None:
+                        continue
+                    visible_status = any(
+                        component_id in error_visible
+                        and components_by_id[component_id].component_type
+                        == "status_panel"
+                        and components_by_id[component_id].section_id
+                        == trigger.section_id
+                        for component_id in components_by_id
+                    )
+                    if interaction.user_feedback.strip() and visible_status:
+                        feedback_interactions.append(interaction)
+            feedback_ok = bool(feedback_interactions)
+            add(
+                f"error-recovery.feedback:{constraint.constraint_id}",
+                "acceptance_coverage",
+                "pass" if feedback_ok else "fail",
+                (
+                    f"Constraint {constraint.constraint_id} exposes error feedback in a visible status panel."
+                    if feedback_ok
+                    else f"Constraint {constraint.constraint_id} lacks reachable visible error feedback."
+                ),
+                [
+                    constraint.constraint_id,
+                    *(item.interaction_id for item in feedback_interactions),
+                ],
+            )
+
+            recovery_target_ids = {
+                state.state_id
+                for state in (initial_state, success_state)
+                if state is not None
+            }
+            recovery_interactions = [
+                item
+                for item in page_spec.interactions
+                if error_state is not None
+                and item.source_state_id == error_state.state_id
+                and item.target_state_id in recovery_target_ids
+                and bool(set(item.use_case_ids).intersection(relevant_use_case_ids))
+                and item.trigger_component_id in error_visible
+                and item.user_feedback.strip()
+                and runtime_has_interaction(item)
+            ]
+            recovery_ok = bool(recovery_interactions)
+            add(
+                f"error-recovery.return:{constraint.constraint_id}",
+                "acceptance_coverage",
+                "pass" if recovery_ok else "fail",
+                (
+                    f"Constraint {constraint.constraint_id} has a rendered recovery path from error."
+                    if recovery_ok
+                    else f"Constraint {constraint.constraint_id} lacks a rendered recovery path from error."
+                ),
+                [
+                    constraint.constraint_id,
+                    *(item.interaction_id for item in recovery_interactions),
+                ],
+            )
+
+            entry_acceptances = [
+                item
+                for item in page_spec.acceptance_checks
+                if error_state is not None
+                and item.state_id == error_state.state_id
+                and bool(set(item.use_case_ids).intersection(relevant_use_case_ids))
+            ]
+            recovery_state_ids = {
+                item.target_state_id for item in recovery_interactions
+            }
+            recovery_acceptances = [
+                item
+                for item in page_spec.acceptance_checks
+                if item.state_id in recovery_state_ids
+                and bool(set(item.use_case_ids).intersection(relevant_use_case_ids))
+            ]
+            acceptance_ok = (
+                entry_ok
+                and recovery_ok
+                and bool(entry_acceptances)
+                and bool(recovery_acceptances)
+            )
+            add(
+                f"error-recovery.acceptance:{constraint.constraint_id}",
+                "acceptance_coverage",
+                "pass" if acceptance_ok else "fail",
+                (
+                    f"Constraint {constraint.constraint_id} has acceptance coverage for error entry and recovery."
+                    if acceptance_ok
+                    else f"Constraint {constraint.constraint_id} lacks acceptance coverage for error entry or recovery."
+                ),
+                [
+                    constraint.constraint_id,
+                    *(item.check_id for item in entry_acceptances),
+                    *(item.check_id for item in recovery_acceptances),
                 ],
             )
 

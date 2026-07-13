@@ -61,6 +61,10 @@ CLI 位于渲染器外层，可以依次编排现有 `MinimalAgentChain`、`Page
 
 `success`、`error`、`empty` 和 `loading` 有独立可识别样式。交互允许源状态和目标状态相同，用于刷新、重试或不改变页面状态的原地反馈。
 
+当 PageSpec 含明确错误恢复闭环时，异常模拟和恢复入口只是普通的 `ComponentSpec` / `InteractionSpec`：渲染器不读取约束原文，也不判断业务场景。输入错误示例会显示“模拟输入错误”与“修改输入并重试”，权限拒绝示例会显示“模拟相机权限拒绝”与“返回并改用示例输入”。点击异常入口后，相关 status panel 的 `textContent`、`data-interaction-id` 和 section 的 `data-last-interaction-id` 会记录实际交互；恢复后回到 `state-initial`，正常 success 操作重新可用。
+
+这些交互完全离线，不调用真实相机、`navigator.permissions`、`getUserMedia`、后端或网络 API。运行时继续只消费 PageSpec，未增加原始需求、Agent context 或 Retriever 输入。
+
 ## 5. 安全与确定性
 
 - HTML 文本和属性统一使用 HTML 转义。
@@ -105,4 +109,4 @@ CLI 位于渲染器外层，可以依次编排现有 `MinimalAgentChain`、`Page
 
 ## 8. 当前不包含
 
-当前渲染层不包含自动截图管线或视觉一致性比较，也不包含服务器、数据库、React / Vue / Vite 项目或最终 Demo 控制台。临时 loopback 服务只用于人工开发验收，不属于渲染器产物或运行时依赖。下游 `MinimalConsistencyChecker` 与 `req2web.consistency.report.v1` 见 `docs/consistency_checker.md`；静态页面和结构报告已由 `DeterministicResultPackager` 整合进端到端结果包，见 `docs/result_package.md`。
+当前渲染层不包含自动截图管线或视觉一致性比较，也不包含真实权限接入、服务器、数据库、React / Vue / Vite 项目或最终 Demo 控制台。临时 loopback 服务只用于人工开发验收，不属于渲染器产物或运行时依赖。下游 `MinimalConsistencyChecker` 与 `req2web.consistency.report.v1` 见 `docs/consistency_checker.md`；静态页面和结构报告已由 `DeterministicResultPackager` 整合进端到端结果包，见 `docs/result_package.md`。

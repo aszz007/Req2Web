@@ -91,6 +91,8 @@ package_dir/
 - `user_feedback`
 - `target_state_id`
 
+因此，PageSpec 中新增的异常触发与恢复交互会按稳定顺序直接进入结果摘要。例如电商包包含“模拟输入错误 -> state-error”和“恢复：修改输入并重试 -> state-initial”，宠物包包含“模拟相机权限拒绝 -> state-error”和“恢复：返回并改用示例输入 -> state-initial”。结果包不自行推断、补写或修复这些步骤。
+
 `result_summary.json` 面向 Demo 使用者，用于快速找到离线页面、理解功能与流程、查看轻量 UI 参考和质量门禁。`internal/` 是 Agent context、PageSpec 和一致性报告的内部追溯材料，不是用户最终页面，也不能伪装成最终输出。
 
 ## 5. 包级 manifest
@@ -127,6 +129,8 @@ manifest 声明除自身以外的全部 8 个包内文件，不包含自身哈�
 8. 重新计算 `index.html`、`styles.css`、`app.js` 的 SHA-256，并与 render manifest 比较。
 9. 将 warning 原样写入 `result_summary.quality_gate`，warning 不单独阻止发布。
 10. 写完 staging 后再执行包级文件集、相对路径、大小、SHA-256、schema 和身份核验。
+
+明确错误恢复约束若未通过检查器的异常入口、反馈、恢复路径或 acceptance 门禁，会产生 consistency fail，从而阻止结果包发布。loading、empty 的非验收不可达 warning 仍原样进入 `quality_gate`，不单独阻止发布。
 
 因此，报告生成后若静态文件被修改而 render manifest 未同步，打包器会因重新计算的 SHA-256 不匹配而拒绝发布。
 
@@ -167,3 +171,5 @@ v1 不包含：
 如需检查结果包中 `page/` 的实际浏览器表现，按 [本地页面可视化验收手册](local_visual_acceptance.md) 执行临时、可清理的人工验收。该操作不向包内增加文件，也不改变结果包 schema。
 
 端到端确定性结果包完成后，下一工作对话应先按 `docs/demo_spec.md` 做 Demo 里程碑验收和缺口决策，而不是自动扩展截图、控制台或视觉评估功能。
+
+当前两个真实验收包继续固定为 9 个文件，位于 `outputs/result_package_v1/ecommerce` 与 `outputs/result_package_v1/pet-recognition`。它们不包含截图；相同输入独立生成到不同目录时，PageSpec、页面、报告、摘要和包级 manifest 均逐字节一致。

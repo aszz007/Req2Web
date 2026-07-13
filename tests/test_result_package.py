@@ -36,6 +36,7 @@ PET_REQUIREMENT = (
     "做一个宠物情绪识别 App，用户拍照后系统分析宠物情绪并展示结果，"
     "相机权限被拒绝时要给出恢复提示。"
 )
+ECOMMERCE_RECOVERY_CONSTRAINT = "输入错误时给出可恢复提示"
 
 
 class FixtureRetriever:
@@ -78,12 +79,17 @@ class FixtureRetriever:
         }
 
 
-def build_context(requirement: str, *, absolute_reference: bool = False):
+def build_context(
+    requirement: str,
+    *,
+    absolute_reference: bool = False,
+    constraints: Iterable[str] = (),
+):
     return MinimalAgentChain(
         DeterministicRequirementProvider(),
         FixtureRetriever(absolute_reference=absolute_reference),
         top_k_per_role=2,
-    ).run(requirement)
+    ).run(requirement, constraints=list(constraints))
 
 
 def failed_report(report: ConsistencyReport) -> ConsistencyReport:
@@ -346,6 +352,80 @@ class ResultPackageTest(unittest.TestCase):
                 (second.package_dir / relative_path).read_bytes(),
                 relative_path,
             )
+
+    def test_recovery_flow_and_all_artifacts_are_deterministic(self) -> None:
+        builds = []
+        for name in ("recovery-first", "recovery-second"):
+            context = build_context(
+                ECOMMERCE_REQUIREMENT,
+                constraints=(ECOMMERCE_RECOVERY_CONSTRAINT,),
+            )
+            spec = PageSpecBuilder().build(context)
+            render = DeterministicPageRenderer().render(
+                spec,
+                self.root / f"{name}-render",
+            )
+            report = MinimalConsistencyChecker().check(spec, render)
+            package = self.packager.package(
+                context,
+                spec,
+                render,
+                report,
+                self.root / name,
+            )
+            package.validate()
+            builds.append((spec, render, report, package))
+
+        first_spec, first_render, first_report, first_package = builds[0]
+        second_spec, second_render, second_report, second_package = builds[1]
+        self.assertEqual(first_spec.to_dict(), second_spec.to_dict())
+        self.assertEqual(first_report.to_dict(), second_report.to_dict())
+        self.assertTrue(first_report.passed)
+        self.assertEqual(first_report.summary["fail"], 0)
+        self.assertFalse(
+            any(
+                item.check_id == "warning.unreachable-state:state-error"
+                for item in first_report.checks
+            )
+        )
+        for filename in (
+            "index.html",
+            "styles.css",
+            "app.js",
+            "render_manifest.json",
+        ):
+            self.assertEqual(
+                (first_render.output_dir / filename).read_bytes(),
+                (second_render.output_dir / filename).read_bytes(),
+                filename,
+            )
+
+        first_files = sorted(
+            path.relative_to(first_package.package_dir).as_posix()
+            for path in first_package.package_dir.rglob("*")
+            if path.is_file()
+        )
+        second_files = sorted(
+            path.relative_to(second_package.package_dir).as_posix()
+            for path in second_package.package_dir.rglob("*")
+            if path.is_file()
+        )
+        self.assertEqual(len(first_files), 9)
+        self.assertEqual(first_files, second_files)
+        for relative_path in first_files:
+            self.assertEqual(
+                (first_package.package_dir / relative_path).read_bytes(),
+                (second_package.package_dir / relative_path).read_bytes(),
+                relative_path,
+            )
+
+        summary = self._load(first_package, "result_summary.json")
+        transitions = {
+            (item["action"], item["target_state_id"])
+            for item in summary["interaction_flow"]
+        }
+        self.assertIn(("模拟输入错误", "state-error"), transitions)
+        self.assertIn(("恢复：修改输入并重试", "state-initial"), transitions)
 
     def test_failed_consistency_report_is_rejected(self) -> None:
         with self.assertRaisesRegex(ResultPackageError, "did not pass"):

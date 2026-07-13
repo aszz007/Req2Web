@@ -29,12 +29,24 @@
 | `sections` | 按用例组织的页面区域，包含稳定 ID、用途和组件引用 |
 | `components` | 渲染器可消费的组件类型、标签、用途和所属 section |
 | `states` | 与任务相关的 `initial`、`loading`、`error`、`success`，以及需要时的 `empty` |
-| `interactions` | 触发组件、源状态、动作、目标状态、用户反馈和关联用例 |
+| `interactions` | 触发组件、源状态、动作、目标状态、用户反馈和关联用例；明确错误恢复约束会形成异常入口与恢复交互 |
 | `constraints` | Agent 约束和构建器补充的设备、结构边界 |
 | `acceptance_checks` | 每个核心用例的可验证成功条件和目标状态 |
 | `traceability` | context schema、轻量 RAG 证据和用例到页面结构的追溯关系 |
 
 section、component 和 interaction 均使用由用例 ID 派生的稳定 ID。相同 `AgentContextBundle` 会产生完全一致的字典和 ID。
+
+### 2.1 明确错误恢复约束
+
+`req2web.page_spec.v1` schema 保持不变。构建器只检查 `AgentContextBundle.constraints` 中来源明确的约束；只有同一约束同时包含错误/拒绝含义和恢复/重试含义时，才生成最小闭环：
+
+1. 按约束类型选择最相关的既有用例组件，例如输入错误优先关联 `search_input` / `form`，相机权限拒绝关联 `media_input`。
+2. 在该用例 section 中加入独立的离线异常模拟组件和只在 error 状态可见的恢复组件。
+3. 生成 `state-initial -> state-error` 的异常交互，以及 `state-error -> state-initial` 的恢复交互。
+4. error 状态显示领域化原因和恢复提示；恢复后 normal success 交互仍保留。
+5. 增加分别以 `state-error` 和 `state-initial` 为目标的 acceptance checks，并把新增组件、交互写入既有 `UseCaseTrace`。
+
+当前确定性文案覆盖输入错误、权限拒绝和通用错误恢复。普通约束、只要求错误反馈但未声明恢复的约束，以及没有相关约束的页面不会无条件增加模拟异常控件。该能力没有新增字段或升级 schema，对现有 PageSpec v1 消费方保持兼容。
 
 ## 3. context bundle 到 PageSpec 的映射
 
@@ -62,6 +74,7 @@ RAG 证据只保留 `role`、`doc_id`、`title` 和最多 3 个必要的 `refere
 - interaction 的触发组件、源状态和目标状态真实存在；
 - interaction 允许源状态和目标状态相同，以表达刷新、重试或原地反馈；
 - acceptance checks 覆盖全部核心用例；
+- 明确错误恢复约束生成的 error / recovery acceptance checks 仍使用既有 `state_id` 和 `use_case_ids`；
 - 五类轻量证据齐全；
 - 每个用例对 section、component、interaction 和 RAG `doc_id` 的追溯有效。
 

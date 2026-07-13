@@ -30,6 +30,7 @@ PET_REQUIREMENT = (
     "做一个宠物情绪识别 App，用户拍照后系统分析宠物情绪并展示结果，"
     "相机权限被拒绝时要给出恢复提示。"
 )
+ECOMMERCE_RECOVERY_CONSTRAINT = "输入错误时给出可恢复提示"
 
 
 class FixtureRetriever:
@@ -65,12 +66,12 @@ class FixtureRetriever:
         }
 
 
-def build_spec(requirement: str):
+def build_spec(requirement: str, *, constraints: Iterable[str] = ()):
     context = MinimalAgentChain(
         DeterministicRequirementProvider(),
         FixtureRetriever(),
         top_k_per_role=2,
-    ).run(requirement)
+    ).run(requirement, constraints=list(constraints))
     return PageSpecBuilder().build(context)
 
 
@@ -82,6 +83,10 @@ class PageRendererTest(unittest.TestCase):
         self.root.mkdir(parents=True)
         self.renderer = DeterministicPageRenderer()
         self.ecommerce_spec = build_spec(ECOMMERCE_REQUIREMENT)
+        self.ecommerce_recovery_spec = build_spec(
+            ECOMMERCE_REQUIREMENT,
+            constraints=(ECOMMERCE_RECOVERY_CONSTRAINT,),
+        )
         self.pet_spec = build_spec(PET_REQUIREMENT)
 
     def tearDown(self) -> None:
@@ -142,6 +147,49 @@ class PageRendererTest(unittest.TestCase):
             self.assertIn(state.name, script)
         self.assertIn("feedback.textContent", script)
         self.assertIn("applyState(interaction.target_state_id", script)
+
+    def test_error_and_recovery_controls_render_from_page_spec(self) -> None:
+        result = self.renderer.render(
+            self.ecommerce_recovery_spec,
+            self.root / "recovery-runtime",
+        )
+        markup = result.index_html.read_text(encoding="utf-8")
+        script = result.app_js.read_text(encoding="utf-8")
+        error = next(
+            item
+            for item in self.ecommerce_recovery_spec.interactions
+            if item.target_state_id == "state-error"
+        )
+        recovery = next(
+            item
+            for item in self.ecommerce_recovery_spec.interactions
+            if item.source_state_id == "state-error"
+        )
+        self.assertIn(
+            f'data-interaction-trigger="{error.trigger_component_id}"',
+            markup,
+        )
+        self.assertIn(
+            f'data-interaction-trigger="{recovery.trigger_component_id}"',
+            markup,
+        )
+        self.assertIn(error.interaction_id, script)
+        self.assertIn(recovery.interaction_id, script)
+        self.assertIn("state-error", script)
+        self.assertNotIn("navigator.permissions", script)
+        self.assertNotIn("getUserMedia", script)
+
+    def test_recovery_spec_preserves_normal_success_interactions(self) -> None:
+        success_interactions = [
+            item
+            for item in self.ecommerce_recovery_spec.interactions
+            if item.source_state_id == "state-initial"
+            and item.target_state_id == "state-success"
+        ]
+        self.assertEqual(
+            len(success_interactions),
+            len(self.ecommerce_recovery_spec.use_cases),
+        )
 
     def test_unknown_component_type_uses_visible_fallback(self) -> None:
         component = self.ecommerce_spec.components[0]

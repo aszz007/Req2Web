@@ -23,6 +23,7 @@ from .schema import (
     TraceabilitySpec,
     UseCaseTrace,
 )
+from .recovery import ErrorRecoveryScenario, match_error_recovery_constraint
 
 
 _TITLE_PREFIX = re.compile(r"^(?:我想|请|帮我)?(?:做|创建|构建|设计)(?:一个|一款)?")
@@ -93,6 +94,20 @@ def _reference_uris(result: dict[str, Any]) -> list[str]:
                 raise ValueError("retrieval result reference URI must be non-empty")
             uris.append(uri.strip())
     return _deduplicate(uris)[:3]
+
+
+def _select_recovery_component(
+    scenario: ErrorRecoveryScenario,
+    components: list[ComponentSpec],
+) -> ComponentSpec:
+    for component_type in scenario.preferred_component_types:
+        for component in components:
+            if component.component_type == component_type:
+                return component
+    for component in components:
+        if component.component_type != "status_panel":
+            return component
+    raise ValueError("PageSpec cannot attach error recovery to a status-only page")
 
 
 class PageSpecBuilder:
@@ -200,12 +215,95 @@ class PageSpecBuilder:
                 "evidence_doc_ids": [],
             }
 
+        recovery_matches: list[ErrorRecoveryScenario] = []
+        seen_recovery_kinds: set[str] = set()
+        for description in context.constraints:
+            scenario = match_error_recovery_constraint(description)
+            if scenario is not None and scenario.kind not in seen_recovery_kinds:
+                recovery_matches.append(scenario)
+                seen_recovery_kinds.add(scenario.kind)
+
+        initial_error_trigger_ids: list[str] = []
+        error_recovery_component_ids: list[str] = []
+        recovery_acceptance_parts: list[tuple[str, str]] = []
+        base_components = components.copy()
+        sections_by_id = {item.section_id: item for item in sections}
+        for scenario_index, scenario in enumerate(recovery_matches, 1):
+            target = _select_recovery_component(scenario, base_components)
+            section = sections_by_id[target.section_id]
+            use_case_id = section.use_case_ids[0]
+            token = _stable_token(use_case_id, f"uc-{scenario_index:02d}")
+            scenario_token = scenario.kind
+
+            error_component_id = f"component-{token}-error-{scenario_token}"
+            recovery_component_id = f"component-{token}-recovery-{scenario_token}"
+            error_interaction_id = f"interaction-{token}-error-{scenario_token}"
+            recovery_interaction_id = (
+                f"interaction-{token}-recovery-{scenario_token}"
+            )
+
+            components.extend(
+                (
+                    ComponentSpec(
+                        component_id=error_component_id,
+                        section_id=section.section_id,
+                        component_type="primary_action",
+                        label=scenario.trigger_label,
+                        purpose=scenario.trigger_purpose,
+                    ),
+                    ComponentSpec(
+                        component_id=recovery_component_id,
+                        section_id=section.section_id,
+                        component_type="primary_action",
+                        label=scenario.recovery_label,
+                        purpose=scenario.recovery_purpose,
+                    ),
+                )
+            )
+            section.component_ids.insert(1, error_component_id)
+            section.component_ids.append(recovery_component_id)
+            interactions.extend(
+                (
+                    InteractionSpec(
+                        interaction_id=error_interaction_id,
+                        trigger_component_id=error_component_id,
+                        source_state_id="state-initial",
+                        action=scenario.trigger_action,
+                        target_state_id="state-error",
+                        user_feedback=scenario.error_feedback,
+                        use_case_ids=[use_case_id],
+                    ),
+                    InteractionSpec(
+                        interaction_id=recovery_interaction_id,
+                        trigger_component_id=recovery_component_id,
+                        source_state_id="state-error",
+                        action=scenario.recovery_action,
+                        target_state_id="state-initial",
+                        user_feedback=scenario.recovery_feedback,
+                        use_case_ids=[use_case_id],
+                    ),
+                )
+            )
+            initial_error_trigger_ids.append(error_component_id)
+            error_recovery_component_ids.append(recovery_component_id)
+            trace_parts[use_case_id]["component_ids"].extend(
+                (error_component_id, recovery_component_id)
+            )
+            trace_parts[use_case_id]["interaction_ids"].extend(
+                (error_interaction_id, recovery_interaction_id)
+            )
+            recovery_acceptance_parts.append((scenario_token, use_case_id))
+
         states = [
             PageState(
                 state_id="state-initial",
                 name="initial",
                 description="页面已就绪，核心任务入口可操作。",
-                visible_component_ids=[*action_component_ids, *output_component_ids],
+                visible_component_ids=[
+                    *action_component_ids,
+                    *output_component_ids,
+                    *initial_error_trigger_ids,
+                ],
             ),
             PageState(
                 state_id="state-loading",
@@ -217,7 +315,10 @@ class PageSpecBuilder:
                 state_id="state-error",
                 name="error",
                 description="任务无法完成时显示原因和可恢复操作。",
-                visible_component_ids=output_component_ids.copy(),
+                visible_component_ids=[
+                    *output_component_ids,
+                    *error_recovery_component_ids,
+                ],
             ),
             PageState(
                 state_id="state-success",
@@ -270,6 +371,27 @@ class PageSpecBuilder:
             )
             for index, use_case in enumerate(context.use_cases, 1)
         ]
+        for scenario_token, use_case_id in recovery_acceptance_parts:
+            acceptance_checks.extend(
+                (
+                    AcceptanceCheck(
+                        check_id=f"check-error-{scenario_token}",
+                        description=(
+                            "明确错误恢复约束必须可确定性进入 error，并展示错误原因和恢复提示。"
+                        ),
+                        use_case_ids=[use_case_id],
+                        state_id="state-error",
+                    ),
+                    AcceptanceCheck(
+                        check_id=f"check-recovery-{scenario_token}",
+                        description=(
+                            "error 状态必须可通过恢复操作返回 initial，并可重新执行正常流程。"
+                        ),
+                        use_case_ids=[use_case_id],
+                        state_id="state-initial",
+                    ),
+                )
+            )
 
         evidence: list[EvidenceReference] = []
         evidence_ids_by_role: dict[str, list[str]] = {}
