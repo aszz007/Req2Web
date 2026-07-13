@@ -4,15 +4,17 @@ Req2Web is an Agent + RAG prototype that turns a vague software requirement into
 
 ## Current Stage
 
-The project is preparing a traceable Demo retrieval corpus before implementing the Agent chain.
+The first traceable Demo corpus is ready; the next step is to build a unified RAG indexing and retrieval skeleton before implementing the Agent chain.
 
-- Vision2Web: 100 responsive webpage tasks retained.
+- Vision2Web: 100 responsive webpage implementations and 93 requirement tasks retained.
 - RICO combined: 42 UI reference screens retained.
 - RICO filtered traces: 12 interaction flows retained.
 - Design2Code: 12 standard and 4 HARD implementation references retained.
 - Sketch2Code: 8 sketch-to-webpage pairs retained.
 - GitHub Issues / PRs: 12 validation cases retained from a 14,384-row inventory.
 - Topcoder: not downloaded yet and does not block the first Demo.
+
+The manifest currently contains 283 unique records across requirement, UI reference, interaction flow, implementation, and validation roles.
 
 The authoritative screening decisions are stored in `data/processed/selection_manifest.csv`. Dataset audit and finalization scripts are in `scripts/`.
 
