@@ -6,13 +6,14 @@ This module deliberately works on the compact retrieval result records already
 present in ``AgentContextBundle``.  It never opens the RAG corpus or an asset.
 """
 
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 import hashlib
 import json
 from typing import Any, Iterable
 
 from req2web_agent import AGENT_BUNDLE_SCHEMA_VERSION, AgentContextBundle
 from req2web_rag.corpus import ROLE_ORDER
+from req2web_rag.validation_signals import validated_compact_validation_signals
 
 from .reference_safety import is_absolute_local_path, validate_reference_uri
 
@@ -27,6 +28,9 @@ class GuidanceSource:
     source_fields: list[str]
     extraction_rule: str
     reference_uris: list[str]
+    # Optional v1 extension. Old guidance JSON omits it; signal-backed items
+    # retain the deterministic source-field/reference/rule audit trail here.
+    adapter_evidence: list[dict[str, str]] = field(default_factory=list)
 
 
 @dataclass
@@ -108,6 +112,15 @@ class RetrievalGuidance:
                 for uri in item.source.reference_uris:
                     _require_text(uri, "guidance_source.reference_uri")
                 _unique(item.source.reference_uris, "guidance_source.reference_uris")
+                if not isinstance(item.source.adapter_evidence, list):
+                    raise ValueError("guidance_source.adapter_evidence must be a list")
+                for evidence in item.source.adapter_evidence:
+                    if not isinstance(evidence, dict) or set(evidence) != {
+                        "signal_id", "source_field", "source_value", "reference_uri", "adapter_rule", "outcome", "value"
+                    }:
+                        raise ValueError("guidance_source.adapter_evidence is invalid")
+                    for name, value in evidence.items():
+                        _require_text(value, f"guidance_source.adapter_evidence.{name}")
                 if is_absolute_local_path(item.value):
                     raise ValueError("RetrievalGuidance must not contain absolute paths")
                 for uri in item.source.reference_uris:
@@ -209,6 +222,7 @@ def _item(
     source_fields: list[str],
     extraction_rule: str,
     reference_uris: list[str] = (),
+    adapter_evidence: list[dict[str, str]] = (),
 ) -> GuidanceItem:
     doc_id = _require_text(result.get("doc_id"), "retrieval result doc_id")
     token = hashlib.sha256(
@@ -224,6 +238,7 @@ def _item(
             source_fields=source_fields,
             extraction_rule=extraction_rule,
             reference_uris=list(reference_uris),
+            adapter_evidence=[dict(item) for item in adapter_evidence],
         ),
     )
 
@@ -348,7 +363,37 @@ class RetrievalGuidanceBuilder:
         for result in self._checked_results("validation", results):
             tokens = _tokens(_result_text(result))
             items.append(_item("validation", result, "acceptance_condition", "regression_case", ["title", "summary"], "validation_source_adapter:v1:issue_or_case"))
+            signal_controlled_values: set[str] = set()
+            for signal in validated_compact_validation_signals(result):
+                evidence = [{
+                    "signal_id": signal["signal_id"],
+                    "source_field": signal["source_field"],
+                    "source_value": signal["source_value"],
+                    "reference_uri": signal["reference_uri"],
+                    "adapter_rule": signal["adapter_rule"],
+                    "outcome": signal["outcome"],
+                    "value": signal["value"],
+                }]
+                if signal["outcome"] == "candidate":
+                    signal_controlled_values.add(signal["value"])
+                    items.append(_item(
+                        "validation", result, "recovery_hint", signal["value"],
+                        ["validation_signals", "metadata.category", "references"],
+                        signal["adapter_rule"], [signal["reference_uri"]], evidence,
+                    ))
+                else:
+                    # The record remains evidence only, but says precisely
+                    # which structured category was intentionally not mapped.
+                    items.append(_item(
+                        "validation", result, "acceptance_condition", "regression_case",
+                        ["validation_signals", "metadata.category", "references"],
+                        signal["adapter_rule"], [signal["reference_uri"]], evidence,
+                    ))
             for token in tokens:
+                # A structured, traceable signal replaces the weaker title/
+                # summary token for the same controlled recovery value.
+                if token in signal_controlled_values:
+                    continue
                 category = "recovery_hint" if token in {"permission_recovery", "retry_recovery"} else "exception_scenario"
                 items.append(_item("validation", result, category, token, ["title", "summary"], f"controlled_token_map:v1:{token}"))
             for uri in _reference_uris(result, {"issue", "pull_request"}):

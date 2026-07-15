@@ -43,11 +43,11 @@ req2web.agent.context.v1
 - `extraction_rule`：稳定的适配器或 token-rule 名称；
 - `reference_uris`：仅在白名单引用类型可用时保留，不复制资产或大型正文。
 
-`validate()` 会校验 schema、五类非空指导、ID 唯一性、角色一致性、字段级来源、无绝对路径，以及“每项指导至少被一个用例 trace 使用”。`to_dict()` 先调用 `validate()`；相同输入以排序 JSON 计算哈希并输出逐字节一致的 JSON。
+`validate()` 会校验 schema、五类非空指导、ID 唯一性、角色一致性、字段级来源、无绝对路径，以及“每项指导至少被一个用例 trace 使用”。signal-backed item 的可选 `source.adapter_evidence` 还保留 signal ID、原字段和值、白名单引用和 adapter rule；旧 guidance 不含该字段时保持兼容。`to_dict()` 先调用 `validate()`；相同输入以排序 JSON 计算哈希并输出逐字节一致的 JSON。
 
 ## 3. 显式角色 / 来源适配规则
 
-当前 `TfidfRetriever` 返回的 compact result 不透传语料 `metadata` 或 `content`。因此 Builder 不会回读文档补字段，而是只消费每条已检索结果中的 `role`、`doc_id`、`dataset`、`subset`、`title`、`summary`、`references`。不同数据来源的字段差异已经在 RAG 统一层归一；本层再按 role 使用以下可审计白名单。
+当前 `TfidfRetriever` 的 compact result 不透传一般语料 `metadata` 或 `content`。它仍只消费每条已检索结果中的 `role`、`doc_id`、`dataset`、`subset`、`title`、`summary`、`references`；唯一的受控例外是 validation 结果可选的 `validation_signals`。该字段只由已加载 unified validation document 的结构化 `metadata.category` 和现存 Issue/PR 白名单引用确定性派生，不能触发 corpus 回读。不同数据来源的字段差异已经在 RAG 统一层归一；本层再按 role 使用以下可审计白名单。
 
 | role | 实际作用 | 白名单字段与规则 |
 |---|---|---|
@@ -55,7 +55,7 @@ req2web.agent.context.v1
 | `ui_reference` | 页面区域、组件、UI URI | 标题/摘要命中受控布局/组件 token；`references` 仅取 screenshot/semantic_image/view_hierarchy/semantic_annotation |
 | `interaction_flow` | 操作模式、状态变化 | 标题/摘要仅识别 mixed/swipe；step_screenshot/step_hierarchy 的数量决定 single/multi-step transition |
 | `implementation` | 结构和资源约束 | 标题/摘要命中受控组件/布局 token；仅取 html/target_html/screenshot/target_screenshot/input_sketch/prototype 的引用 kind 组合 |
-| `validation` | 异常、恢复、验收 | 固定 regression_case 仅表示当前记录可作验收回归案例；标题/摘要命中 permission/retry/loading/empty 等受控 token；仅取 issue/pull_request URI |
+| `validation` | 异常、恢复、验收 | 固定 regression_case 仅表示当前记录可作验收回归案例；标题/摘要命中 permission/retry/loading/empty 等受控 token；可选 signal 仅将 `input_error -> retry_recovery`、`auth_access -> permission_recovery` 形成候选；仅取 issue/pull_request URI |
 
 受控 token map 的输出是固定枚举（例如 `search_input`、`location_picker`、`permission_recovery`、`empty_state`），不会把标题、摘要或未知 metadata 自由拼接成“事实”。无匹配时输出角色专属的保守结构提示（例如 `reference_screen` 或 `reference_structure`），而不是猜测不存在的组件、流程或验收条件。
 

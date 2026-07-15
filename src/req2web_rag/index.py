@@ -10,6 +10,7 @@ from typing import Any, Iterable
 
 from .corpus import ROLE_ORDER
 from .schema import validate_document
+from .validation_signals import build_validation_signals
 
 
 INDEX_SCHEMA_VERSION = "req2web.rag.tfidf.v1"
@@ -183,8 +184,7 @@ class TfidfIndex:
         results: list[dict[str, Any]] = []
         for document_index, score in ranked[:top_k]:
             document = self.documents[document_index]
-            results.append(
-                {
+            result = {
                     "score": round(score, 6),
                     "doc_id": document["doc_id"],
                     "role": document["role"],
@@ -194,8 +194,13 @@ class TfidfIndex:
                     "title": document["title"],
                     "summary": document["summary"],
                     "references": document["references"],
-                }
-            )
+            }
+            # Optional and validation-only: old consumers can ignore this
+            # field; guided generation gains a bounded trace to structured
+            # source facts hidden by the old compact result contract.
+            if document["role"] == "validation":
+                result["validation_signals"] = build_validation_signals(document)
+            results.append(result)
         return results
 
     def search_by_role(self, query: str, top_k: int = 2) -> dict[str, list[dict[str, Any]]]:

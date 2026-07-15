@@ -82,3 +82,7 @@ UI 的 top-5 与改写候选均在机器报告中。四例改写均改变原前�
 预期收益是把“只得到 regression_case/URI 或未支持值”的 8 个 validation 单元变成可审计的候选转换，并把 3 个被门禁拒绝的单元保留为拒绝；**不以提升影响数量为验收目标**。风险是从 Issue 摘要过度推断 UI 行为；因此信号必须精确反查 `doc_id` 和来源字段，且缺证据时继续 fallback。完成标准：新增适配器的单元测试、12 案例完整回归、双门禁继续全绿、机器报告比较前后原因分布，并证明没有 case-specific 常量或放宽门禁。
 
 备选但不推荐现在实施：调大 top-k/改写查询（有排序敏感性但无可采纳收益证据）、扩充 validation 语料（尚未证明覆盖不足）、为 `reference_screen` 增加 UI 提取规则（只影响 3 个 UI 单元，收益较窄）。
+
+## 后续实现状态（2026-07-15）
+
+本诊断推荐的 validation signal adapter 已在不读取 raw 数据的前提下实现。实际 field boundary、稳定 signal schema、映射及兼容说明见 `docs/validation_signal_adapter.md`。它只将已加载 validation 文档的 `metadata.category` 与已存在 Issue/PR 白名单引用映射成受控候选；`input_error -> retry_recovery`、`auth_access -> permission_recovery`，其余类别仍是 audit-only/evidence-only。所有 adopted 判断继续由既有 `explicit_context_gate` / semantic gate 处理，不能因适配器而推断新的页面行为。
