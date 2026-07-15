@@ -1,0 +1,94 @@
+{
+  "case_set_id": "demo-v2-regression-12-v1",
+  "cases": [
+    {
+      "case_id": "desktop-dashboard",
+      "constraints": ["没有匹配数据时应显示空状态并允许清除筛选"],
+      "coverage_tags": ["dashboard", "desktop", "empty-state", "filter", "legacy-fixed", "recovery"],
+      "requirement": "做一个桌面数据看板，展示关键指标、列表筛选和详情；没有数据时显示空状态。",
+      "target_device": "desktop"
+    },
+    {
+      "case_id": "desktop-media-library",
+      "constraints": [],
+      "coverage_tags": ["content-browse", "desktop", "media", "search"],
+      "requirement": "做一个桌面媒体资源浏览页面，用户搜索视频、按分类筛选并查看内容详情。",
+      "target_device": "desktop",
+      "task_type": "content_platform"
+    },
+    {
+      "case_id": "desktop-project-admin",
+      "constraints": ["删除操作失败时显示错误并允许返回列表后重试"],
+      "coverage_tags": ["admin", "confirmation", "desktop", "error-recovery", "table"],
+      "requirement": "做一个桌面项目管理页面，管理员在表格中搜索、筛选并确认删除项目。",
+      "target_device": "desktop",
+      "task_type": "dashboard"
+    },
+    {
+      "case_id": "desktop-search-catalog",
+      "constraints": [],
+      "coverage_tags": ["content-list", "desktop", "filter", "search"],
+      "requirement": "做一个桌面课程目录页面，用户搜索课程、按标签筛选并查看课程详情。",
+      "target_device": "desktop",
+      "task_type": "content_platform"
+    },
+    {
+      "case_id": "ecommerce",
+      "constraints": ["输入错误时允许修改并重试"],
+      "coverage_tags": ["checkout", "ecommerce", "error-recovery", "legacy-fixed", "mobile", "search"],
+      "requirement": "做一个带搜索、筛选、购物车和结算的移动电商页面。",
+      "target_device": "mobile"
+    },
+    {
+      "case_id": "map-address-search",
+      "constraints": ["定位不可用时应允许手动选择地址"],
+      "coverage_tags": ["legacy-fixed", "location", "mobile", "recovery", "search"],
+      "requirement": "做一个移动端地址搜索页面，用户搜索地点、选择并确认位置。",
+      "target_device": "mobile"
+    },
+    {
+      "case_id": "mobile-appointment",
+      "constraints": ["提交预约失败时显示错误并允许检查表单后重试"],
+      "coverage_tags": ["appointment", "error-recovery", "form", "mobile"],
+      "requirement": "做一个移动预约页面，用户选择服务、填写联系信息并提交预约。",
+      "target_device": "mobile"
+    },
+    {
+      "case_id": "mobile-auth",
+      "constraints": ["登录失败时显示错误并允许修改输入后重试"],
+      "coverage_tags": ["auth", "error-recovery", "form", "mobile"],
+      "requirement": "做一个移动登录和注册页面，用户填写账号信息后完成身份验证。",
+      "target_device": "mobile"
+    },
+    {
+      "case_id": "mobile-messages",
+      "constraints": [],
+      "coverage_tags": ["interaction", "messaging", "mobile", "social"],
+      "requirement": "做一个移动消息页面，用户浏览会话列表、搜索联系人并发送消息。",
+      "target_device": "mobile",
+      "task_type": "social_communication"
+    },
+    {
+      "case_id": "pet-recognition",
+      "constraints": ["相机权限被拒绝时应提供恢复方式"],
+      "coverage_tags": ["legacy-fixed", "media-input", "mobile", "permission-recovery", "recognition"],
+      "requirement": "做一个宠物情绪识别 App，用户拍照或上传照片后查看分析结果。",
+      "target_device": "mobile"
+    },
+    {
+      "case_id": "profile-settings",
+      "constraints": ["保存失败时显示错误并允许返回修改后重试"],
+      "coverage_tags": ["error-recovery", "form", "mobile", "profile", "settings"],
+      "requirement": "做一个移动个人资料与设置页面，用户修改昵称、通知偏好并保存。",
+      "target_device": "mobile"
+    },
+    {
+      "case_id": "task-empty-recovery",
+      "constraints": ["没有任务时显示空状态并允许清除筛选后继续查看任务"],
+      "coverage_tags": ["empty-state", "mobile", "recovery", "task-list"],
+      "requirement": "做一个移动任务列表页面，用户搜索、筛选任务并查看任务状态。",
+      "target_device": "mobile"
+    }
+  ],
+  "schema_version": "req2web.demo.regression.case_set.v1"
+}

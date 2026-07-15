@@ -67,6 +67,15 @@ from .schema import (
     TraceabilitySpec,
     UseCaseTrace,
 )
+from .demo_regression import (
+    REGRESSION_CASE_SET_SCHEMA_VERSION,
+    REGRESSION_MANIFEST_SCHEMA_VERSION,
+    REGRESSION_REPORT_SCHEMA_VERSION,
+    DemoV2RegressionRunner,
+    RegressionCase,
+    RegressionCaseSet,
+    RegressionSuiteValidator,
+)
 
 __all__ = [
     "PAGE_SPEC_SCHEMA_VERSION",
@@ -120,4 +129,11 @@ __all__ = [
     "RoleAblation",
     "StructuralDifference",
     "structural_differences",
+    "REGRESSION_CASE_SET_SCHEMA_VERSION",
+    "REGRESSION_MANIFEST_SCHEMA_VERSION",
+    "REGRESSION_REPORT_SCHEMA_VERSION",
+    "DemoV2RegressionRunner",
+    "RegressionCase",
+    "RegressionCaseSet",
+    "RegressionSuiteValidator",
 ]
