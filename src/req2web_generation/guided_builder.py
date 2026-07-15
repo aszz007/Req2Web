@@ -425,6 +425,8 @@ class RetrievalGuidedPageSpecBuilder:
         self,
         context: AgentContextBundle,
         guidance: RetrievalGuidance,
+        *,
+        disabled_roles: Iterable[str] = (),
     ) -> GuidedPageSpecBuildResult:
         if not isinstance(context, AgentContextBundle):
             raise TypeError("guided PageSpec context must be an AgentContextBundle")
@@ -459,18 +461,54 @@ class RetrievalGuidedPageSpecBuilder:
         if rebuilt.to_dict() != guidance.to_dict():
             raise ValueError("guidance is not the deterministic guidance derived from context")
 
+        disabled = tuple(dict.fromkeys(disabled_roles))
+        invalid_roles = [role for role in disabled if role not in ROLE_ORDER]
+        if invalid_roles:
+            raise ValueError(f"unsupported disabled guidance roles: {invalid_roles}")
+
         page_spec = PageSpecBuilder().build(context)
         adopted: list[GuidanceDecision] = []
         ignored: list[GuidanceDecision] = []
         fallback: list[GuidanceDecision] = []
 
+        # The ablation path is deliberately implemented here, after the source
+        # guidance has passed its normal identity checks.  It does not alter the
+        # guidance object or re-run retrieval; it merely prevents one role from
+        # reaching the existing deterministic transformation rules.
+        if disabled:
+            for item in _all_guidance_items(guidance):
+                if item.source.role in disabled:
+                    ignored.append(
+                        _decision(
+                            "ignored",
+                            source_kind="retrieval_guidance",
+                            role=item.source.role,
+                            item=item,
+                            rule=f"ablation_disabled_role:v1:{item.source.role}",
+                            reason="受控消融移除了该角色的检索指导；不声明任何 PageSpec 结构影响。",
+                        )
+                    )
+            effective_guidance = RetrievalGuidance(
+                guidance_bundle_id=guidance.guidance_bundle_id,
+                target_device=guidance.target_device,
+                task_type=guidance.task_type,
+                requirement_guidance=[] if "requirement" in disabled else guidance.requirement_guidance,
+                ui_guidance=[] if "ui_reference" in disabled else guidance.ui_guidance,
+                interaction_guidance=[] if "interaction_flow" in disabled else guidance.interaction_guidance,
+                implementation_guidance=[] if "implementation" in disabled else guidance.implementation_guidance,
+                validation_guidance=[] if "validation" in disabled else guidance.validation_guidance,
+                use_case_traces=guidance.use_case_traces,
+            )
+        else:
+            effective_guidance = guidance
+
         self._apply_context_components(context, page_spec, fallback)
         self._apply_context_recovery(context, page_spec, fallback)
-        self._apply_requirement(context, guidance, page_spec, adopted, ignored, fallback)
-        self._apply_ui(context, guidance, page_spec, adopted, ignored, fallback)
-        self._apply_interaction(context, guidance, page_spec, adopted, ignored, fallback)
-        self._apply_implementation(context, guidance, page_spec, adopted, ignored, fallback)
-        self._apply_validation(context, guidance, page_spec, adopted, ignored, fallback)
+        self._apply_requirement(context, effective_guidance, page_spec, adopted, ignored, fallback)
+        self._apply_ui(context, effective_guidance, page_spec, adopted, ignored, fallback)
+        self._apply_interaction(context, effective_guidance, page_spec, adopted, ignored, fallback)
+        self._apply_implementation(context, effective_guidance, page_spec, adopted, ignored, fallback)
+        self._apply_validation(context, effective_guidance, page_spec, adopted, ignored, fallback)
 
         page_spec.validate()
         result = GuidedPageSpecBuildResult(

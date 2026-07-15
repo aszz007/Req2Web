@@ -36,6 +36,15 @@ from .retrieval_guidance import (
     RetrievalGuidanceBuilder,
     UseCaseGuidanceTrace,
 )
+from .retrieval_influence import (
+    RETRIEVAL_INFLUENCE_REPORT_SCHEMA_VERSION,
+    InfluenceCheck,
+    RetrievalInfluenceChecker,
+    RetrievalInfluenceReport,
+    RoleAblation,
+    StructuralDifference,
+    structural_differences,
+)
 from .schema import (
     PAGE_SPEC_SCHEMA_VERSION,
     AcceptanceCheck,
@@ -92,4 +101,11 @@ __all__ = [
     "TraceabilitySpec",
     "UseCaseTrace",
     "UseCaseGuidanceTrace",
+    "RETRIEVAL_INFLUENCE_REPORT_SCHEMA_VERSION",
+    "InfluenceCheck",
+    "RetrievalInfluenceChecker",
+    "RetrievalInfluenceReport",
+    "RoleAblation",
+    "StructuralDifference",
+    "structural_differences",
 ]
