@@ -28,6 +28,13 @@ from .result_package import (
     ResultPackage,
     ResultPackageError,
 )
+from .result_package_v2 import (
+    RESULT_PACKAGE_V2_SCHEMA_VERSION,
+    RESULT_SUMMARY_V2_SCHEMA_VERSION,
+    DeterministicRetrievalEnhancedResultPackager,
+    RetrievalEnhancedResultPackage,
+    RetrievalEnhancedResultPackageError,
+)
 from .retrieval_guidance import (
     RETRIEVAL_GUIDANCE_SCHEMA_VERSION,
     GuidanceItem,
@@ -89,6 +96,11 @@ __all__ = [
     "RenderResult",
     "ResultPackage",
     "ResultPackageError",
+    "RESULT_PACKAGE_V2_SCHEMA_VERSION",
+    "RESULT_SUMMARY_V2_SCHEMA_VERSION",
+    "DeterministicRetrievalEnhancedResultPackager",
+    "RetrievalEnhancedResultPackage",
+    "RetrievalEnhancedResultPackageError",
     "RETRIEVAL_GUIDANCE_SCHEMA_VERSION",
     "RetrievalGuidance",
     "RetrievalGuidanceBuilder",

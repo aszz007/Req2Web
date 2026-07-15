@@ -173,3 +173,5 @@ v1 不包含：
 端到端确定性结果包完成后，下一工作对话应先按 `docs/demo_spec.md` 做 Demo 里程碑验收和缺口决策，而不是自动扩展截图、控制台或视觉评估功能。
 
 当前两个真实验收包继续固定为 9 个文件，位于 `outputs/result_package_v1/ecommerce` 与 `outputs/result_package_v1/pet-recognition`。它们不包含截图；相同输入独立生成到不同目录时，PageSpec、页面、报告、摘要和包级 manifest 均逐字节一致。
+
+检索增强交付使用独立且向后兼容的 [结果包 v2](result_package_v2.md)；本文件描述的 v1 接口、目录、摘要和验证规则保持不变。

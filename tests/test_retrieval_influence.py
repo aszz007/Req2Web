@@ -26,16 +26,15 @@ from req2web_agent import UseCase  # noqa: E402
 
 class RetrievalInfluenceTest(TestCase):
     def setUp(self) -> None:
-        self.root = ROOT / "tests" / ".tmp_retrieval_influence" / self._testMethodName
+        self.tmp_root = ROOT / "tests" / ".tmp_retrieval_influence"
+        self.root = self.tmp_root / self._testMethodName
         if self.root.exists():
             shutil.rmtree(self.root)
 
     def tearDown(self) -> None:
-        if self.root.exists():
-            shutil.rmtree(self.root)
-        parent = self.root.parent
-        if parent.exists() and not any(parent.iterdir()):
-            parent.rmdir()
+        # The fixed-case subtests deliberately replace ``self.root``.  Clean
+        # the shared test directory rather than only the final subtest path.
+        shutil.rmtree(self.tmp_root, ignore_errors=True)
 
     def _report(self, context):
         guidance = RetrievalGuidanceBuilder().build(context)
