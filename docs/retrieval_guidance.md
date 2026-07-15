@@ -61,14 +61,19 @@ req2web.agent.context.v1
 
 ## 4. 使用方式
 
-先用既有 Agent CLI 生成 context（这一步在 Builder 之外），再把已保存的 JSON 交给新 CLI：
+先用既有 Agent CLI 生成 context（这一步在 Builder 之外），再把已保存的 JSON 交给新 CLI。Windows PowerShell 下请显式指定 Python 标准输出为 UTF-8，并用 `Start-Process` 直接保存标准输出；普通文本管道可能按当前代码页转换中文：
 
 ```powershell
-.\.venv\Scripts\python.exe .\scripts\run_agent_chain.py `
-  "做一个带搜索、筛选、购物车和结算的移动电商页面。" `
-  --target-device mobile `
-  --constraint "输入错误时应允许修改并重试。" `
-  | Set-Content -Encoding UTF8 .\outputs\retrieval_guidance_v1\ecommerce.context.json
+$env:PYTHONIOENCODING = 'utf-8'
+Start-Process -FilePath .\.venv\Scripts\python.exe `
+  -ArgumentList @(
+    '.\scripts\run_agent_chain.py',
+    '做一个带搜索、筛选、购物车和结算的移动电商页面。',
+    '--top-k', '5', '--target-device', 'mobile',
+    '--constraint', '输入错误时应允许修改并重试。'
+  ) `
+  -RedirectStandardOutput .\outputs\retrieval_guidance_v1\ecommerce.context.json `
+  -NoNewWindow -Wait
 
 .\.venv\Scripts\python.exe .\scripts\run_retrieval_guidance.py `
   --context .\outputs\retrieval_guidance_v1\ecommerce.context.json `
