@@ -14,6 +14,8 @@ from typing import Any, Iterable
 from req2web_agent import AGENT_BUNDLE_SCHEMA_VERSION, AgentContextBundle
 from req2web_rag.corpus import ROLE_ORDER
 
+from .reference_safety import is_absolute_local_path, validate_reference_uri
+
 
 RETRIEVAL_GUIDANCE_SCHEMA_VERSION = "req2web.retrieval.guidance.v1"
 
@@ -106,10 +108,15 @@ class RetrievalGuidance:
                 for uri in item.source.reference_uris:
                     _require_text(uri, "guidance_source.reference_uri")
                 _unique(item.source.reference_uris, "guidance_source.reference_uris")
-                if _is_absolute_path(item.value) or any(
-                    _is_absolute_path(uri) for uri in item.source.reference_uris
-                ):
+                if is_absolute_local_path(item.value):
                     raise ValueError("RetrievalGuidance must not contain absolute paths")
+                for uri in item.source.reference_uris:
+                    try:
+                        validate_reference_uri(uri)
+                    except ValueError as exc:
+                        raise ValueError(
+                            "RetrievalGuidance must not contain unsafe reference URIs"
+                        ) from exc
 
         guidance_ids = _unique(
             (item.guidance_id for item in all_items), "guidance_item IDs"
@@ -146,12 +153,6 @@ class RetrievalGuidance:
     def to_dict(self) -> dict[str, Any]:
         self.validate()
         return asdict(self)
-
-
-def _is_absolute_path(value: str) -> bool:
-    return value.startswith(("/", "\\")) or (
-        len(value) > 2 and value[1] == ":" and value[2] in {"/", "\\"}
-    )
 
 
 def _result_text(result: dict[str, Any]) -> str:

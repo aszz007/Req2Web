@@ -135,13 +135,30 @@ class RetrievalGuidanceTest(TestCase):
         with self.assertRaisesRegex(ValueError, "title"):
             self.builder.build(damaged)
 
-    def test_absolute_output_uri_is_rejected(self) -> None:
+    def test_local_output_uri_spellings_are_rejected(self) -> None:
+        for uri in (
+            "C:/private/screen.png",
+            "C:\\private\\screen.png",
+            "file://C:/private/screen.png",
+            "file:///C:/private/screen.png",
+            "file:C:/private/screen.png",
+            "http://example.test/private/screen.png",
+        ):
+            changed = deepcopy(self.context)
+            changed.retrieval_results["ui_reference"][0]["references"] = [
+                {"kind": "screenshot", "uri": uri}
+            ]
+            with self.subTest(uri=uri):
+                with self.assertRaisesRegex(ValueError, "absolute paths|unsafe reference URIs"):
+                    self.builder.build(changed)
+
+    def test_https_and_project_relative_uris_are_allowed(self) -> None:
         changed = deepcopy(self.context)
         changed.retrieval_results["ui_reference"][0]["references"] = [
-            {"kind": "screenshot", "uri": "C:/private/screen.png"}
+            {"kind": "screenshot", "uri": "fixtures/ui/search.png"},
+            {"kind": "semantic_image", "uri": "https://example.test/search.png"},
         ]
-        with self.assertRaisesRegex(ValueError, "absolute paths"):
-            self.builder.build(changed)
+        self.builder.build(changed).validate()
 
     def test_builder_does_not_open_files_or_call_services(self) -> None:
         with mock.patch("builtins.open", side_effect=AssertionError("file access is forbidden")):

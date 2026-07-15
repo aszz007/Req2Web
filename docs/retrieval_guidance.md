@@ -8,7 +8,7 @@
 req2web.agent.context.v1
 -> RetrievalGuidanceBuilder
 -> req2web.retrieval.guidance.v1
--> （后续单独任务）PageSpec 检索驱动合成
+-> RetrievalGuidedPageSpecBuilder / req2web.guided.page_spec.build_result.v1
 ```
 
 实现位于 `src/req2web_generation/retrieval_guidance.py`。`RetrievalGuidanceBuilder` 的唯一业务输入是已完成的 `AgentContextBundle`，尤其是其中已经生成的五类 `retrieval_results`。它不会：
@@ -18,7 +18,7 @@ req2web.agent.context.v1
 - 调用外部服务、LLM，或安装/启用 `bge-m3`；
 - 改动 `PageSpecBuilder`、渲染器、一致性检查器或结果包 schema。
 
-本任务没有把该契约接入 PageSpec。这样可先用独立 schema、替换测试和真实基线证明“检索内容改变指导”，再由下一任务决定如何让指导影响具体页面结构。
+该契约现在由独立 `RetrievalGuidedPageSpecBuilder` 显式消费；旧 `PageSpecBuilder.build(context)` 与 PageSpec v1 schema 保持不变。采用、拒绝和保守降级规则见 `docs/guided_page_spec.md`。
 
 ## 2. 稳定契约
 
@@ -113,6 +113,6 @@ Start-Process -FilePath .\.venv\Scripts\python.exe `
 .\.venv\Scripts\python.exe -m unittest discover -s tests -v
 ```
 
-## 7. 后续边界
+## 7. 下游边界
 
-下一任务可以定义 `PageSpecBuilder` 对 `RetrievalGuidance` 的显式消费规则，并对布局、组件、interaction、implementation constraint 和 acceptance check 分别建立可解释影响测试。本任务不提前修改这些下游模块，也不扩大结果包、截图、视觉比较或最终控制台范围。
+检索驱动 PageSpec 已使用独立 build-result sidecar 接入，但尚未整合到正式 ResultPackage。Renderer、ConsistencyReport 和 ResultPackage schema 没有随之升级；截图、视觉比较和最终控制台仍在范围外。

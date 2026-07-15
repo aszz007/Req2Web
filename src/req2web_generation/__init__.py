@@ -8,6 +8,13 @@ from .consistency import (
     ConsistencyReport,
     MinimalConsistencyChecker,
 )
+from .guided_builder import (
+    GUIDED_PAGE_SPEC_BUILD_RESULT_SCHEMA_VERSION,
+    AffectedPageSpecField,
+    GuidanceDecision,
+    GuidedPageSpecBuildResult,
+    RetrievalGuidedPageSpecBuilder,
+)
 from .renderer import (
     RENDER_MANIFEST_SCHEMA_VERSION,
     SUPPORTED_COMPONENT_TYPES,
@@ -56,6 +63,9 @@ __all__ = [
     "ConstraintSpec",
     "DeterministicPageRenderer",
     "EvidenceReference",
+    "GUIDED_PAGE_SPEC_BUILD_RESULT_SCHEMA_VERSION",
+    "GuidanceDecision",
+    "GuidedPageSpecBuildResult",
     "InteractionSpec",
     "LayoutSpec",
     "MinimalConsistencyChecker",
@@ -63,6 +73,7 @@ __all__ = [
     "PageSpecBuilder",
     "PageState",
     "PageUseCase",
+    "AffectedPageSpecField",
     "RENDER_MANIFEST_SCHEMA_VERSION",
     "RESULT_PACKAGE_SCHEMA_VERSION",
     "RESULT_SUMMARY_SCHEMA_VERSION",
@@ -72,6 +83,7 @@ __all__ = [
     "RETRIEVAL_GUIDANCE_SCHEMA_VERSION",
     "RetrievalGuidance",
     "RetrievalGuidanceBuilder",
+    "RetrievalGuidedPageSpecBuilder",
     "SectionSpec",
     "SUPPORTED_COMPONENT_TYPES",
     "GuidanceItem",
