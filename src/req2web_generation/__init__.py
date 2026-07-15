@@ -21,6 +21,14 @@ from .result_package import (
     ResultPackage,
     ResultPackageError,
 )
+from .retrieval_guidance import (
+    RETRIEVAL_GUIDANCE_SCHEMA_VERSION,
+    GuidanceItem,
+    GuidanceSource,
+    RetrievalGuidance,
+    RetrievalGuidanceBuilder,
+    UseCaseGuidanceTrace,
+)
 from .schema import (
     PAGE_SPEC_SCHEMA_VERSION,
     AcceptanceCheck,
@@ -61,9 +69,15 @@ __all__ = [
     "RenderResult",
     "ResultPackage",
     "ResultPackageError",
+    "RETRIEVAL_GUIDANCE_SCHEMA_VERSION",
+    "RetrievalGuidance",
+    "RetrievalGuidanceBuilder",
     "SectionSpec",
     "SUPPORTED_COMPONENT_TYPES",
+    "GuidanceItem",
+    "GuidanceSource",
     "DeterministicResultPackager",
     "TraceabilitySpec",
     "UseCaseTrace",
+    "UseCaseGuidanceTrace",
 ]
