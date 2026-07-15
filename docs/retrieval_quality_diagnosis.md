@@ -4,6 +4,17 @@
 冻结输入：`fixtures/demo_v2_regression_cases_v1.json`、`outputs/demo_v2_regression_v1/`、既有 283 文档 TF-IDF 索引
 范围：只诊断 15 个低影响单元（11 个 `validation`、4 个 `ui_reference`）；不读取 `data/raw`，不改生产链、fixture、门禁或 12 个结果包。
 
+## 当前重跑（form_structure 适配后）
+
+以新建的 12 案例包重跑诊断后，低影响单元从 15 降为 13：`ui_reference`
+从 4 降为 2（`mobile-appointment`、`mobile-auth` 由可追溯
+`form_structure` 形成真实结构影响），`validation` 仍为 11。角色矩阵从
+44 个有影响 / 16 个不适用变为 46 / 14，`ui_reference` 从 8 / 4 变为 10 / 2；
+双门禁持续全绿、`verification_failed=0`。`profile-settings` 的冻结 top-2
+仍无合格表单来源，保持 audit-only；`pet-recognition` 保持 semantic rejected。
+诊断不再断言旧的固定 15 行，以便报告当前受控链路的真实结果，而不以案例 ID
+或目标比例调整规则。
+
 ## 结论
 
 `validation` 与 `ui_reference` 不是同一种主问题。前者的 11/11 都已经检索到 validation 文档，却只生成“证据引用 / regression_case / 当前不支持的异常值”，没有可在现有安全规则下变成结构指令的项；其中 3/11 还召回了恢复提示，但因它与明确需求的恢复类型不一致而被正确拒绝。后者的 3/4 是 UI 文档只被提取为 `reference_screen`，另 1/4 是提取到了控件值但与宠物识别需求不相符而被正确拒绝。

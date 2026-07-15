@@ -14,6 +14,7 @@ from typing import Any, Iterable
 from req2web_agent import AGENT_BUNDLE_SCHEMA_VERSION, AgentContextBundle
 from req2web_rag.corpus import ROLE_ORDER
 from req2web_rag.validation_signals import validated_compact_validation_signals
+from req2web_rag.ui_structure_signals import validated_compact_ui_structure_signals
 
 from .reference_safety import is_absolute_local_path, validate_reference_uri
 
@@ -115,12 +116,20 @@ class RetrievalGuidance:
                 if not isinstance(item.source.adapter_evidence, list):
                     raise ValueError("guidance_source.adapter_evidence must be a list")
                 for evidence in item.source.adapter_evidence:
-                    if not isinstance(evidence, dict) or set(evidence) != {
+                    validation_shape = {
                         "signal_id", "source_field", "source_value", "reference_uri", "adapter_rule", "outcome", "value"
-                    }:
+                    }
+                    ui_shape = {
+                        "signal_id", "source_doc_id", "source_fields", "source_values", "reference_uris", "adapter_rule", "outcome", "value"
+                    }
+                    if not isinstance(evidence, dict) or frozenset(evidence) not in {frozenset(validation_shape), frozenset(ui_shape)}:
                         raise ValueError("guidance_source.adapter_evidence is invalid")
                     for name, value in evidence.items():
-                        _require_text(value, f"guidance_source.adapter_evidence.{name}")
+                        if isinstance(value, list):
+                            if not value or any(not isinstance(part, (str, int)) for part in value):
+                                raise ValueError("guidance_source.adapter_evidence list is invalid")
+                        else:
+                            _require_text(value, f"guidance_source.adapter_evidence.{name}")
                 if is_absolute_local_path(item.value):
                     raise ValueError("RetrievalGuidance must not contain absolute paths")
                 for uri in item.source.reference_uris:
@@ -329,6 +338,16 @@ class RetrievalGuidanceBuilder:
                 items.append(_item("ui_reference", result, "component_hint", token, ["title", "summary"], f"controlled_token_map:v1:{token}"))
             for uri in _reference_uris(result, {"screenshot", "semantic_image", "view_hierarchy", "semantic_annotation"}):
                 items.append(_item("ui_reference", result, "ui_reference_uri", uri, ["references"], "ui_source_adapter:v1:whitelisted_uri", [uri]))
+            for signal in validated_compact_ui_structure_signals(result):
+                evidence = [{name: signal[name] for name in (
+                    "signal_id", "source_doc_id", "source_fields", "source_values",
+                    "reference_uris", "adapter_rule", "outcome", "value",
+                )}]
+                items.append(_item(
+                    "ui_reference", result, "component_hint", "form_structure",
+                    ["ui_structure_signals", *signal["source_fields"], "references"],
+                    signal["adapter_rule"], signal["reference_uris"], evidence,
+                ))
         return items
 
     def _flow(self, results: object) -> list[GuidanceItem]:

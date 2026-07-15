@@ -52,7 +52,7 @@ req2web.agent.context.v1
 | role | 实际作用 | 白名单字段与规则 |
 |---|---|---|
 | `requirement` | 相似任务类型、可复用约束、业务边界 | `dataset` + `subset` 形成来源任务类型；`references.kind` 仅取 requirement/workflow/prototype/resource_directory；标题/摘要仅可命中受控 token map |
-| `ui_reference` | 页面区域、组件、UI URI | 标题/摘要命中受控布局/组件 token；`references` 仅取 screenshot/semantic_image/view_hierarchy/semantic_annotation |
+| `ui_reference` | 页面区域、组件、UI URI | 标题/摘要命中受控布局/组件 token；`references` 仅取 screenshot/semantic_image/view_hierarchy/semantic_annotation；可选 `ui_structure_signals` 仅重新校验并映射 `form_structure` |
 | `interaction_flow` | 操作模式、状态变化 | 标题/摘要仅识别 mixed/swipe；step_screenshot/step_hierarchy 的数量决定 single/multi-step transition |
 | `implementation` | 结构和资源约束 | 标题/摘要命中受控组件/布局 token；仅取 html/target_html/screenshot/target_screenshot/input_sketch/prototype 的引用 kind 组合 |
 | `validation` | 异常、恢复、验收 | 固定 regression_case 仅表示当前记录可作验收回归案例；标题/摘要命中 permission/retry/loading/empty 等受控 token；可选 signal 仅将 `input_error -> retry_recovery`、`auth_access -> permission_recovery` 形成候选；仅取 issue/pull_request URI |

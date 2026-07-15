@@ -45,6 +45,7 @@ _CONCEPT_KEYWORDS: dict[str, tuple[str, ...]] = {
     "empty_state": ("空状态", "无匹配", "没有匹配", "无数据", "没有数据", "empty", "no data"),
     "permission_recovery": ("权限", "拒绝", "permission"),
     "retry_recovery": ("输入错误", "错误", "失败", "重试", "retry", "error"),
+    "form_structure": ("填写", "表单", "登录", "注册", "login", "register", "sign in"),
 }
 
 _CONTEXT_COMPONENTS: tuple[str, ...] = (
@@ -71,6 +72,7 @@ _COMPONENT_PRESENTATION: dict[str, tuple[str, str, str]] = {
     "metric_summary": ("data_view", "关键指标", "展示用户明确要求的指标摘要"),
     "detail_view": ("data_view", "详情视图", "展示所选项目的关键信息"),
     "empty_state": ("status_panel", "空结果提示", "说明当前没有匹配内容并给出恢复入口"),
+    "form_structure": ("form", "表单", "提供当前需求明确的填写或认证表单结构"),
 }
 
 _TAP_WORDS = ("点击", "选择", "确认", "查看", "搜索", "筛选", "上传", "拍摄", "结算", "提交")

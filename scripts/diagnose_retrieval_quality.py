@@ -155,7 +155,7 @@ def _counterfactual_note(original: list[dict[str, Any]], expanded: list[dict[str
 
 
 def generate_diagnosis(*, fixture: Path, package_root: Path, index_dir: Path) -> dict[str, Any]:
-    """Return a deterministic report for exactly the 15 frozen low-influence units."""
+    """Return a deterministic report for the current low-influence target units."""
     case_set = RegressionCaseSet.load(Path(fixture))
     retriever = create_retriever(RetrieverConfig(index_dir=Path(index_dir), backend="tfidf"))
     units: list[dict[str, Any]] = []
@@ -199,14 +199,10 @@ def generate_diagnosis(*, fixture: Path, package_root: Path, index_dir: Path) ->
                 },
             })
     units.sort(key=lambda item: (item["role"], item["case_id"]))
-    if len(units) != 15:
-        raise ValueError(f"expected exactly 15 low-influence ui_reference/validation units, found {len(units)}")
-    if sum(item["role"] == "validation" for item in units) != 11 or sum(item["role"] == "ui_reference" for item in units) != 4:
-        raise ValueError("target units must be exactly 11 validation plus 4 ui_reference")
     causes = Counter(item["primary_root_cause"] for item in units)
     return {
         "schema_version": SCHEMA_VERSION, "case_set_id": case_set.case_set_id,
-        "scope": {"target_roles": list(TARGET_ROLES), "target_unit_count": 15, "read_only": True},
+        "scope": {"target_roles": list(TARGET_ROLES), "target_unit_count": len(units), "read_only": True},
         "counterfactual_config": {"backend": "tfidf", "expanded_top_k": 5, "rewrite": "original_requirement + constraints + fixed role focus"},
         "root_cause_counts": {name: causes.get(name, 0) for name in ROOT_CAUSES},
         "root_cause_labels": ROOT_CAUSES, "units": units,

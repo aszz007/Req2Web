@@ -11,6 +11,7 @@ from typing import Any, Iterable
 from .corpus import ROLE_ORDER
 from .schema import validate_document
 from .validation_signals import build_validation_signals
+from .ui_structure_signals import build_ui_structure_signals
 
 
 INDEX_SCHEMA_VERSION = "req2web.rag.tfidf.v1"
@@ -200,6 +201,8 @@ class TfidfIndex:
             # source facts hidden by the old compact result contract.
             if document["role"] == "validation":
                 result["validation_signals"] = build_validation_signals(document)
+            if document["role"] == "ui_reference":
+                result["ui_structure_signals"] = build_ui_structure_signals(document)
             results.append(result)
         return results
 
