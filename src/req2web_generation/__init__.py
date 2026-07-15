@@ -76,6 +76,15 @@ from .demo_regression import (
     RegressionCaseSet,
     RegressionSuiteValidator,
 )
+from .delivery_sidecar import (
+    DELIVERY_REFERENCES_SCHEMA_VERSION,
+    DELIVERY_SIDECAR_SCHEMA_VERSION,
+    DELIVERY_STORYBOARD_SCHEMA_VERSION,
+    DeliverySidecarError,
+    DeliverySidecarResult,
+    DeterministicDeliverySidecarBuilder,
+    build_delivery_sidecar_batch,
+)
 
 __all__ = [
     "PAGE_SPEC_SCHEMA_VERSION",
@@ -136,4 +145,11 @@ __all__ = [
     "RegressionCase",
     "RegressionCaseSet",
     "RegressionSuiteValidator",
+    "DELIVERY_REFERENCES_SCHEMA_VERSION",
+    "DELIVERY_STORYBOARD_SCHEMA_VERSION",
+    "DELIVERY_SIDECAR_SCHEMA_VERSION",
+    "DeliverySidecarError",
+    "DeliverySidecarResult",
+    "DeterministicDeliverySidecarBuilder",
+    "build_delivery_sidecar_batch",
 ]

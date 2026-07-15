@@ -89,3 +89,9 @@ CLI 只按顺序复用 `MinimalAgentChain`、`RetrievalGuidanceBuilder`、`PageS
 验收固定使用移动电商、宠物情绪识别、地图地址搜索和桌面数据看板四类需求。相同输入生成到不同目录时，包中每个文件（包括 package manifest）必须逐字节一致；可对 `package_manifest.json` 计算 SHA-256 作为包级确定性证据。
 
 本版本仍不包含 bge-m3、外部 LLM、Topcoder 扩充、截图、像素视觉比较、浏览器自动化验收、最终 Demo 控制台、服务器、数据库、公开托管或失败页面自动修复。
+
+## 7. 可选交付侧车（不修改 v2）
+
+面向用户的 UI 参考与分场景 storyboard 由独立的 `req2web.delivery.sidecar.v1` 生成，说明见 [delivery_sidecar.md](delivery_sidecar.md)。它把一个已通过本章双门禁的 v2 包作为只读输入，生成自己的离线 HTML、JSON 与 manifest；不会把任何文件写回 v2 包，也不重跑既有节点。
+
+默认输出 `reference_only` 卡片。只有项目提供显式 `reference_root` 且引用满足 kind、相对路径、扩展名、非符号链接与稳定性规则时，侧车才复制 `screenshot` / `semantic_image` 位图。该能力不是图像理解、生成页面截图或视觉比较。
