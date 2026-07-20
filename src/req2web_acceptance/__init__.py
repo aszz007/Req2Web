@@ -1,4 +1,4 @@
-"""Internal deterministic requirement views and acceptance plans."""
+"""Internal deterministic requirement views, plans, bindings, and browser evidence."""
 
 from .binding import (
     ACCEPTANCE_BINDING_SCHEMA_VERSION,
@@ -7,6 +7,18 @@ from .binding import (
     CriterionBinding,
     ExecutableStep,
     compile_acceptance_binding,
+)
+from .browser_executor import (
+    BROWSER_EXECUTION_SCHEMA_VERSION,
+    BrowserBackend,
+    BrowserBackendUnavailable,
+    BrowserExecutionReport,
+    BrowserSafetyError,
+    CriterionRuntimeResult,
+    LazyPlaywrightBrowserBackend,
+    RuntimeStepEvidence,
+    execute_acceptance_binding_plan,
+    validate_local_page_url,
 )
 from .acceptance_plan import (
     ACCEPTANCE_PLAN_SCHEMA_VERSION,
@@ -32,18 +44,28 @@ __all__ = [
     "AcceptanceBindingPlan",
     "AcceptanceCriterion",
     "AcceptancePlan",
-    "CriterionBinding",
+    "BROWSER_EXECUTION_SCHEMA_VERSION",
+    "BrowserBackend",
+    "BrowserBackendUnavailable",
+    "BrowserExecutionReport",
+    "BrowserSafetyError",
     "ConstraintView",
+    "CriterionBinding",
+    "CriterionRuntimeResult",
     "EXECUTABLE_STEP_PLAN_SCHEMA_VERSION",
     "ExecutableStep",
     "INTERNAL_REQUIREMENT_VIEW_SCHEMA_VERSION",
+    "LazyPlaywrightBrowserBackend",
     "RequirementMetadata",
     "RequirementView",
     "RequirementViewRequirement",
+    "RuntimeStepEvidence",
     "UseCaseView",
     "ValidationEvidenceView",
     "ValidationSignalView",
     "compile_acceptance_binding",
     "compile_acceptance_plan",
+    "execute_acceptance_binding_plan",
     "project_requirement_view",
+    "validate_local_page_url",
 ]
