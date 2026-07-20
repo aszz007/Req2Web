@@ -289,6 +289,32 @@ class CandidateDecisionSet:
             ids.add(record.decision_id)
             prior = key
 
+    def validate_against(self, page_spec: PageSpec) -> None:
+        """Fail closed unless base candidate semantics are the real PageSpec projection.
+
+        Attribution fields remain independently auditable enrichment. They may be
+        added by a future D02 adapter, but cannot alter candidate semantic keys or
+        candidate entity IDs established by the frozen normalizer.
+        """
+        if not isinstance(page_spec, PageSpec):
+            raise TypeError("page_spec must be a PageSpec")
+        self.validate()
+        page_spec.validate()
+        expected = normalize_candidate_decisions(self.case_id, page_spec)
+        if (
+            self.source_page_spec_schema_version != expected.source_page_spec_schema_version
+            or self.source_page_spec_sha256 != expected.source_page_spec_sha256
+            or len(self.decisions) != len(expected.decisions)
+        ):
+            raise ValueError("candidate set does not match the supplied PageSpec identity")
+        for actual, projected in zip(self.decisions, expected.decisions):
+            if (
+                actual.decision_id != projected.decision_id
+                or actual.unit_type != projected.unit_type
+                or actual.semantic_key != projected.semantic_key
+                or actual.candidate_entity_ids != projected.candidate_entity_ids
+            ):
+                raise ValueError("candidate base semantics or entity IDs do not match the supplied PageSpec")
     def to_dict(self) -> dict[str, object]:
         self.validate()
         return {"case_id": self.case_id, "decisions": [record.to_dict() for record in self.decisions], "schema_version": self.schema_version, "source_page_spec_schema_version": self.source_page_spec_schema_version, "source_page_spec_sha256": self.source_page_spec_sha256}
@@ -436,6 +462,39 @@ def normalize_gold_obligations(case_id: str, acceptance_plan: AcceptancePlan) ->
     return result
 
 
+def map_acceptance_criteria_to_gold_obligations(
+    acceptance_plan: AcceptancePlan,
+    gold_obligations: GoldObligationSet,
+) -> tuple[tuple[str, str], ...]:
+    """Return the verified public criterion-to-deduplicated-gold mapping.
+
+    This is the only public bridge from an AcceptancePlan criterion to a normalized
+    gold collection. It reuses the normalizer's frozen projection and never
+    inspects a PageSpec, binding plan, browser report, or candidate decision.
+    """
+    if not isinstance(acceptance_plan, AcceptancePlan):
+        raise TypeError("acceptance_plan must be an AcceptancePlan")
+    if not isinstance(gold_obligations, GoldObligationSet):
+        raise TypeError("gold_obligations must be a GoldObligationSet")
+    acceptance_plan.validate()
+    gold_obligations.validate()
+    if (
+        gold_obligations.source_acceptance_plan_schema_version != acceptance_plan.schema_version
+        or gold_obligations.source_acceptance_plan_sha256 != acceptance_plan.sha256()
+    ):
+        raise ValueError("gold set does not originate from the supplied AcceptancePlan")
+    expected = normalize_gold_obligations(gold_obligations.case_id, acceptance_plan)
+    if expected != gold_obligations:
+        raise ValueError("gold set does not match the frozen AcceptancePlan projection")
+    by_semantic = {(item.unit_type, item.semantic_key): item for item in gold_obligations.obligations}
+    mapping: list[tuple[str, str]] = []
+    for criterion in acceptance_plan.criteria:
+        unit_type, semantic_key, evaluation_rule = _gold_projection(criterion)
+        gold = by_semantic.get((unit_type, semantic_key))
+        if gold is None or gold.evaluation_rule != evaluation_rule:
+            raise ValueError("criterion does not map to the supplied gold collection")
+        mapping.append((criterion.criterion_id, gold.gold_unit_id))
+    return tuple(sorted(mapping))
 def _semantic_use_case(use_case: object) -> dict[str, str]:
     return {"actor": _normalized_text(getattr(use_case, "actor"), "use_case.actor"), "expected_outcome": _normalized_text(getattr(use_case, "expected_outcome"), "use_case.expected_outcome"), "goal": _normalized_text(getattr(use_case, "goal"), "use_case.goal")}
 

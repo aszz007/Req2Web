@@ -1,5 +1,18 @@
 """Internal Stage 3 evaluation protocol artifacts."""
 
+from .acceptance_evaluation import (
+    ACCEPTANCE_EVALUATION_SCHEMA_VERSION,
+    ALIGNMENT_MATCH_TYPES,
+    EVALUATION_RESULTS,
+    REQUIREMENT_OUTCOMES,
+    AcceptanceEvaluationReport,
+    GoldAcceptanceResult,
+    RatioMetric,
+    RequirementOutcome,
+    aggregate_requirement_outcomes,
+    classify_alignment_match,
+    evaluate_acceptance,
+)
 from .decision_units import (
     DECISION_UNIT_SCHEMA_VERSION,
     IDENTITY_VALIDATION_STATUSES,
@@ -12,22 +25,35 @@ from .decision_units import (
     GoldObligationSet,
     create_decision_alignment,
     freeze_decision_alignments,
+    map_acceptance_criteria_to_gold_obligations,
     normalize_candidate_decisions,
     normalize_gold_obligations,
 )
 
 __all__ = [
-    "DECISION_UNIT_SCHEMA_VERSION",
-    "IDENTITY_VALIDATION_STATUSES",
+    "ACCEPTANCE_EVALUATION_SCHEMA_VERSION",
+    "ALIGNMENT_MATCH_TYPES",
+    "EVALUATION_RESULTS",
+    "REQUIREMENT_OUTCOMES",
+    "AcceptanceEvaluationReport",
     "CandidateDecision",
     "CandidateDecisionSet",
+    "DECISION_UNIT_SCHEMA_VERSION",
     "DecisionAlignment",
     "DecisionAlignmentSet",
     "DecisionUnitBundle",
+    "GoldAcceptanceResult",
     "GoldObligation",
     "GoldObligationSet",
+    "IDENTITY_VALIDATION_STATUSES",
+    "RatioMetric",
+    "RequirementOutcome",
+    "aggregate_requirement_outcomes",
+    "classify_alignment_match",
     "create_decision_alignment",
+    "evaluate_acceptance",
     "freeze_decision_alignments",
+    "map_acceptance_criteria_to_gold_obligations",
     "normalize_candidate_decisions",
     "normalize_gold_obligations",
 ]
