@@ -50,6 +50,21 @@ from .fallback_delivery import (
 )
 
 
+from .recovery_outcome import (
+    DETERMINISTIC_RECOVERY_OUTCOME_MANIFEST_SCHEMA_VERSION,
+    DETERMINISTIC_RECOVERY_OUTCOME_SCHEMA_VERSION,
+    FALLBACK_DELIVERY,
+    FAILED_DELIVERY,
+    FIRST_PASS_SUCCESS,
+    M2_DEVELOPMENT_FAULT_COPY_SCOPE,
+    RECOVERED_SUCCESS,
+    RECOVERY_OUTCOME_STATUSES,
+    DeterministicRecoveryOutcome,
+    DeterministicRecoveryOutcomeError,
+    RecoveryOutcomeFile,
+    execute_deterministic_development_recovery,
+)
+
 from .detector import (
     AMBIGUOUS_MULTIPLE_FAULTS,
     DOM_COMPONENT_STABLE_ID_MISMATCH,
@@ -114,6 +129,18 @@ __all__ = [
     "RepairExecutionReport",
     "execute_authorized_deterministic_repair",
     "write_repair_execution_report",
+    "DETERMINISTIC_RECOVERY_OUTCOME_MANIFEST_SCHEMA_VERSION",
+    "DETERMINISTIC_RECOVERY_OUTCOME_SCHEMA_VERSION",
+    "FALLBACK_DELIVERY",
+    "FAILED_DELIVERY",
+    "FIRST_PASS_SUCCESS",
+    "M2_DEVELOPMENT_FAULT_COPY_SCOPE",
+    "RECOVERED_SUCCESS",
+    "RECOVERY_OUTCOME_STATUSES",
+    "DeterministicRecoveryOutcome",
+    "DeterministicRecoveryOutcomeError",
+    "RecoveryOutcomeFile",
+    "execute_deterministic_development_recovery",
     "FALLBACK_DELIVERY_REPORT_SCHEMA_VERSION",
     "FROZEN_G0_FALLBACK_RECORD_SCHEMA_VERSION",
     "FallbackDeliveryError",
