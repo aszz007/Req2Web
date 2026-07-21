@@ -1,4 +1,4 @@
-"""Canonical structural-blindness bundle assembly for future fault detection.
+﻿"""Canonical structural-blindness bundle assembly for future fault detection.
 
 This module assembles one already-constructed deterministic artifact set into a
 fixed detector-visible inventory.  It deliberately does not classify a bundle
@@ -492,6 +492,59 @@ def _bundle_updates_for_route(route: str, fragment_files: Mapping[str, bytes]) -
         return {"artifact/" + path: content for path, content in fragment_files.items()}
     raise FaultBundleError("unknown fragment route")
 
+
+def _copy_and_reseal_blinded_fault_bundle(
+    source_bundle_dir: Path,
+    output_dir: Path,
+    artifact_updates: Mapping[str, bytes],
+) -> BlindedFaultBundleRecord:
+    """Copy one validated bundle and regenerate only its integrity envelope.
+
+    This is a structural helper with no repair, classification, policy, or
+    fallback semantics.  Callers provide replacement bytes only for existing
+    detector-visible artifact paths; all other artifact bytes are copied exactly.
+    The destination receives a fresh canonical top-level bundle manifest.
+    """
+    if not isinstance(artifact_updates, Mapping):
+        raise FaultBundleError("artifact_updates must be a mapping")
+    source_root = Path(source_bundle_dir)
+    source_record = load_blinded_fault_bundle(source_root)
+    source_tree = _read_tree_files(source_root)
+    expected_paths = {_BUNDLE_MANIFEST_NAME, *(entry.path for entry in source_record.files)}
+    if set(source_tree) != expected_paths:
+        raise FaultBundleError("source bundle directory has an unexpected file inventory")
+    source_files = {
+        entry.path: source_tree[entry.path]
+        for entry in source_record.files
+    }
+    actual_entries = _bundle_file_entries(source_files)
+    if tuple(entry.to_dict() for entry in actual_entries) != tuple(
+        entry.to_dict() for entry in source_record.files
+    ):
+        raise FaultBundleError("source bundle artifacts changed after validation")
+
+    updates: dict[str, bytes] = {}
+    for path, content in artifact_updates.items():
+        _safe_relative_posix(path, "artifact update path")
+        if path not in source_files:
+            raise FaultBundleError("artifact update path is not declared by the source bundle")
+        if not isinstance(content, bytes):
+            raise FaultBundleError("artifact update content must be bytes")
+        updates[path] = content
+    copied_files = {**source_files, **updates}
+    _validate_bundle_file_map(copied_files)
+
+    destination = _prepare_empty_output_directory(Path(output_dir))
+    _write_file_map(destination, copied_files)
+    actual_files = _read_tree_files(destination)
+    if actual_files != copied_files:
+        raise FaultBundleError("resealed bundle artifact bytes did not round-trip")
+    record = _make_bundle_record(source_record.case_id, source_record.page_id, actual_files)
+    _write_exact_bytes(destination / _BUNDLE_MANIFEST_NAME, canonical_json_bytes(record.to_dict()))
+    reloaded = load_blinded_fault_bundle(destination)
+    if reloaded.to_dict() != record.to_dict():
+        raise FaultBundleError("resealed bundle manifest did not round-trip")
+    return record
 
 def _make_bundle_record(case_id: str, page_id: str, files: Mapping[str, bytes]) -> BlindedFaultBundleRecord:
     entries = tuple(_bundle_file_entries(files))

@@ -156,6 +156,33 @@ class FaultBundleTest(TestCase):
         self.assertNotIn("FaultCopyRecord", req2web_faults.__all__)
         self.assertFalse(hasattr(req2web_faults, "FaultCopyRecord"))
 
+    def test_internal_copy_and_reseal_preserves_source_and_only_updates_declared_artifacts(self) -> None:
+        source_dir = self.output("copy-reseal-source")
+        destination = self.output("copy-reseal-destination")
+        assemble_blinded_fault_bundle(self.source, source_dir)
+        before = tree_bytes(source_dir)
+        changed_path = "artifact/acceptance/acceptance_plan.json"
+        updated = before[changed_path] + b"\n"
+        record = bundle_module._copy_and_reseal_blinded_fault_bundle(
+            source_dir,
+            destination,
+            {changed_path: updated},
+        )
+        self.assertEqual(before, tree_bytes(source_dir))
+        self.assertEqual(record.to_dict(), load_blinded_fault_bundle(destination).to_dict())
+        after = tree_bytes(destination)
+        self.assertEqual(set(before), set(after))
+        self.assertEqual(
+            sorted(path for path in before if before[path] != after[path]),
+            ["artifact/acceptance/acceptance_plan.json", "fault_case_bundle_manifest.json"],
+        )
+        with self.assertRaisesRegex(FaultBundleError, "not declared"):
+            bundle_module._copy_and_reseal_blinded_fault_bundle(
+                source_dir,
+                self.output("copy-reseal-unknown"),
+                {"artifact/not-declared.json": b"{}"},
+            )
+
     def test_page_spec_and_render_fragments_replace_only_their_registered_slots(self) -> None:
         clean_dir = self.output("clean")
         clean = assemble_blinded_fault_bundle(self.source, clean_dir)

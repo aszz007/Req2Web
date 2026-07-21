@@ -29,6 +29,15 @@ from .repair_policy import (
     authorize_fault_detection_report,
     write_repair_authorization,
 )
+from .repair_executor import (
+    REPAIR_EXECUTION_REPORT_SCHEMA_VERSION,
+    RepairExecutionError,
+    RepairExecutionFileDelta,
+    RepairExecutionReport,
+    execute_authorized_deterministic_repair,
+    write_repair_execution_report,
+)
+
 from .detector import (
     AMBIGUOUS_MULTIPLE_FAULTS,
     DOM_COMPONENT_STABLE_ID_MISMATCH,
@@ -87,4 +96,10 @@ __all__ = [
     "RepairPolicyError",
     "authorize_fault_detection_report",
     "write_repair_authorization",
+    "REPAIR_EXECUTION_REPORT_SCHEMA_VERSION",
+    "RepairExecutionError",
+    "RepairExecutionFileDelta",
+    "RepairExecutionReport",
+    "execute_authorized_deterministic_repair",
+    "write_repair_execution_report",
 ]
