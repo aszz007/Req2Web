@@ -15,7 +15,6 @@ from typing import Any, Mapping
 
 from req2web_acceptance import AcceptanceBindingPlan, AcceptancePlan, RequirementView
 from req2web_generation.renderer import RenderResult
-from req2web_generation.result_package import ResultPackage
 from req2web_generation.result_package_v2 import RetrievalEnhancedResultPackage
 from req2web_generation.schema import PageSpec
 from req2web_inspector.facts import InspectorFactSet
@@ -147,8 +146,9 @@ class BlindedFaultBundleRecord:
 class BlindedFaultBundleSource:
     """One already-constructed deterministic artifact set.
 
-    The caller owns any negative-control semantics.  This source carries no
-    control/fault label and the assembler creates no semantic intervention.
+    The caller owns any negative-control semantics. This M2 source is limited
+    to the G0 Inspector plus RetrievalEnhancedResultPackage v2 route; it carries
+    no control/fault label and creates no semantic intervention.
     """
 
     case_id: str
@@ -158,7 +158,7 @@ class BlindedFaultBundleSource:
     page_spec: PageSpec
     inspector_fact_set: InspectorFactSet
     render_result: RenderResult
-    result_package: ResultPackage | RetrievalEnhancedResultPackage
+    result_package: RetrievalEnhancedResultPackage
 
     def validate(self) -> None:
         _require_text(self.case_id, "case_id")
@@ -174,7 +174,12 @@ class BlindedFaultBundleSource:
         )
         self.inspector_fact_set.validate()
         package_files = _validated_result_package_files(self.result_package)
-        _validate_result_package_alignment(self.page_spec, render_files, package_files)
+        _validate_result_package_alignment(
+            self.page_spec,
+            self.inspector_fact_set,
+            render_files,
+            package_files,
+        )
         page_id = self.page_spec.page_id
         if any(value != page_id for value in (
             self.inspector_fact_set.page_id,
@@ -193,7 +198,12 @@ class BlindedFaultBundleSource:
         self.validate()
         render_files = _validated_render_files(self.render_result)
         package_files = _validated_result_package_files(self.result_package)
-        _validate_result_package_alignment(self.page_spec, render_files, package_files)
+        _validate_result_package_alignment(
+            self.page_spec,
+            self.inspector_fact_set,
+            render_files,
+            package_files,
+        )
         result = {
             "artifact/acceptance/requirement_view.json": canonical_json_bytes(self.requirement_view.to_dict()),
             "artifact/acceptance/acceptance_plan.json": canonical_json_bytes(self.acceptance_plan.to_dict()),
@@ -565,8 +575,12 @@ def _validated_render_files(render_result: RenderResult) -> dict[str, bytes]:
 
 
 def _validated_result_package_files(
-    result_package: ResultPackage | RetrievalEnhancedResultPackage,
+    result_package: RetrievalEnhancedResultPackage,
 ) -> dict[str, bytes]:
+    if not isinstance(result_package, RetrievalEnhancedResultPackage):
+        raise FaultBundleError(
+            "M2 blinded bundles require a G0 RetrievalEnhancedResultPackage v2"
+        )
     result_package.validate()
     root = result_package.package_dir
     if root.is_symlink() or not root.is_dir():
@@ -576,11 +590,15 @@ def _validated_result_package_files(
 
 def _validate_result_package_alignment(
     page_spec: PageSpec,
+    inspector_fact_set: InspectorFactSet,
     render_files: Mapping[str, bytes],
     package_files: Mapping[str, bytes],
 ) -> None:
     required = {
+        "internal/retrieval_guidance.json",
+        "internal/guided_page_spec_build_result.json",
         "internal/page_spec.json",
+        "internal/retrieval_influence_report.json",
         "page/index.html",
         "page/styles.css",
         "page/app.js",
@@ -594,6 +612,62 @@ def _validate_result_package_alignment(
     )
     if embedded_page_spec != page_spec.to_dict():
         raise FaultBundleError("result package embedded PageSpec does not match supplied PageSpec")
+    if inspector_fact_set.run_group != "G0":
+        raise FaultBundleError("M2 blinded bundles require a G0 InspectorFactSet")
+    guidance = _load_json_object(
+        package_files["internal/retrieval_guidance.json"],
+        "result package internal/retrieval_guidance.json",
+    )
+    guided = _load_json_object(
+        package_files["internal/guided_page_spec_build_result.json"],
+        "result package internal/guided_page_spec_build_result.json",
+    )
+    influence = _load_json_object(
+        package_files["internal/retrieval_influence_report.json"],
+        "result package internal/retrieval_influence_report.json",
+    )
+    inspector_bindings = (
+        (
+            "guidance_bundle_id",
+            inspector_fact_set.guidance_bundle_id,
+            guidance.get("guidance_bundle_id"),
+        ),
+        (
+            "guided_build_result_id",
+            inspector_fact_set.guided_build_result_id,
+            guided.get("build_result_id"),
+        ),
+        (
+            "retrieval_influence_report_id",
+            inspector_fact_set.retrieval_influence_report_id,
+            influence.get("report_id"),
+        ),
+        (
+            "guidance_sha256",
+            inspector_fact_set.guidance_sha256,
+            canonical_sha256(guidance),
+        ),
+        (
+            "guided_build_result_sha256",
+            inspector_fact_set.guided_build_result_sha256,
+            canonical_sha256(guided),
+        ),
+        (
+            "retrieval_influence_report_sha256",
+            inspector_fact_set.retrieval_influence_report_sha256,
+            canonical_sha256(influence),
+        ),
+        (
+            "retrieval_influence_report_passed",
+            inspector_fact_set.retrieval_influence_report_passed,
+            influence.get("passed"),
+        ),
+    )
+    for field_name, actual, expected in inspector_bindings:
+        if actual != expected:
+            raise FaultBundleError(
+                "Inspector fact set " + field_name + " does not match the supplied G0 v2 package"
+            )
     for name in ("index.html", "styles.css", "app.js", "render_manifest.json"):
         if package_files["page/" + name] != render_files["render/" + name]:
             raise FaultBundleError("result package page/" + name + " does not match supplied RenderResult")

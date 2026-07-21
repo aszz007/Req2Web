@@ -77,8 +77,12 @@ class FaultBundleTest(TestCase):
         cls.render = DeterministicPageRenderer().render(cls.page_spec, cls.root / "source" / "render")
         cls.binding = compile_acceptance_binding(cls.view, cls.plan, cls.page_spec, cls.render)
         consistency = MinimalConsistencyChecker().check(cls.page_spec, cls.render)
-        cls.package = DeterministicResultPackager().package(
-            cls.context, cls.page_spec, cls.render, consistency, cls.root / "source" / "package"
+        cls.package_v1 = DeterministicResultPackager().package(
+            cls.context,
+            cls.page_spec,
+            cls.render,
+            consistency,
+            cls.root / "source" / "package-v1",
         )
         influence = RetrievalInfluenceChecker().check(
             cls.context,
@@ -88,7 +92,7 @@ class FaultBundleTest(TestCase):
             ablations,
             cls.render,
         )
-        cls.package_v2 = DeterministicRetrievalEnhancedResultPackager().package(
+        cls.package = DeterministicRetrievalEnhancedResultPackager().package(
             cls.context,
             guidance,
             guided,
@@ -110,8 +114,6 @@ class FaultBundleTest(TestCase):
             result_package=cls.package,
         )
         cls.source.validate()
-        cls.source_v2 = replace(cls.source, result_package=cls.package_v2)
-        cls.source_v2.validate()
 
     @classmethod
     def tearDownClass(cls) -> None:
@@ -294,32 +296,19 @@ class FaultBundleTest(TestCase):
                             fragment_dir=fragment,
                         )
 
-    def test_v1_package_requires_embedded_page_spec_and_render_byte_alignment(self) -> None:
-        alternate_page_spec = replace(
-            self.page_spec,
-            title=self.page_spec.title + " alternate valid package",
-        )
-        alternate_page_spec.validate()
-        alternate_render = DeterministicPageRenderer().render(
-            alternate_page_spec,
-            self.root / "mismatch" / self._testMethodName / "alternate-package-render",
-        )
-        alternate_consistency = MinimalConsistencyChecker().check(alternate_page_spec, alternate_render)
-        alternate_package = DeterministicResultPackager().package(
-            self.context,
-            alternate_page_spec,
-            alternate_render,
-            alternate_consistency,
-            self.root / "mismatch" / self._testMethodName / "alternate-package",
-        )
-        self.assertEqual(alternate_package.page_id, self.page_spec.page_id)
-        with self.assertRaisesRegex(FaultBundleError, "embedded PageSpec"):
-            replace(self.source, result_package=alternate_package).validate()
+    def test_v1_package_is_rejected_and_v2_render_alignment_remains_exact(self) -> None:
+        with self.assertRaisesRegex(
+            FaultBundleError,
+            "RetrievalEnhancedResultPackage v2",
+        ):
+            replace(self.source, result_package=self.package_v1).validate()
 
         copied_render_root = self.root / "mismatch" / self._testMethodName / "caller-render"
         shutil.copytree(self.render.output_dir, copied_render_root)
         styles_path = copied_render_root / "styles.css"
-        styles_path.write_bytes(styles_path.read_bytes() + b"\n/* caller-provided valid mismatch */\n")
+        styles_path.write_bytes(
+            styles_path.read_bytes() + b"\n/* caller-provided valid mismatch */\n"
+        )
         render_manifest_path = copied_render_root / "render_manifest.json"
         render_manifest = json.loads(render_manifest_path.read_text(encoding="utf-8"))
         for entry in render_manifest["files"]:
@@ -348,9 +337,9 @@ class FaultBundleTest(TestCase):
             ).validate()
 
     def test_v2_package_uses_the_same_real_source_alignment_validation(self) -> None:
-        self.source_v2.validate()
+        self.source.validate()
         output = self.output("v2-source")
-        record = assemble_blinded_fault_bundle(self.source_v2, output)
+        record = assemble_blinded_fault_bundle(self.source, output)
         paths = {entry.path for entry in record.files}
         self.assertIn("artifact/result_package/internal/page_spec.json", paths)
         self.assertIn("artifact/result_package/internal/retrieval_influence_report.json", paths)
