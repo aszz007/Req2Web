@@ -17,6 +17,18 @@ from .bundle import (
     validate_blinded_bundle_inventory_parity,
 )
 
+from .repair_policy import (
+    DETERMINISTIC_REPAIR_AUTHORIZED,
+    FALLBACK_REQUIRED,
+    NO_ACTION,
+    REPAIR_AUTHORIZATION_SCHEMA_VERSION,
+    REPAIR_AUTHORIZATION_STATUSES,
+    REPAIR_POLICY_SCHEMA_VERSION,
+    RepairAuthorization,
+    RepairPolicyError,
+    authorize_fault_detection_report,
+    write_repair_authorization,
+)
 from .detector import (
     AMBIGUOUS_MULTIPLE_FAULTS,
     DOM_COMPONENT_STABLE_ID_MISMATCH,
@@ -65,4 +77,14 @@ __all__ = [
     "validate_blinded_bundle_inventory_parity",
     "detect_blinded_fault_bundle",
     "write_fault_detection_report",
+    "DETERMINISTIC_REPAIR_AUTHORIZED",
+    "FALLBACK_REQUIRED",
+    "NO_ACTION",
+    "REPAIR_AUTHORIZATION_SCHEMA_VERSION",
+    "REPAIR_AUTHORIZATION_STATUSES",
+    "REPAIR_POLICY_SCHEMA_VERSION",
+    "RepairAuthorization",
+    "RepairPolicyError",
+    "authorize_fault_detection_report",
+    "write_repair_authorization",
 ]
