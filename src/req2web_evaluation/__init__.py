@@ -75,6 +75,24 @@ from .negative_control import (
 )
 
 __all__ = [
+    "ACTUAL_SCOPE_RELATIONS",
+    "FAULT_RECOVERY_EVALUATION_CASE_SCHEMA_VERSION",
+    "FAULT_RECOVERY_EVALUATION_MANIFEST_SCHEMA_VERSION",
+    "FAULT_RECOVERY_EVALUATION_SUITE_SCHEMA_VERSION",
+    "FINAL_OUTCOMES",
+    "METRIC_NAMES",
+    "SCOPE_RELATIONS",
+    "FaultRecoveryEvaluationCaseReport",
+    "FaultRecoveryEvaluationError",
+    "FaultRecoveryEvaluationSuiteReport",
+    "FaultRecoveryMetric",
+    "aggregate_fault_recovery_evaluations",
+    "classify_scope_relation",
+    "evaluate_fault_recovery_case",
+    "validate_fault_recovery_evaluation_case_artifact",
+    "validate_fault_recovery_evaluation_suite_artifact",
+    "write_fault_recovery_evaluation_case",
+    "write_fault_recovery_evaluation_suite",
     "ACCEPTANCE_EVALUATION_SCHEMA_VERSION",
     "ALIGNMENT_MATCH_TYPES",
     "EVALUATION_RESULTS",
@@ -139,3 +157,33 @@ __all__ = [
     "validate_negative_control_artifact",
     "write_negative_control_artifact",
 ]
+
+
+_FAULT_RECOVERY_EXPORTS = frozenset({
+    "ACTUAL_SCOPE_RELATIONS",
+    "FAULT_RECOVERY_EVALUATION_CASE_SCHEMA_VERSION",
+    "FAULT_RECOVERY_EVALUATION_MANIFEST_SCHEMA_VERSION",
+    "FAULT_RECOVERY_EVALUATION_SUITE_SCHEMA_VERSION",
+    "FINAL_OUTCOMES",
+    "METRIC_NAMES",
+    "SCOPE_RELATIONS",
+    "FaultRecoveryEvaluationCaseReport",
+    "FaultRecoveryEvaluationError",
+    "FaultRecoveryEvaluationSuiteReport",
+    "FaultRecoveryMetric",
+    "aggregate_fault_recovery_evaluations",
+    "classify_scope_relation",
+    "evaluate_fault_recovery_case",
+    "validate_fault_recovery_evaluation_case_artifact",
+    "validate_fault_recovery_evaluation_suite_artifact",
+    "write_fault_recovery_evaluation_case",
+    "write_fault_recovery_evaluation_suite",
+})
+
+
+def __getattr__(name: str):
+    """Lazily expose fault evaluator APIs without making runtime imports circular."""
+    if name in _FAULT_RECOVERY_EXPORTS:
+        from . import fault_recovery_evaluation
+        return getattr(fault_recovery_evaluation, name)
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
