@@ -37,6 +37,18 @@ from .repair_executor import (
     execute_authorized_deterministic_repair,
     write_repair_execution_report,
 )
+from .fallback_delivery import (
+    FALLBACK_DELIVERY_REPORT_SCHEMA_VERSION,
+    FROZEN_G0_FALLBACK_RECORD_SCHEMA_VERSION,
+    FallbackDeliveryError,
+    FallbackDeliveryReport,
+    FrozenG0FallbackRecord,
+    FrozenG0Provenance,
+    FrozenPackageFile,
+    deliver_frozen_g0_fallback,
+    freeze_g0_fallback_package,
+)
+
 
 from .detector import (
     AMBIGUOUS_MULTIPLE_FAULTS,
@@ -102,4 +114,13 @@ __all__ = [
     "RepairExecutionReport",
     "execute_authorized_deterministic_repair",
     "write_repair_execution_report",
+    "FALLBACK_DELIVERY_REPORT_SCHEMA_VERSION",
+    "FROZEN_G0_FALLBACK_RECORD_SCHEMA_VERSION",
+    "FallbackDeliveryError",
+    "FallbackDeliveryReport",
+    "FrozenG0FallbackRecord",
+    "FrozenG0Provenance",
+    "FrozenPackageFile",
+    "deliver_frozen_g0_fallback",
+    "freeze_g0_fallback_package",
 ]
