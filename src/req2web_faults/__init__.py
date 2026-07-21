@@ -1,24 +1,31 @@
-"""Mutation-fragment runtime metadata API; not detector-ready input.
+"""Detector-visible structural bundle API.
 
-Mutation requests, injector audits, and evaluator-only gold live in internal
-modules and are intentionally not re-exported here. FaultCopyRecord metadata
-must first be assembled into a separate parity-validated fault-case bundle
-before any detector implementation is permitted.
+Injector mutation requests, fragment metadata, injector audits, and evaluator-only
+gold remain internal.  Callers may only import the parity-validated bundle
+assembler and its structural records from this package namespace.
 """
-from .mutation import (
-    FAULT_COPY_MANIFEST_SCHEMA_VERSION,
-    FAULT_COPY_SCHEMA_VERSION,
-    FaultCopyRecord,
-    FaultMutationError,
-    canonical_json_bytes,
-    canonical_sha256,
+from .bundle import (
+    BLINDED_BUNDLE_PARITY_SCHEMA_VERSION,
+    BLINDED_FAULT_BUNDLE_SCHEMA_VERSION,
+    BlindedBundleFile,
+    BlindedBundleInventoryParityReport,
+    BlindedFaultBundleRecord,
+    BlindedFaultBundleSource,
+    FaultBundleError,
+    assemble_blinded_fault_bundle,
+    load_blinded_fault_bundle,
+    validate_blinded_bundle_inventory_parity,
 )
 
 __all__ = [
-    "FAULT_COPY_MANIFEST_SCHEMA_VERSION",
-    "FAULT_COPY_SCHEMA_VERSION",
-    "FaultCopyRecord",
-    "FaultMutationError",
-    "canonical_json_bytes",
-    "canonical_sha256",
+    "BLINDED_BUNDLE_PARITY_SCHEMA_VERSION",
+    "BLINDED_FAULT_BUNDLE_SCHEMA_VERSION",
+    "BlindedBundleFile",
+    "BlindedBundleInventoryParityReport",
+    "BlindedFaultBundleRecord",
+    "BlindedFaultBundleSource",
+    "FaultBundleError",
+    "assemble_blinded_fault_bundle",
+    "load_blinded_fault_bundle",
+    "validate_blinded_bundle_inventory_parity",
 ]
