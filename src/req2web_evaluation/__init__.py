@@ -55,6 +55,25 @@ from .decision_units import (
     normalize_gold_obligations,
 )
 
+from .negative_control import (
+    EXPECTED_OUTCOME as NEGATIVE_CONTROL_EXPECTED_OUTCOME,
+    FAILURE_CODES as NEGATIVE_CONTROL_FAILURE_CODES,
+    NEGATIVE_CONTROL_FAILED,
+    NEGATIVE_CONTROL_MANIFEST_SCHEMA_VERSION,
+    NEGATIVE_CONTROL_REPORT_SCHEMA_VERSION,
+    NEGATIVE_CONTROL_SPEC_SCHEMA_VERSION,
+    PASSED as NEGATIVE_CONTROL_PASSED,
+    InjectedRetrievalResult,
+    NegativeControlError,
+    NegativeControlInputError,
+    NegativeControlReport,
+    NegativeControlRun,
+    NegativeControlSpec,
+    run_negative_control,
+    validate_negative_control_artifact,
+    write_negative_control_artifact,
+)
+
 __all__ = [
     "ACCEPTANCE_EVALUATION_SCHEMA_VERSION",
     "ALIGNMENT_MATCH_TYPES",
@@ -103,4 +122,20 @@ __all__ = [
     "map_acceptance_criteria_to_gold_obligations",
     "normalize_candidate_decisions",
     "normalize_gold_obligations",
+    "NEGATIVE_CONTROL_EXPECTED_OUTCOME",
+    "NEGATIVE_CONTROL_FAILURE_CODES",
+    "NEGATIVE_CONTROL_FAILED",
+    "NEGATIVE_CONTROL_MANIFEST_SCHEMA_VERSION",
+    "NEGATIVE_CONTROL_PASSED",
+    "NEGATIVE_CONTROL_REPORT_SCHEMA_VERSION",
+    "NEGATIVE_CONTROL_SPEC_SCHEMA_VERSION",
+    "InjectedRetrievalResult",
+    "NegativeControlError",
+    "NegativeControlInputError",
+    "NegativeControlReport",
+    "NegativeControlRun",
+    "NegativeControlSpec",
+    "run_negative_control",
+    "validate_negative_control_artifact",
+    "write_negative_control_artifact",
 ]
