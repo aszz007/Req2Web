@@ -1,5 +1,21 @@
 """Internal vendor-neutral Provider boundary for Req2Web M3."""
 
+from .candidate_audit import (
+    MODEL_CANDIDATE_AUDIT_RECORD_SCHEMA_VERSION,
+    SYNTHETIC_MOCK_VISIBILITY_RECEIPT_SCHEMA_VERSION,
+    CandidateAuditConstructionError,
+    CandidateAuditDecision,
+    MockEvidenceVisibilitySource,
+    MockPolicyVisibilitySource,
+    MockRequirementVisibilitySource,
+    ModelCandidateAuditAdapter,
+    ModelCandidateAuditRecord,
+    ResolvedVisibilitySource,
+    SyntheticMockVisibilityReceipt,
+    SyntheticMockVisibilitySourceRegistry,
+    VerifiedCandidateAttributionEdge,
+    expected_audit_decision_from_resolution,
+)
 from .semantic_candidate import (
     MODEL_SEMANTIC_CANDIDATE_SCHEMA_VERSION,
     PAGE_SPEC_ASSEMBLY_REPORT_SCHEMA_VERSION,
@@ -16,16 +32,30 @@ from .semantic_candidate import (
 )
 
 __all__ = [
+    "MODEL_CANDIDATE_AUDIT_RECORD_SCHEMA_VERSION",
     "MODEL_SEMANTIC_CANDIDATE_SCHEMA_VERSION",
     "PAGE_SPEC_ASSEMBLY_REPORT_SCHEMA_VERSION",
     "PROVIDER_ERROR_SCHEMA_VERSION",
     "PROVIDER_RAW_RESPONSE_SCHEMA_VERSION",
+    "SYNTHETIC_MOCK_VISIBILITY_RECEIPT_SCHEMA_VERSION",
     "AssembledPageSpec",
+    "CandidateAuditConstructionError",
+    "CandidateAuditDecision",
     "CanonicalPageSpecAssembler",
+    "MockEvidenceVisibilitySource",
+    "MockPolicyVisibilitySource",
+    "MockRequirementVisibilitySource",
+    "ModelCandidateAuditAdapter",
+    "ModelCandidateAuditRecord",
     "ModelSemanticCandidate",
     "PageSpecAssemblyReport",
     "ProviderError",
     "ProviderProtocolError",
     "ProviderRawResponse",
+    "ResolvedVisibilitySource",
+    "SyntheticMockVisibilityReceipt",
+    "SyntheticMockVisibilitySourceRegistry",
+    "VerifiedCandidateAttributionEdge",
+    "expected_audit_decision_from_resolution",
     "parse_provider_raw_response",
 ]
