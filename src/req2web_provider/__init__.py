@@ -16,6 +16,17 @@ from .candidate_audit import (
     VerifiedCandidateAttributionEdge,
     expected_audit_decision_from_resolution,
 )
+from .mock_provider import (
+    MOCK_PROVIDER_INVOCATION_RECORD_SCHEMA_VERSION,
+    MOCK_PROVIDER_REQUEST_SCHEMA_VERSION,
+    MOCK_PROVIDER_RESULT_SCHEMA_VERSION,
+    MockProviderRequestError,
+    MockSmokePageSpecProvider,
+    ScriptedMockProviderOutcome,
+    SyntheticMockProviderInvocationRecord,
+    SyntheticMockProviderRequest,
+    SyntheticMockProviderResult,
+)
 from .semantic_candidate import (
     MODEL_SEMANTIC_CANDIDATE_SCHEMA_VERSION,
     PAGE_SPEC_ASSEMBLY_REPORT_SCHEMA_VERSION,
@@ -33,6 +44,9 @@ from .semantic_candidate import (
 
 __all__ = [
     "MODEL_CANDIDATE_AUDIT_RECORD_SCHEMA_VERSION",
+    "MOCK_PROVIDER_INVOCATION_RECORD_SCHEMA_VERSION",
+    "MOCK_PROVIDER_REQUEST_SCHEMA_VERSION",
+    "MOCK_PROVIDER_RESULT_SCHEMA_VERSION",
     "MODEL_SEMANTIC_CANDIDATE_SCHEMA_VERSION",
     "PAGE_SPEC_ASSEMBLY_REPORT_SCHEMA_VERSION",
     "PROVIDER_ERROR_SCHEMA_VERSION",
@@ -43,6 +57,8 @@ __all__ = [
     "CandidateAuditDecision",
     "CanonicalPageSpecAssembler",
     "MockEvidenceVisibilitySource",
+    "MockProviderRequestError",
+    "MockSmokePageSpecProvider",
     "MockPolicyVisibilitySource",
     "MockRequirementVisibilitySource",
     "ModelCandidateAuditAdapter",
@@ -53,6 +69,10 @@ __all__ = [
     "ProviderProtocolError",
     "ProviderRawResponse",
     "ResolvedVisibilitySource",
+    "ScriptedMockProviderOutcome",
+    "SyntheticMockProviderInvocationRecord",
+    "SyntheticMockProviderRequest",
+    "SyntheticMockProviderResult",
     "SyntheticMockVisibilityReceipt",
     "SyntheticMockVisibilitySourceRegistry",
     "VerifiedCandidateAttributionEdge",
