@@ -19,7 +19,20 @@ import uuid
 
 from req2web_agent import AgentContextBundle, UseCase
 from req2web_evaluation.decision_units import CandidateDecisionSet, normalize_candidate_decisions
-from req2web_generation import RetrievalGuidanceBuilder, RetrievalGuidedPageSpecBuilder
+from req2web_generation import (
+    GuidedPageSpecBuildResult,
+    RetrievalGuidance,
+    RetrievalGuidanceBuilder,
+    RetrievalGuidedPageSpecBuilder,
+)
+from req2web_generation.schema import PageSpec
+from req2web_inspector.facts import InspectorFactSet
+from req2web_faults.mutation import (
+    IGNORED_EVIDENCE_MISATTRIBUTED_TO_PAGE_SPEC,
+    FaultCopyBuildResult,
+    FaultMutationRequest,
+    build_fault_copy,
+)
 from req2web_rag.corpus import ROLE_ORDER
 
 
@@ -799,6 +812,140 @@ def run_negative_control(spec: NegativeControlSpec, baseline_context: AgentConte
         baseline_guided_build=baseline_guided, controlled_guided_build=controlled_guided,
         baseline_decisions=baseline_decisions, controlled_decisions=controlled_decisions,
     )
+
+
+def build_passing_negative_control_ignored_evidence_misattribution_fault_copy(
+    *,
+    run: NegativeControlRun,
+    inspector_fact_set: InspectorFactSet,
+    page_spec: PageSpec,
+    source_ref_id: str,
+    page_spec_entity_id: str,
+    page_spec_field_name: str,
+    output_dir: Path,
+) -> FaultCopyBuildResult:
+    """Bind the approved D03-4 misattribution fixture to one passed M2-07a run.
+
+    This evaluator-side wrapper is the only API that proves the source fact is
+    derived from this run's injected negative-control evidence. It writes no
+    control artifact into the runtime fragment or detector-visible bundle; the
+    returned build remains the existing injector-only primitive result.
+    """
+    if not isinstance(run, NegativeControlRun):
+        raise NegativeControlError("misattribution binding requires NegativeControlRun")
+    if not isinstance(inspector_fact_set, InspectorFactSet):
+        raise NegativeControlError("misattribution binding requires InspectorFactSet")
+    if not isinstance(page_spec, PageSpec):
+        raise NegativeControlError("misattribution binding requires PageSpec")
+    _require_text(source_ref_id, "source_ref_id")
+    _require_text(page_spec_entity_id, "page_spec_entity_id")
+    _require_text(page_spec_field_name, "page_spec_field_name")
+    try:
+        run.spec.validate()
+        run.report.validate_against_spec(run.spec)
+        controlled_guidance = run.controlled_guidance
+        controlled_guided = run.controlled_guided_build
+        if not isinstance(controlled_guidance, RetrievalGuidance):
+            raise TypeError("controlled_guidance has the wrong type")
+        if not isinstance(controlled_guided, GuidedPageSpecBuildResult):
+            raise TypeError("controlled_guided_build has the wrong type")
+        run.controlled_context.validate()
+        controlled_guidance.validate()
+        controlled_guided.validate(controlled_guidance)
+        page_spec.validate()
+        inspector_fact_set.validate()
+    except (TypeError, ValueError) as error:
+        raise NegativeControlError("misattribution binding inputs are not canonical") from error
+    report = run.report
+    if report.status != PASSED:
+        raise NegativeControlError("misattribution binding requires a passed negative control")
+    if report.case_id != run.spec.case_id:
+        raise NegativeControlError("misattribution run report case does not match its spec")
+    if _context_sha256(run.controlled_context) != report.controlled_context_sha256:
+        raise NegativeControlError("controlled context does not match the passed report")
+    if _sha256_bytes(_canonical_json_bytes(controlled_guidance.to_dict())) != report.controlled_guidance_sha256:
+        raise NegativeControlError("controlled guidance does not match the passed report")
+    if _page_spec_sha256(page_spec) != report.controlled_page_spec_sha256:
+        raise NegativeControlError("PageSpec does not match the passed report")
+    if controlled_guided.page_spec.to_dict() != page_spec.to_dict():
+        raise NegativeControlError("PageSpec does not match the controlled guided build")
+    if (
+        inspector_fact_set.page_id != page_spec.page_id
+        or inspector_fact_set.guidance_bundle_id != controlled_guidance.guidance_bundle_id
+        or inspector_fact_set.guided_build_result_id != controlled_guided.build_result_id
+        or inspector_fact_set.guidance_sha256
+        != _sha256_bytes(_canonical_json_bytes(controlled_guidance.to_dict()))
+        or inspector_fact_set.guided_build_result_sha256
+        != _sha256_bytes(_canonical_json_bytes(controlled_guided.to_dict()))
+        or inspector_fact_set.page_spec_sha256 != _page_spec_sha256(page_spec)
+    ):
+        raise NegativeControlError("Inspector facts do not bind the passed controlled G0 artifacts")
+    sources_by_id = {
+        item.source_ref_id: item for item in inspector_fact_set.source_refs
+    }
+    source = sources_by_id.get(source_ref_id)
+    if (
+        source is None
+        or source.source_kind != "guided_retrieval"
+        or source.role != run.spec.role
+        or source.guidance_id is None
+        or source.doc_id is None
+        or source.doc_id not in report.injected_doc_ids
+        or source.guidance_id not in report.injected_guidance_ids
+    ):
+        raise NegativeControlError("requested source is not this passed control's injected guidance")
+    injected_dispositions = dict(report.injected_decision_dispositions)
+    facts = [
+        item
+        for item in inspector_fact_set.facts
+        if item.source_ref_id == source_ref_id
+    ]
+    if len(facts) != 1:
+        raise NegativeControlError("requested injected source must bind exactly one Inspector fact")
+    fact = facts[0]
+    if (
+        fact.disposition != "ignored"
+        or fact.trace_link_ids
+        or fact.decision_id not in report.injected_decision_ids
+        or injected_dispositions.get(fact.decision_id) != "ignored"
+    ):
+        raise NegativeControlError("requested Inspector fact is not this control's ignored decision")
+    decisions = [
+        item for item in controlled_guided.ignored if item.decision_id == fact.decision_id
+    ]
+    if len(decisions) != 1:
+        raise NegativeControlError("requested ignored decision is absent from the controlled guided build")
+    decision = decisions[0]
+    if (
+        decision.source_kind != "retrieval_guidance"
+        or decision.guidance_id != source.guidance_id
+        or decision.doc_id != source.doc_id
+        or decision.affected_fields
+    ):
+        raise NegativeControlError("requested ignored decision is not an empty injected retrieval decision")
+    context_doc_ids = {
+        str(item["doc_id"])
+        for item in run.controlled_context.retrieval_results[run.spec.role]
+    }
+    if source.doc_id not in context_doc_ids:
+        raise NegativeControlError("requested injected source is absent from the controlled context")
+    request = FaultMutationRequest(
+        case_id=run.spec.case_id,
+        mutation_kind=IGNORED_EVIDENCE_MISATTRIBUTED_TO_PAGE_SPEC,
+        target_id=source_ref_id,
+        page_spec_entity_id=page_spec_entity_id,
+        page_spec_field_name=page_spec_field_name,
+    )
+    try:
+        return build_fault_copy(
+            request,
+            inspector_fact_set,
+            output_dir,
+            page_spec=page_spec,
+            guided_build_result=controlled_guided,
+        )
+    except (TypeError, ValueError) as error:
+        raise NegativeControlError("misattribution injector primitive rejected bound inputs") from error
 
 
 def _reject_output_traversal(output_dir: Path) -> None:

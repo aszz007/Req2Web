@@ -17,8 +17,14 @@ from typing import Any, Mapping
 from req2web_generation.renderer import RenderResult
 from req2web_generation.result_package import ResultPackage
 from req2web_generation.result_package_v2 import RetrievalEnhancedResultPackage
+from req2web_generation.guided_builder import GuidedPageSpecBuildResult
 from req2web_generation.schema import PageSpec
-from req2web_inspector.facts import InspectorFactSet
+from req2web_inspector.facts import (
+    InspectorFact,
+    InspectorFactSet,
+    InspectorTraceLink,
+    page_spec_field_path,
+)
 
 
 FAULT_COPY_SCHEMA_VERSION = "req2web.fault_copy.v3"
@@ -26,6 +32,7 @@ FAULT_COPY_MANIFEST_SCHEMA_VERSION = "req2web.fault_copy_manifest.v3"
 
 PAGE_SPEC_COMPONENT_REMOVED = "page_spec_component_removed"
 INSPECTOR_TRACE_RELATION_REMOVED = "inspector_trace_relation_removed"
+IGNORED_EVIDENCE_MISATTRIBUTED_TO_PAGE_SPEC = "ignored_evidence_misattributed_to_page_spec"
 RENDER_COMPONENT_STABLE_ID_TAMPERED = "render_component_stable_id_tampered"
 PACKAGE_MANIFEST_PATH_TAMPERED = "package_manifest_path_tampered"
 PACKAGE_MANIFEST_SHA256_TAMPERED = "package_manifest_sha256_tampered"
@@ -33,6 +40,7 @@ PACKAGE_MANIFEST_SHA256_TAMPERED = "package_manifest_sha256_tampered"
 REGISTERED_MUTATION_KINDS = (
     PAGE_SPEC_COMPONENT_REMOVED,
     INSPECTOR_TRACE_RELATION_REMOVED,
+    IGNORED_EVIDENCE_MISATTRIBUTED_TO_PAGE_SPEC,
     RENDER_COMPONENT_STABLE_ID_TAMPERED,
     PACKAGE_MANIFEST_PATH_TAMPERED,
     PACKAGE_MANIFEST_SHA256_TAMPERED,
@@ -41,6 +49,7 @@ REGISTERED_MUTATION_KINDS = (
 _KIND_ARTIFACT_KIND = {
     PAGE_SPEC_COMPONENT_REMOVED: "page_spec",
     INSPECTOR_TRACE_RELATION_REMOVED: "inspector_fact_set",
+    IGNORED_EVIDENCE_MISATTRIBUTED_TO_PAGE_SPEC: "inspector_fact_set",
     RENDER_COMPONENT_STABLE_ID_TAMPERED: "render_artifact",
     PACKAGE_MANIFEST_PATH_TAMPERED: "result_package",
     PACKAGE_MANIFEST_SHA256_TAMPERED: "result_package",
@@ -48,6 +57,7 @@ _KIND_ARTIFACT_KIND = {
 _KIND_COPY_LOCATION = {
     PAGE_SPEC_COMPONENT_REMOVED: "artifact/page_spec_fault.json",
     INSPECTOR_TRACE_RELATION_REMOVED: "artifact/inspector_fact_set_fault.json",
+    IGNORED_EVIDENCE_MISATTRIBUTED_TO_PAGE_SPEC: "artifact/inspector_fact_set_fault.json",
     RENDER_COMPONENT_STABLE_ID_TAMPERED: "artifact/render/index.html",
     PACKAGE_MANIFEST_PATH_TAMPERED: "artifact/result_package/package_manifest.json",
     PACKAGE_MANIFEST_SHA256_TAMPERED: "artifact/result_package/package_manifest.json",
@@ -76,6 +86,8 @@ class FaultMutationRequest:
     mutation_kind: str
     target_id: str
     manifest_field: str | None = None
+    page_spec_entity_id: str | None = None
+    page_spec_field_name: str | None = None
 
     def validate(self) -> None:
         for name in ("case_id", "mutation_kind", "target_id"):
@@ -83,17 +95,45 @@ class FaultMutationRequest:
         if self.mutation_kind not in REGISTERED_MUTATION_KINDS:
             raise FaultMutationError("unknown mutation_kind")
         package_kinds = {PACKAGE_MANIFEST_PATH_TAMPERED, PACKAGE_MANIFEST_SHA256_TAMPERED}
-        if self.mutation_kind in package_kinds:
+        if self.mutation_kind == IGNORED_EVIDENCE_MISATTRIBUTED_TO_PAGE_SPEC:
+            if self.manifest_field is not None:
+                raise FaultMutationError("ignored-evidence misattribution does not use manifest_field")
+            _require_text(self.page_spec_entity_id, "page_spec_entity_id")
+            _require_text(self.page_spec_field_name, "page_spec_field_name")
+        elif self.mutation_kind in package_kinds:
             expected = "path" if self.mutation_kind == PACKAGE_MANIFEST_PATH_TAMPERED else "sha256"
             if self.manifest_field != expected:
                 raise FaultMutationError("package manifest mutation requires its registered manifest_field")
             _safe_relative_posix(self.target_id, "target_id")
         elif self.manifest_field is not None:
             raise FaultMutationError("manifest_field is reserved for package manifest mutations")
+        if self.mutation_kind != IGNORED_EVIDENCE_MISATTRIBUTED_TO_PAGE_SPEC and (
+            self.page_spec_entity_id is not None or self.page_spec_field_name is not None
+        ):
+            raise FaultMutationError("PageSpec target fields are reserved for ignored-evidence misattribution")
+
+    def to_payload(self) -> dict[str, object]:
+        """Return the versioned injector-only request payload used for hashing.
+
+        Existing M2 mutation kinds retain their exact pre-M2-08a four-field
+        payload so previously accepted injector-audit and evaluator-gold
+        identities do not drift. Only the new misattribution kind commits its
+        PageSpec entity/field target in addition to the legacy fields.
+        """
+        self.validate()
+        payload: dict[str, object] = {
+            "case_id": self.case_id,
+            "mutation_kind": self.mutation_kind,
+            "target_id": self.target_id,
+            "manifest_field": self.manifest_field,
+        }
+        if self.mutation_kind == IGNORED_EVIDENCE_MISATTRIBUTED_TO_PAGE_SPEC:
+            payload["page_spec_entity_id"] = self.page_spec_entity_id
+            payload["page_spec_field_name"] = self.page_spec_field_name
+        return payload
 
     def sha256(self) -> str:
-        self.validate()
-        return canonical_sha256(asdict(self))
+        return canonical_sha256(self.to_payload())
 
 
 @dataclass(frozen=True)
@@ -168,13 +208,20 @@ def build_fault_copy(
     request: FaultMutationRequest,
     source: PageSpec | InspectorFactSet | RenderResult | ResultPackage | RetrievalEnhancedResultPackage,
     output_dir: Path,
+    *,
+    page_spec: PageSpec | None = None,
+    guided_build_result: GuidedPageSpecBuildResult | None = None,
 ) -> FaultCopyBuildResult:
-    """Create a runtime copy and retain exact provenance only in injector memory."""
+    """Create a generic injector primitive; it does not prove control provenance."""
     request.validate()
     if request.mutation_kind == PAGE_SPEC_COMPONENT_REMOVED:
         plan = _page_spec_plan(request, source)
     elif request.mutation_kind == INSPECTOR_TRACE_RELATION_REMOVED:
         plan = _fact_set_plan(request, source)
+    elif request.mutation_kind == IGNORED_EVIDENCE_MISATTRIBUTED_TO_PAGE_SPEC:
+        plan = _ignored_evidence_misattribution_plan(
+            request, source, page_spec, guided_build_result
+        )
     elif request.mutation_kind == RENDER_COMPONENT_STABLE_ID_TAMPERED:
         plan = _render_plan(request, source)
     elif request.mutation_kind in {PACKAGE_MANIFEST_PATH_TAMPERED, PACKAGE_MANIFEST_SHA256_TAMPERED}:
@@ -196,9 +243,14 @@ def write_fault_copy(
     request: FaultMutationRequest,
     source: PageSpec | InspectorFactSet | RenderResult | ResultPackage | RetrievalEnhancedResultPackage,
     output_dir: Path,
+    *,
+    page_spec: PageSpec | None = None,
+    guided_build_result: GuidedPageSpecBuildResult | None = None,
 ) -> FaultCopyRecord:
-    """Injector convenience API returning only non-detector-ready fragment metadata."""
-    return build_fault_copy(request, source, output_dir).runtime_record
+    """Generic injector convenience API returning blind fragment metadata only."""
+    return build_fault_copy(
+        request, source, output_dir, page_spec=page_spec, guided_build_result=guided_build_result
+    ).runtime_record
 
 
 def write_page_spec_component_removal(*, case_id: str, page_spec: PageSpec, component_id: str, output_dir: Path) -> FaultCopyRecord:
@@ -207,6 +259,34 @@ def write_page_spec_component_removal(*, case_id: str, page_spec: PageSpec, comp
 
 def write_inspector_trace_relation_removal(*, case_id: str, fact_set: InspectorFactSet, trace_link_id: str, output_dir: Path) -> FaultCopyRecord:
     return write_fault_copy(FaultMutationRequest(case_id, INSPECTOR_TRACE_RELATION_REMOVED, trace_link_id), fact_set, output_dir)
+
+
+def write_inspector_ignored_evidence_misattribution(
+    *,
+    case_id: str,
+    fact_set: InspectorFactSet,
+    page_spec: PageSpec,
+    guided_build_result: GuidedPageSpecBuildResult,
+    source_ref_id: str,
+    page_spec_entity_id: str,
+    page_spec_field_name: str,
+    output_dir: Path,
+) -> FaultCopyRecord:
+    """Low-level injector primitive; it does not prove negative-control provenance."""
+    request = FaultMutationRequest(
+        case_id,
+        IGNORED_EVIDENCE_MISATTRIBUTED_TO_PAGE_SPEC,
+        source_ref_id,
+        page_spec_entity_id=page_spec_entity_id,
+        page_spec_field_name=page_spec_field_name,
+    )
+    return write_fault_copy(
+        request,
+        fact_set,
+        output_dir,
+        page_spec=page_spec,
+        guided_build_result=guided_build_result,
+    )
 
 
 def write_render_stable_id_binding_tamper(*, case_id: str, render_result: RenderResult, component_id: str, output_dir: Path) -> FaultCopyRecord:
@@ -253,6 +333,123 @@ def _fact_set_plan(request: FaultMutationRequest, source: object) -> dict[str, A
     mutated_files = {"inspector_fact_set_fault.json": canonical_json_bytes(mutated_payload)}
     changed = "trace_links[trace_link_id=" + request.target_id + "] and linked facts[].trace_link_ids"
     return _plan(request, source.fact_set_id, changed, source_files, mutated_files)
+
+
+def _ignored_evidence_misattribution_plan(
+    request: FaultMutationRequest,
+    source: object,
+    page_spec: PageSpec | None,
+    guided_build_result: GuidedPageSpecBuildResult | None,
+) -> dict[str, Any]:
+    """Create exactly one forged Inspector trace for one ignored retrieval decision.
+
+    The request details remain only in the in-memory build result and injector
+    audit. The copied runtime fragment contains a canonical InspectorFactSet,
+    not a control label, gold label, or mutation descriptor.
+    """
+    if not isinstance(source, InspectorFactSet):
+        raise FaultMutationError("ignored-evidence misattribution requires an InspectorFactSet source")
+    if not isinstance(page_spec, PageSpec):
+        raise FaultMutationError("ignored-evidence misattribution requires the matching PageSpec")
+    if not isinstance(guided_build_result, GuidedPageSpecBuildResult):
+        raise FaultMutationError("ignored-evidence misattribution requires the matching guided build result")
+    try:
+        source.validate()
+        page_spec.validate()
+        guided_build_result.validate()
+    except (TypeError, ValueError) as error:
+        raise FaultMutationError("misattribution inputs did not pass their canonical bindings") from error
+    if page_spec.page_id != source.page_id or canonical_sha256(page_spec.to_dict()) != source.page_spec_sha256:
+        raise FaultMutationError("PageSpec does not match the InspectorFactSet binding")
+    if (
+        guided_build_result.build_result_id != source.guided_build_result_id
+        or canonical_sha256(guided_build_result.to_dict()) != source.guided_build_result_sha256
+        or guided_build_result.page_spec.to_dict() != page_spec.to_dict()
+    ):
+        raise FaultMutationError("guided build result does not match the InspectorFactSet binding")
+    sources_by_id = {item.source_ref_id: item for item in source.source_refs}
+    decision_source = sources_by_id.get(request.target_id)
+    if (
+        decision_source is None
+        or decision_source.source_kind != "guided_retrieval"
+        or decision_source.guidance_id is None
+        or decision_source.doc_id is None
+    ):
+        raise FaultMutationError("requested ignored evidence source is not a real guided retrieval source")
+    matching_facts = [
+        item
+        for item in source.facts
+        if item.source_ref_id == request.target_id and item.disposition == "ignored"
+    ]
+    if len(matching_facts) != 1:
+        raise FaultMutationError("requested ignored evidence source must have exactly one ignored fact")
+    fact = matching_facts[0]
+    if fact.trace_link_ids:
+        raise FaultMutationError("ignored evidence fact must not already have trace links")
+    matching_decisions = [
+        item for item in guided_build_result.ignored if item.decision_id == fact.decision_id
+    ]
+    if len(matching_decisions) != 1:
+        raise FaultMutationError("ignored Inspector fact does not bind one ignored GuidanceDecision")
+    decision = matching_decisions[0]
+    if (
+        decision.source_kind != "retrieval_guidance"
+        or decision.guidance_id != decision_source.guidance_id
+        or decision.doc_id != decision_source.doc_id
+        or decision.affected_fields
+    ):
+        raise FaultMutationError("ignored GuidanceDecision does not prove an empty retrieval decision")
+    assert request.page_spec_entity_id is not None
+    assert request.page_spec_field_name is not None
+    try:
+        field_path = page_spec_field_path(
+            page_spec, request.page_spec_entity_id, request.page_spec_field_name
+        )
+    except (TypeError, ValueError) as error:
+        raise FaultMutationError("requested PageSpec entity/field target is not real") from error
+    forged = InspectorTraceLink(
+        trace_link_id="",
+        decision_id=fact.decision_id,
+        entity_id=request.page_spec_entity_id,
+        field_path=field_path,
+        source_ref_id=decision_source.source_ref_id,
+    )
+    forged = replace(
+        forged,
+        trace_link_id="inspector-trace-" + canonical_sha256(forged.to_payload())[:20],
+    )
+    forged.validate()
+    updated_fact = replace(
+        fact,
+        fact_id="",
+        trace_link_ids=tuple(sorted((*fact.trace_link_ids, forged.trace_link_id))),
+    )
+    updated_fact = replace(
+        updated_fact,
+        fact_id="inspector-fact-" + canonical_sha256(updated_fact.to_payload())[:20],
+    )
+    updated_fact.validate()
+    facts = tuple(sorted(
+        (updated_fact if item.fact_id == fact.fact_id else item for item in source.facts),
+        key=lambda item: item.fact_id,
+    ))
+    trace_links = tuple(sorted((*source.trace_links, forged), key=lambda item: item.trace_link_id))
+    mutated = replace(source, fact_set_id="", facts=facts, trace_links=trace_links)
+    mutated = replace(
+        mutated,
+        fact_set_id="inspector-fact-set-" + canonical_sha256(mutated.to_payload())[:20],
+    )
+    mutated.validate()
+    source_files = {"inspector_fact_set_fault.json": canonical_json_bytes(source.to_dict())}
+    mutated_files = {"inspector_fact_set_fault.json": canonical_json_bytes(mutated.to_dict())}
+    changed = (
+        "trace_links[trace_link_id=" + forged.trace_link_id
+        + ",source_ref_id=" + decision_source.source_ref_id
+        + ",field_path=" + field_path + "] and "
+        + "facts[decision_id=" + fact.decision_id + "].trace_link_ids"
+    )
+    return _plan(request, source.fact_set_id, changed, source_files, mutated_files)
+
 
 
 def _render_plan(request: FaultMutationRequest, source: object) -> dict[str, Any]:
@@ -437,7 +634,10 @@ def _write_exact_bytes(path: Path, content: bytes) -> None:
 
 
 def _prepare_empty_output_directory(output_dir: Path) -> Path:
-    destination = Path(output_dir).expanduser()
+    raw = Path(output_dir)
+    if any(part in {"", ".", ".."} for part in raw.parts):
+        raise FaultMutationError("output_dir must not contain traversal segments")
+    destination = raw.expanduser()
     _reject_symlink_ancestors(destination)
     if destination.exists():
         if destination.is_symlink() or not destination.is_dir():

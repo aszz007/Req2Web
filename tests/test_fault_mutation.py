@@ -117,6 +117,48 @@ class FaultMutationTest(TestCase):
                 self.assertNotIn(value, text, name)
             self.assertNotIn(request.target_id, text, name)
 
+    def test_request_hash_preserves_legacy_payload_and_binds_misattribution_target(self) -> None:
+        legacy = FaultMutationRequest(
+            "dev-case-hash",
+            "page_spec_component_removed",
+            "component-legacy",
+        )
+        self.assertEqual(
+            legacy.sha256(),
+            "9fa05104712983d2b4904276400107eb5a862fe451b2b304385030b092faa923",
+        )
+        self.assertEqual(
+            legacy.sha256(),
+            canonical_sha256({
+                "case_id": "dev-case-hash",
+                "mutation_kind": "page_spec_component_removed",
+                "target_id": "component-legacy",
+                "manifest_field": None,
+            }),
+        )
+        first = FaultMutationRequest(
+            "dev-case-hash",
+            "ignored_evidence_misattributed_to_page_spec",
+            "inspector-source-example",
+            page_spec_entity_id="page-example",
+            page_spec_field_name="title",
+        )
+        second = FaultMutationRequest(
+            "dev-case-hash",
+            "ignored_evidence_misattributed_to_page_spec",
+            "inspector-source-example",
+            page_spec_entity_id="page-example",
+            page_spec_field_name="summary",
+        )
+        self.assertEqual(
+            set(first.to_payload()),
+            {
+                "case_id", "mutation_kind", "target_id", "manifest_field",
+                "page_spec_entity_id", "page_spec_field_name",
+            },
+        )
+        self.assertNotEqual(first.sha256(), second.sha256())
+
     def test_page_spec_copy_has_only_component_entry_delta_and_preserves_source(self) -> None:
         source = deepcopy(self.page_spec.to_dict())
         component_id = self.page_spec.components[0].component_id

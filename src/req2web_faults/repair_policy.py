@@ -21,6 +21,7 @@ from .detector import (
     PACKAGE_MANIFEST_SHA256_MISMATCH,
     PAGE_SPEC_DANGLING_COMPONENT_REFERENCE,
     INSPECTOR_TRACE_RELATION_INTEGRITY_MISMATCH,
+    IGNORED_EVIDENCE_MISATTRIBUTED_TO_PAGE_SPEC,
     UNCLASSIFIED_FAILURE,
     FaultDetectionReport,
 )
@@ -271,6 +272,7 @@ _REGISTERED_ERROR_CODES = frozenset({
     PACKAGE_MANIFEST_SHA256_MISMATCH,
     PAGE_SPEC_DANGLING_COMPONENT_REFERENCE,
     INSPECTOR_TRACE_RELATION_INTEGRITY_MISMATCH,
+    IGNORED_EVIDENCE_MISATTRIBUTED_TO_PAGE_SPEC,
 })
 
 
@@ -491,6 +493,11 @@ def _frozen_policy_registry() -> RepairPolicyRegistry:
             (),
         ),
         _make_rule(
+            IGNORED_EVIDENCE_MISATTRIBUTED_TO_PAGE_SPEC,
+            "fallback_only",
+            (),
+        ),
+        _make_rule(
             PACKAGE_MANIFEST_PATH_MISMATCH,
             "deterministic_mechanical",
             ("artifact/result_package/package_manifest.json",),
@@ -507,7 +514,7 @@ def _frozen_policy_registry() -> RepairPolicyRegistry:
         ),
     ), key=lambda rule: rule.error_code))
     payload = {
-        "policy_version": "m2-05a-v1",
+        "policy_version": "m2-08a-v1",
         "rules": [rule.to_dict() for rule in rules],
         "schema_version": REPAIR_POLICY_SCHEMA_VERSION,
     }

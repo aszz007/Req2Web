@@ -61,6 +61,7 @@ from req2web_inspector.facts import (
     InspectorInfluenceCheckSummary,
     InspectorSourceRef,
     InspectorTraceLink,
+    page_spec_field_path,
     project_g0_inspector_facts,
 )
 
@@ -89,6 +90,7 @@ FAULT_DETECTION_STATUSES = (
 
 PAGE_SPEC_DANGLING_COMPONENT_REFERENCE = "page_spec_dangling_component_reference"
 INSPECTOR_TRACE_RELATION_INTEGRITY_MISMATCH = "inspector_trace_relation_integrity_mismatch"
+IGNORED_EVIDENCE_MISATTRIBUTED_TO_PAGE_SPEC = "ignored_evidence_misattributed_to_page_spec"
 DOM_COMPONENT_STABLE_ID_MISMATCH = "dom_component_stable_id_mismatch"
 PACKAGE_MANIFEST_PATH_MISMATCH = "package_manifest_path_mismatch"
 PACKAGE_MANIFEST_SHA256_MISMATCH = "package_manifest_sha256_mismatch"
@@ -96,6 +98,7 @@ PACKAGE_MANIFEST_SHA256_MISMATCH = "package_manifest_sha256_mismatch"
 _CLASSIFIED_ERROR_STAGES = {
     PAGE_SPEC_DANGLING_COMPONENT_REFERENCE: "page_spec",
     INSPECTOR_TRACE_RELATION_INTEGRITY_MISMATCH: "guidance/adoption",
+    IGNORED_EVIDENCE_MISATTRIBUTED_TO_PAGE_SPEC: "guidance/adoption",
     DOM_COMPONENT_STABLE_ID_MISMATCH: "render_binding",
     PACKAGE_MANIFEST_PATH_MISMATCH: "package",
     PACKAGE_MANIFEST_SHA256_MISMATCH: "package",
@@ -711,23 +714,63 @@ def _inspect_inspector(
                 actual={"trace_relation": "missing_from_fact_and_trace_links"},
             )
         else:
-            diagnostics.append(_make_diagnostic(
-                "inspector_expected_projection_mismatch",
-                related_identifiers=(fact_set.fact_set_id,),
-                related_paths=(
-                    path,
-                    "artifact/result_package/internal/guided_page_spec_build_result.json",
-                ),
-                expected={
-                    "inspector_fact_set": "exact G0 projection or one missing expected relation"
-                },
-                actual={
-                    "mismatched_fields": _inspector_mismatched_fields(
-                        fact_set,
-                        expected_fact_set,
-                    )
-                },
-            ))
+            misattribution = _exact_single_ignored_evidence_misattribution(
+                fact_set, expected_fact_set, files
+            )
+            if misattribution is not None:
+                forged_link, expected_fact, source = misattribution
+                related = {
+                    fact_set.fact_set_id,
+                    expected_fact.fact_id,
+                    expected_fact.decision_id,
+                    forged_link.trace_link_id,
+                    forged_link.entity_id,
+                    forged_link.source_ref_id,
+                }
+                if source.doc_id:
+                    related.add(source.doc_id)
+                finding = _make_finding(
+                    "guidance/adoption",
+                    IGNORED_EVIDENCE_MISATTRIBUTED_TO_PAGE_SPEC,
+                    related_identifiers=tuple(sorted(related)),
+                    related_paths=(
+                        path,
+                        "artifact/result_package/internal/guided_page_spec_build_result.json",
+                        "artifact/result_package/internal/retrieval_guidance.json",
+                        "artifact/result_package/internal/page_spec.json",
+                        "artifact/result_package/internal/retrieval_influence_report.json",
+                    ),
+                    expected={
+                        "decision_id": expected_fact.decision_id,
+                        "disposition": "ignored",
+                        "trace_link_count": 0,
+                    },
+                    actual={
+                        "entity_id": forged_link.entity_id,
+                        "field_path": forged_link.field_path,
+                        "source_ref_id": forged_link.source_ref_id,
+                        "trace_link_id": forged_link.trace_link_id,
+                        "trace_link_count": 1,
+                    },
+                )
+            else:
+                diagnostics.append(_make_diagnostic(
+                    "inspector_expected_projection_mismatch",
+                    related_identifiers=(fact_set.fact_set_id,),
+                    related_paths=(
+                        path,
+                        "artifact/result_package/internal/guided_page_spec_build_result.json",
+                    ),
+                    expected={
+                        "inspector_fact_set": "exact G0 projection, one missing expected relation, or one ignored-evidence extra relation"
+                    },
+                    actual={
+                        "mismatched_fields": _inspector_mismatched_fields(
+                            fact_set,
+                            expected_fact_set,
+                        )
+                    },
+                ))
 
     try:
         fact_set.validate()
@@ -839,6 +882,172 @@ def _exact_single_missing_inspector_relation(
     except InspectorFactError:
         return None
     return expected_links[missing_id]
+
+
+def _exact_single_ignored_evidence_misattribution(
+    actual: InspectorFactSet,
+    expected: InspectorFactSet,
+    files: Mapping[str, bytes],
+) -> tuple[InspectorTraceLink, InspectorFact, InspectorSourceRef] | None:
+    """Recognize only one canonical forged link on one ignored retrieval decision.
+
+    The check reconstructs the G0 expected projection from the detector-visible
+    v2 internals. It never reads an M2 negative-control sidecar, injector audit,
+    or evaluator gold. Any additional delta, invalid identity, or ambiguous link
+    shape returns ``None`` so the caller reports an unclassified failure.
+    """
+    try:
+        actual.validate()
+    except InspectorFactError:
+        return None
+    for field_name in (
+        "run_group",
+        "page_id",
+        "guidance_bundle_id",
+        "guided_build_result_id",
+        "retrieval_influence_report_id",
+        "guidance_sha256",
+        "guided_build_result_sha256",
+        "page_spec_sha256",
+        "retrieval_influence_report_sha256",
+        "retrieval_influence_report_passed",
+        "influence_checks",
+        "source_refs",
+        "schema_version",
+    ):
+        if getattr(actual, field_name) != getattr(expected, field_name):
+            return None
+    expected_links = {item.trace_link_id: item for item in expected.trace_links}
+    actual_links = {item.trace_link_id: item for item in actual.trace_links}
+    extra_ids = set(actual_links) - set(expected_links)
+    if len(extra_ids) != 1 or set(expected_links) - set(actual_links):
+        return None
+    if any(actual_links[link_id] != expected_links[link_id] for link_id in expected_links):
+        return None
+    extra_link = actual_links[next(iter(extra_ids))]
+    expected_facts = {item.decision_id: item for item in expected.facts}
+    actual_facts = {item.decision_id: item for item in actual.facts}
+    if len(expected_facts) != len(expected.facts) or len(actual_facts) != len(actual.facts):
+        return None
+    if set(actual_facts) != set(expected_facts):
+        return None
+    expected_fact = expected_facts.get(extra_link.decision_id)
+    actual_fact = actual_facts.get(extra_link.decision_id)
+    if expected_fact is None or actual_fact is None:
+        return None
+    if (
+        expected_fact.disposition != "ignored"
+        or actual_fact.disposition != "ignored"
+        or expected_fact.trace_link_ids
+        or extra_link.source_ref_id != expected_fact.source_ref_id
+        or extra_link.source_ref_id != actual_fact.source_ref_id
+        or extra_link.decision_id != actual_fact.decision_id
+    ):
+        return None
+    if set(actual_fact.trace_link_ids) - set(expected_fact.trace_link_ids) != {extra_link.trace_link_id}:
+        return None
+    if set(expected_fact.trace_link_ids) - set(actual_fact.trace_link_ids):
+        return None
+    if replace(
+        actual_fact,
+        fact_id=expected_fact.fact_id,
+        trace_link_ids=expected_fact.trace_link_ids,
+    ) != expected_fact:
+        return None
+    for decision_id, expected_item in expected_facts.items():
+        if decision_id == expected_fact.decision_id:
+            continue
+        if actual_facts[decision_id] != expected_item:
+            return None
+    expected_sources = {item.source_ref_id: item for item in expected.source_refs}
+    source = expected_sources.get(extra_link.source_ref_id)
+    if (
+        source is None
+        or source.source_kind != "guided_retrieval"
+        or source.guidance_id is None
+        or source.doc_id is None
+    ):
+        return None
+    try:
+        guided_payload = _load_json_object(
+            files["artifact/result_package/internal/guided_page_spec_build_result.json"],
+            "artifact/result_package/internal/guided_page_spec_build_result.json",
+        )
+        page_payload = _load_json_object(
+            files["artifact/result_package/internal/page_spec.json"],
+            "artifact/result_package/internal/page_spec.json",
+        )
+        guided = _guided_build_result_from_payload(guided_payload)
+        page_spec = _page_spec_from_payload(page_payload)
+    except (KeyError, TypeError, ValueError):
+        return None
+    matching_decisions = [
+        item for item in guided.ignored if item.decision_id == expected_fact.decision_id
+    ]
+    if len(matching_decisions) != 1:
+        return None
+    decision = matching_decisions[0]
+    if (
+        decision.source_kind != "retrieval_guidance"
+        or decision.guidance_id != source.guidance_id
+        or decision.doc_id != source.doc_id
+        or decision.affected_fields
+    ):
+        return None
+    if not _is_real_page_spec_field_target(page_spec, extra_link):
+        return None
+    candidate = replace(
+        actual,
+        fact_set_id=expected.fact_set_id,
+        trace_links=expected.trace_links,
+        facts=expected.facts,
+    )
+    if candidate != expected:
+        return None
+    try:
+        candidate.validate()
+    except InspectorFactError:
+        return None
+    return extra_link, expected_fact, source
+
+
+def _is_real_page_spec_field_target(
+    page_spec: PageSpec,
+    trace_link: InspectorTraceLink,
+) -> bool:
+    """Check the frozen Inspector field-path grammar without semantic matching."""
+    if trace_link.entity_id == page_spec.page_id:
+        prefix = "page."
+        field_name = trace_link.field_path.removeprefix(prefix)
+        if not field_name or not trace_link.field_path.startswith(prefix):
+            return False
+    else:
+        collections = (
+            ("section", page_spec.sections, "section_id"),
+            ("component", page_spec.components, "component_id"),
+            ("state", page_spec.states, "state_id"),
+            ("interaction", page_spec.interactions, "interaction_id"),
+            ("constraint", page_spec.constraints, "constraint_id"),
+            ("acceptance_check", page_spec.acceptance_checks, "check_id"),
+        )
+        prefix = None
+        for kind, values, id_field in collections:
+            if any(getattr(item, id_field) == trace_link.entity_id for item in values):
+                prefix = f"{kind}[{trace_link.entity_id}]."
+                break
+        if prefix is None or not trace_link.field_path.startswith(prefix):
+            return False
+        field_name = trace_link.field_path.removeprefix(prefix)
+        if not field_name:
+            return False
+    try:
+        return (
+            page_spec_field_path(page_spec, trace_link.entity_id, field_name)
+            == trace_link.field_path
+        )
+    except (TypeError, ValueError):
+        return False
+
 
 
 def _inspector_mismatched_fields(

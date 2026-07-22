@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 import shutil
 import sys
+import uuid
 from unittest import TestCase
 from unittest.mock import patch
 
@@ -74,8 +75,9 @@ def canonical_json_bytes(value: object) -> bytes:
 class FaultDetectorTest(TestCase):
     @classmethod
     def setUpClass(cls) -> None:
-        cls.root = ROOT / "tests" / ".tmp_fault_detector"
-        shutil.rmtree(cls.root, ignore_errors=True)
+        cls.root = (
+            ROOT / "tests" / ".tmp_fault_detector" / ("run-" + uuid.uuid4().hex)
+        )
         cls.root.mkdir(parents=True)
         cls.context = build_context()
         cls.view = project_requirement_view(cls.context)
