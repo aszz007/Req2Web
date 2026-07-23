@@ -900,6 +900,21 @@ class TierA07bOneRepairTests(unittest.TestCase):
             with self.assertRaises(TierA07bGateDeliveryOutcomeError):
                 outcome.validate_against(**valid_args)
 
+    def test_fallback_binding_case_must_match_outcome_case_in_all_entry_points(self):
+        outcome, _ = self.run_route("fallback-case", repair_patch=self.repair_patch(value="still invalid"))
+        self.assertEqual(outcome.status, "fallback_delivery")
+        payload = deepcopy(outcome.to_dict())
+        payload["case_id"] = "case-tier-a-07b-other"
+        payload = self.resign_outcome(payload)
+        direct = TierA07bGateDeliveryOutcome(**payload)
+        with self.assertRaises(TierA07bGateDeliveryOutcomeError):
+            direct.validate()
+        with self.assertRaises(TierA07bGateDeliveryOutcomeError):
+            TierA07bGateDeliveryOutcome.from_dict(payload)
+        raw = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+        with self.assertRaises(TierA07bGateDeliveryOutcomeError):
+            TierA07bGateDeliveryOutcome.from_bytes(raw)
+
     def test_state_matrix_rejects_package_role_and_nested_binding_forgery(self):
         success, success_args = self.run_route("matrix-success")
         fallback, _ = self.run_route(

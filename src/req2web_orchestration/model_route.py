@@ -13,6 +13,7 @@ from collections import Counter
 from copy import deepcopy
 from dataclasses import dataclass
 import hashlib
+from importlib import import_module as _import_module
 import json
 import re
 from shutil import rmtree as _stdlib_rmtree
@@ -75,7 +76,11 @@ from req2web_generation.result_package_v2 import RESULT_PACKAGE_V2_SCHEMA_VERSIO
 from req2web_generation.schema import PAGE_SPEC_SCHEMA_VERSION, PageSpec
 from req2web_provider.d17_audit import D17Path3TierAPreInvocationAuditRecord
 from req2web_provider.d17_input_view import D17Path3SelectedInput
-from req2web_provider.d17_manifest import D17Path3TierAManifest
+from req2web_provider.d17_manifest import (
+    D17_PATH3_TIER_A_FIELD_POLICY_IDENTITY,
+    D17Path3FieldPolicy,
+    D17Path3TierAManifest,
+)
 from req2web_provider.d17_serializer import D17Path3LocalRequestArtifact
 from req2web_provider.local_qwen_provider import (
     LocalQwenProviderInvocationBlockedError,
@@ -89,6 +94,10 @@ from req2web_provider.semantic_candidate import (
     ProviderRawResponse,
     parse_provider_raw_response,
 )
+
+_FIXED_08_QWEN_PROFILE_TYPE = _import_module(
+    "req2web_runtime.qwen_profile"
+).QwenProfilePlaceholder
 
 
 MODEL_ROUTE_OUTCOME_SCHEMA_VERSION = "req2web.orchestration.tier_a_model_route_outcome.v1"
@@ -5882,6 +5891,7 @@ class TierA07bGateDeliveryOutcome:
             self.model_route_binding, _keys=_model_binding_keys
         )
         g0 = _all_or_none(self.g0_binding, _g0_binding_keys); fallback = _all_or_none(self.fallback_binding, _fallback_binding_keys); first = _all_or_none(self.first_candidate, _first_keys); repaired = _all_or_none(self.repaired_candidate, _first_keys);
+        if fallback and self.fallback_binding["case_id"] != self.case_id: raise TierA07bGateDeliveryOutcomeError("outcome_state_invalid")
         if first and repaired and (self.first_candidate["page_id"] != self.repaired_candidate["page_id"] or self.first_candidate["traceability_sha256"] != self.repaired_candidate["traceability_sha256"]): raise TierA07bGateDeliveryOutcomeError("outcome_state_invalid")
         report = _all_or_none(self.repair_report, _report_keys, report=True); post = _all_or_none(self.post_repair_gate, _report_keys, report=True); patch = _all_or_none(self.repair_patch, _patch_keys)
         predicted = _scope(self.predicted_repair_scope, "predicted_scope"); policy = _scope(self.policy_allowed_scope, "policy_scope"); effective = _scope(self.effective_repair_scope, "effective_scope")
@@ -6479,3 +6489,533 @@ def _07b_live_first_page_spec(model_route_outcome: object, scripted_local_fixtur
 
 def validate_serialized_tier_a_07b_gate_delivery_outcome(payload: object) -> TierA07bGateDeliveryOutcome:
     return TierA07bGateDeliveryOutcome.from_bytes(payload) if type(payload) is bytes else TierA07bGateDeliveryOutcome.from_dict(payload)
+
+
+# Tier A-08 records only the identities required by step 7 of the approved
+# D17 sequence.  It deliberately has no writer, runner, or cleanup action.
+TIER_A_08_REAL_RUN_BUNDLE_SCHEMA_VERSION = "req2web.orchestration.tier_a_08_real_run_bundle.v1"
+_08_ID_PREFIX = "tier-a-08-real-run-bundle-"
+_08_BINDING_KEYS = ("artifact_id", "sha256", "byte_length")
+_08_D17_KEYS = (
+    "manifest_binding", "field_policy_identity", "field_policy_snapshot_sha256",
+    "complete_local_context_sha256", "selection_record_binding", "input_view_binding",
+    "input_view_artifact_binding", "prompt_artifact_binding", "config_artifact_binding",
+    "local_request_binding", "pre_invocation_audit_binding",
+)
+_08_PROFILE_KEYS = ("profile_placeholder", "profile_sha256")
+_08_PREPARATION_KEYS = ("preparation_record_id", "preparation_record_sha256")
+_08_MODEL_ROUTE_KEYS = (
+    "model_route_binding", "g0_binding", "preparation_record_id",
+    "preparation_record_sha256",
+)
+_08_ROUTE_KEYS = (
+    "route_evidence_kind", "real_run_route_occurred", "outcome_id", "outcome_sha256",
+    "a07b_outcome",
+)
+_08_RUN_FACT_KEYS = (
+    "provider_invocation_state", "provider_response_sha256", "semantic_candidate_state",
+    "semantic_candidate_sha256", "assembled_page_spec_state", "assembled_page_spec_sha256",
+    "resource_state", "resource_summary", "time_state", "elapsed_seconds",
+    "cost_state", "cost",
+)
+_08_CLEANUP_KEYS = (
+    "tier_a_step_8_status", "cleanup_policy_status", "cleanup_receipt_status",
+    "cleanup_action_status",
+)
+_08_KEYS = (
+    "schema_version", "bundle_id", "run_occurred", "external_egress_allowed",
+    "d17_binding", "profile_binding", "preparation_binding", "model_route_record", "gate_delivery_binding",
+    "run_facts", "cleanup_linkage",
+)
+
+
+class TierA08RealRunBundleError(ValueError):
+    """Tier A-08 real-run bundle placeholder validation failed."""
+
+
+def _08_mapping(
+    value: object, keys: tuple[str, ...], _error=TierA08RealRunBundleError
+) -> Mapping[str, object]:
+    if not isinstance(value, Mapping) or set(value) != set(keys):
+        raise _error("bundle_exact_keys_invalid")
+    return value
+
+
+def _08_sha256(value: object, _is_sha256_fn=_is_sha256, _error=TierA08RealRunBundleError) -> str:
+    if not _is_sha256_fn(value):
+        raise _error("bundle_identity_invalid")
+    return value
+
+
+def _08_bool(value: object, _error=TierA08RealRunBundleError) -> bool:
+    if type(value) is not bool:
+        raise _error("bundle_state_invalid")
+    return value
+
+
+def _08_binding(
+    artifact_id: object, canonical: object, _safe_id=_07a_safe_id, _hash=_sha256,
+    _error=TierA08RealRunBundleError,
+) -> dict[str, object]:
+    if not _safe_id(artifact_id) or type(canonical) is not bytes:
+        raise _error("bundle_identity_invalid")
+    return {
+        "artifact_id": artifact_id,
+        "sha256": _hash(canonical),
+        "byte_length": len(canonical),
+    }
+
+
+def _08_validate_binding(
+    value: object, _mapping=_08_mapping, _keys=_08_BINDING_KEYS, _safe_id=_07a_safe_id,
+    _is_sha256_fn=_is_sha256, _error=TierA08RealRunBundleError,
+) -> dict[str, object]:
+    data = _mapping(value, _keys)
+    if (
+        not _safe_id(data["artifact_id"])
+        or not _is_sha256_fn(data["sha256"])
+        or type(data["byte_length"]) is not int
+        or data["byte_length"] < 1
+    ):
+        raise _error("bundle_identity_invalid")
+    return dict(data)
+
+
+def _08_profile_projection(
+    profile: object,
+    _profile_type=_FIXED_08_QWEN_PROFILE_TYPE,
+    _profile_validator=_FIXED_08_QWEN_PROFILE_TYPE.validate,
+    _profile_bytes=_FIXED_08_QWEN_PROFILE_TYPE.canonical_bytes,
+    _profile_from_bytes=_FIXED_08_QWEN_PROFILE_TYPE.from_bytes,
+    _hash=_sha256,
+    _error=TierA08RealRunBundleError,
+) -> dict[str, object]:
+    """Capture the exact definition-time Qwen placeholder authority."""
+    if type(profile) is not _profile_type:
+        raise _error("bundle_profile_invalid")
+    try:
+        _profile_validator(profile)
+        canonical = _profile_bytes(profile)
+        rebuilt = _profile_from_bytes(canonical)
+    except Exception as exc:
+        raise _error("bundle_profile_invalid") from exc
+    if rebuilt.to_dict() != profile.to_dict():
+        raise _error("bundle_profile_invalid")
+    return {"profile_placeholder": rebuilt.to_dict(), "profile_sha256": _hash(canonical)}
+
+
+def _08_route_binding(
+    outcome: TierA07bGateDeliveryOutcome,
+    _outcome_type=TierA07bGateDeliveryOutcome,
+    _outcome_validate=TierA07bGateDeliveryOutcome.validate,
+    _outcome_bytes=TierA07bGateDeliveryOutcome.canonical_bytes,
+    _hash=_sha256,
+    _error=TierA08RealRunBundleError,
+) -> dict[str, object]:
+    if type(outcome) is not _outcome_type:
+        raise _error("bundle_route_invalid")
+    _outcome_validate(outcome)
+    canonical = _outcome_bytes(outcome)
+    return {
+        "route_evidence_kind": "tier_a_07b_local_synthetic_fixture",
+        "real_run_route_occurred": False,
+        "outcome_id": outcome.outcome_id,
+        "outcome_sha256": _hash(canonical),
+        "a07b_outcome": outcome.to_dict(),
+    }
+
+
+def _08_validate_route(
+    value: object,
+    _outcome_type=TierA07bGateDeliveryOutcome,
+    _outcome_from_dict=TierA07bGateDeliveryOutcome.from_dict,
+    _outcome_validate=TierA07bGateDeliveryOutcome.validate,
+    _outcome_bytes=TierA07bGateDeliveryOutcome.canonical_bytes,
+    _mapping=_08_mapping,
+    _keys=_08_ROUTE_KEYS,
+    _safe_id=_07a_safe_id,
+    _is_sha256_fn=_is_sha256,
+    _hash=_sha256,
+    _error=TierA08RealRunBundleError,
+) -> dict[str, object]:
+    data = dict(_mapping(value, _keys))
+    if (
+        data["route_evidence_kind"] != "tier_a_07b_local_synthetic_fixture"
+        or data["real_run_route_occurred"] is not False
+        or not _safe_id(data["outcome_id"])
+        or not _is_sha256_fn(data["outcome_sha256"])
+    ):
+        raise _error("bundle_route_invalid")
+    try:
+        outcome = _outcome_from_dict(data["a07b_outcome"])
+        if type(outcome) is not _outcome_type:
+            raise TypeError("outcome type")
+        _outcome_validate(outcome)
+        canonical = _outcome_bytes(outcome)
+    except Exception as exc:
+        raise _error("bundle_route_invalid") from exc
+    if data["outcome_id"] != outcome.outcome_id or data["outcome_sha256"] != _hash(canonical):
+        raise _error("bundle_route_invalid")
+    return data
+
+
+@dataclass(frozen=True)
+class TierA08RealRunBundlePlaceholder:
+    """Replayable Step-7 structure; it records no Provider/model execution."""
+
+    schema_version: str
+    bundle_id: str
+    run_occurred: bool
+    external_egress_allowed: bool
+    d17_binding: Mapping[str, object]
+    profile_binding: Mapping[str, object]
+    preparation_binding: Mapping[str, object]
+    model_route_record: Mapping[str, object]
+    gate_delivery_binding: Mapping[str, object]
+    run_facts: Mapping[str, object]
+    cleanup_linkage: Mapping[str, object]
+
+    @classmethod
+    def create(
+        cls,
+        context: AgentContextBundle,
+        manifest: D17Path3TierAManifest,
+        selected: D17Path3SelectedInput,
+        local_request: D17Path3LocalRequestArtifact,
+        pre_invocation_audit: D17Path3TierAPreInvocationAuditRecord,
+        local_qwen_preparation: LocalQwenProviderPreparationRecord,
+        profile: object,
+        model_route_outcome: ModelRouteOutcome,
+        gate_delivery_outcome: TierA07bGateDeliveryOutcome,
+        _preparation_type=LocalQwenProviderPreparationRecord,
+        _model_type=ModelRouteOutcome,
+        _model_validate=ModelRouteOutcome.validate,
+        _model_binding=_07a_model_route_binding,
+        _g0_binding=_07a_g0_binding,
+        _outcome_type=TierA07bGateDeliveryOutcome,
+        _profile_projection=_08_profile_projection,
+        _route_projection=_08_route_binding,
+        _binding=_08_binding,
+        _preparation_validate=LocalQwenProviderPreparationRecord.validate_against,
+        _outcome_validate=TierA07bGateDeliveryOutcome.validate,
+        _model_bytes=ModelRouteOutcome.canonical_bytes,
+        _schema=TIER_A_08_REAL_RUN_BUNDLE_SCHEMA_VERSION,
+        _id_prefix=_08_ID_PREFIX,
+        _canonical=_canonical_json_bytes,
+        _hash=_sha256,
+        _error=TierA08RealRunBundleError,
+    ) -> "TierA08RealRunBundlePlaceholder":
+        if type(local_qwen_preparation) is not _preparation_type:
+            raise _error("bundle_preparation_invalid")
+        if type(model_route_outcome) is not _model_type or type(gate_delivery_outcome) is not _outcome_type:
+            raise _error("bundle_type_invalid")
+        try:
+            _preparation_validate(local_qwen_preparation,
+                context, manifest, selected, local_request, pre_invocation_audit
+            )
+            _model_validate(model_route_outcome)
+            _outcome_validate(gate_delivery_outcome)
+            if (
+                dict(gate_delivery_outcome.model_route_binding)
+                != _model_binding(model_route_outcome)
+                or dict(gate_delivery_outcome.g0_binding)
+                != _g0_binding(model_route_outcome.frozen_g0_reference)
+                or type(model_route_outcome.local_qwen_preparation) is not _preparation_type
+                or model_route_outcome.local_qwen_preparation.canonical_bytes()
+                != local_qwen_preparation.canonical_bytes()
+            ):
+                raise ValueError("model route chain mismatch")
+        except Exception as exc:
+            raise _error("bundle_live_binding_invalid") from exc
+        d17 = {
+            "manifest_binding": _binding(manifest.manifest_id, manifest.canonical_bytes()),
+            "field_policy_identity": manifest.field_policy.policy_identity,
+            "field_policy_snapshot_sha256": manifest.field_policy.approved_snapshot_sha256(),
+            "complete_local_context_sha256": selected.selection_record.local_context_sha256,
+            "selection_record_binding": _binding(
+                selected.selection_record.selection_record_id, selected.selection_record.canonical_bytes()
+            ),
+            "input_view_binding": _binding(
+                selected.selection_record.input_view_id, selected.provider_visible_input.canonical_bytes()
+            ),
+            "input_view_artifact_binding": _binding(
+                local_request.input_view_artifact.artifact_id,
+                local_request.input_view_artifact.canonical_bytes(),
+            ),
+            "prompt_artifact_binding": _binding(
+                local_request.prompt_artifact.artifact_id, local_request.prompt_artifact.canonical_bytes()
+            ),
+            "config_artifact_binding": _binding(
+                local_request.config_artifact.artifact_id, local_request.config_artifact.canonical_bytes()
+            ),
+            "local_request_binding": _binding(
+                local_request.artifact_id, local_request.canonical_bytes()
+            ),
+            "pre_invocation_audit_binding": _binding(
+                pre_invocation_audit.audit_record_id, pre_invocation_audit.canonical_bytes()
+            ),
+        }
+        root = {
+            "schema_version": _schema,
+            "run_occurred": False,
+            "external_egress_allowed": False,
+            "d17_binding": d17,
+            "profile_binding": _profile_projection(profile),
+            "preparation_binding": {
+                "preparation_record_id": local_qwen_preparation.preparation_record_id,
+                "preparation_record_sha256": local_qwen_preparation.sha256(),
+            },
+            "model_route_record": {
+                "model_route_binding": _model_binding(model_route_outcome),
+                "g0_binding": _g0_binding(model_route_outcome.frozen_g0_reference),
+                "preparation_record_id": local_qwen_preparation.preparation_record_id,
+                "preparation_record_sha256": local_qwen_preparation.sha256(),
+            },
+            "gate_delivery_binding": _route_projection(gate_delivery_outcome),
+            "run_facts": {
+                "provider_invocation_state": "not_run", "provider_response_sha256": None,
+                "semantic_candidate_state": "not_run", "semantic_candidate_sha256": None,
+                "assembled_page_spec_state": "not_run", "assembled_page_spec_sha256": None,
+                "resource_state": "not_run", "resource_summary": None,
+                "time_state": "not_run", "elapsed_seconds": None,
+                "cost_state": "not_run", "cost": None,
+            },
+            "cleanup_linkage": {
+                "tier_a_step_8_status": "not_implemented",
+                "cleanup_policy_status": "not_created",
+                "cleanup_receipt_status": "not_created",
+                "cleanup_action_status": "not_executed",
+            },
+        }
+        bundle = cls(bundle_id=_id_prefix + _hash(_canonical(root))[:20], **root)
+        bundle.validate()
+        return bundle
+
+    @classmethod
+    def from_dict(
+        cls, payload: object, _mapping=_08_mapping, _keys=_08_KEYS, _bool_fn=_08_bool,
+        _d17_keys=_08_D17_KEYS, _profile_keys=_08_PROFILE_KEYS,
+        _preparation_keys=_08_PREPARATION_KEYS, _model_keys=_08_MODEL_ROUTE_KEYS,
+        _run_keys=_08_RUN_FACT_KEYS, _cleanup_keys=_08_CLEANUP_KEYS,
+        _route_validator=_08_validate_route,
+    ) -> "TierA08RealRunBundlePlaceholder":
+        data = _mapping(payload, _keys)
+        result = cls(
+            schema_version=data["schema_version"], bundle_id=data["bundle_id"],
+            run_occurred=_bool_fn(data["run_occurred"]),
+            external_egress_allowed=_bool_fn(data["external_egress_allowed"]),
+            d17_binding=dict(_mapping(data["d17_binding"], _d17_keys)),
+            profile_binding=dict(_mapping(data["profile_binding"], _profile_keys)),
+            preparation_binding=dict(_mapping(data["preparation_binding"], _preparation_keys)),
+            model_route_record=dict(_mapping(data["model_route_record"], _model_keys)),
+            gate_delivery_binding=_route_validator(data["gate_delivery_binding"]),
+            run_facts=dict(_mapping(data["run_facts"], _run_keys)),
+            cleanup_linkage=dict(_mapping(data["cleanup_linkage"], _cleanup_keys)),
+        )
+        result.validate()
+        return result
+
+    @classmethod
+    def from_bytes(
+        cls,
+        raw: object,
+        _loads=json.loads,
+        _decode_error=json.JSONDecodeError,
+        _canonical=_canonical_json_bytes,
+        _error=TierA08RealRunBundleError,
+    ) -> "TierA08RealRunBundlePlaceholder":
+        if type(raw) is not bytes:
+            raise _error("bundle_bytes_invalid")
+        try:
+            parsed = _loads(raw.decode("utf-8"))
+        except (UnicodeDecodeError, _decode_error) as exc:
+            raise _error("bundle_bytes_invalid") from exc
+        result = cls.from_dict(parsed)
+        if _canonical(result.to_dict()) != raw:
+            raise _error("bundle_bytes_noncanonical")
+        return result
+
+    def _root(self) -> dict[str, object]:
+        return {
+            "schema_version": self.schema_version, "run_occurred": self.run_occurred,
+            "external_egress_allowed": self.external_egress_allowed,
+            "d17_binding": dict(self.d17_binding),
+            "profile_binding": dict(self.profile_binding),
+            "preparation_binding": dict(self.preparation_binding),
+            "model_route_record": dict(self.model_route_record),
+            "gate_delivery_binding": dict(self.gate_delivery_binding),
+            "run_facts": dict(self.run_facts), "cleanup_linkage": dict(self.cleanup_linkage),
+        }
+
+    def validate(
+        self,
+        _mapping=_08_mapping,
+        _binding_validator=_08_validate_binding,
+        _route_validator=_08_validate_route,
+        _profile_type=_FIXED_08_QWEN_PROFILE_TYPE,
+        _profile_from_dict=_FIXED_08_QWEN_PROFILE_TYPE.from_dict,
+        _profile_bytes=_FIXED_08_QWEN_PROFILE_TYPE.canonical_bytes,
+        _outcome_from_dict=TierA07bGateDeliveryOutcome.from_dict,
+        _policy_identity=D17_PATH3_TIER_A_FIELD_POLICY_IDENTITY,
+        _policy_sha256=D17Path3FieldPolicy.approved_snapshot_sha256,
+        _schema=TIER_A_08_REAL_RUN_BUNDLE_SCHEMA_VERSION,
+        _id_prefix=_08_ID_PREFIX,
+        _d17_keys=_08_D17_KEYS,
+        _profile_keys=_08_PROFILE_KEYS,
+        _preparation_keys=_08_PREPARATION_KEYS,
+        _model_keys=_08_MODEL_ROUTE_KEYS,
+        _run_keys=_08_RUN_FACT_KEYS,
+        _cleanup_keys=_08_CLEANUP_KEYS,
+        _model_route_binding_keys=_07A_MODEL_ROUTE_BINDING_KEYS,
+        _g0_binding_keys=_07A_G0_BINDING_KEYS,
+        _safe_id=_07a_safe_id,
+        _is_sha256_fn=_is_sha256,
+        _canonical=_canonical_json_bytes,
+        _hash=_sha256,
+        _error=TierA08RealRunBundleError,
+    ) -> None:
+        if (
+            self.schema_version != _schema
+            or self.run_occurred is not False
+            or self.external_egress_allowed is not False
+        ):
+            raise _error("bundle_state_invalid")
+        d17 = _mapping(self.d17_binding, _d17_keys)
+        for key in (
+            "manifest_binding", "selection_record_binding", "input_view_binding",
+            "input_view_artifact_binding", "prompt_artifact_binding", "config_artifact_binding",
+            "local_request_binding", "pre_invocation_audit_binding",
+        ):
+            _binding_validator(d17[key])
+        if (
+            d17["field_policy_identity"] != _policy_identity
+            or d17["field_policy_snapshot_sha256"] != _policy_sha256()
+            or not _is_sha256_fn(d17["complete_local_context_sha256"])
+        ):
+            raise _error("bundle_identity_invalid")
+        profile = _mapping(self.profile_binding, _profile_keys)
+        preparation = _mapping(self.preparation_binding, _preparation_keys)
+        if (
+            not _is_sha256_fn(profile["profile_sha256"])
+            or not _safe_id(preparation["preparation_record_id"])
+            or not _is_sha256_fn(preparation["preparation_record_sha256"])
+        ):
+            raise _error("bundle_identity_invalid")
+        try:
+            saved_profile = _profile_from_dict(profile["profile_placeholder"])
+            if (
+                type(saved_profile) is not _profile_type
+                or _profile_bytes(saved_profile) != _canonical(profile["profile_placeholder"])
+                or profile["profile_sha256"] != _hash(_profile_bytes(saved_profile))
+            ):
+                raise ValueError("profile binding mismatch")
+        except Exception as exc:
+            raise _error("bundle_identity_invalid") from exc
+        model_record = _mapping(self.model_route_record, _model_keys)
+        try:
+            saved_route_binding = _mapping(model_record["model_route_binding"], _model_route_binding_keys)
+            saved_g0_binding = _mapping(model_record["g0_binding"], _g0_binding_keys)
+            if (
+                not _safe_id(model_record["preparation_record_id"])
+                or not _is_sha256_fn(model_record["preparation_record_sha256"])
+            ):
+                raise ValueError("model record mismatch")
+            route = _route_validator(self.gate_delivery_binding)
+            saved_outcome = _outcome_from_dict(route["a07b_outcome"])
+            if (
+                dict(saved_outcome.model_route_binding) != dict(saved_route_binding)
+                or dict(saved_outcome.g0_binding) != dict(saved_g0_binding)
+                or model_record["preparation_record_id"] != preparation["preparation_record_id"]
+                or model_record["preparation_record_sha256"] != preparation["preparation_record_sha256"]
+            ):
+                raise ValueError("route chain mismatch")
+        except Exception as exc:
+            raise _error("bundle_route_invalid") from exc
+        facts = _mapping(self.run_facts, _run_keys)
+        for state in (
+            "provider_invocation_state", "semantic_candidate_state", "assembled_page_spec_state",
+            "resource_state", "time_state", "cost_state",
+        ):
+            if facts[state] != "not_run":
+                raise _error("bundle_state_invalid")
+        if any(
+            facts[key] is not None
+            for key in (
+                "provider_response_sha256", "semantic_candidate_sha256", "assembled_page_spec_sha256",
+                "resource_summary", "elapsed_seconds", "cost",
+            )
+        ):
+            raise _error("bundle_state_invalid")
+        cleanup = _mapping(self.cleanup_linkage, _cleanup_keys)
+        if cleanup != {
+            "tier_a_step_8_status": "not_implemented", "cleanup_policy_status": "not_created",
+            "cleanup_receipt_status": "not_created", "cleanup_action_status": "not_executed",
+        }:
+            raise _error("bundle_cleanup_invalid")
+        expected_id = _id_prefix + _hash(_canonical(self._root()))[:20]
+        if self.bundle_id != expected_id:
+            raise _error("bundle_identity_invalid")
+
+    def to_dict(self, _validator=None) -> dict[str, object]:
+        (type(self).validate if _validator is None else _validator)(self)
+        return {"schema_version": self.schema_version, "bundle_id": self.bundle_id, **{
+            key: value for key, value in self._root().items() if key != "schema_version"
+        }}
+
+    def canonical_bytes(self, _canonical=_canonical_json_bytes) -> bytes:
+        return _canonical(self.to_dict())
+
+    def sha256(self, _hash=_sha256) -> str:
+        return _hash(self.canonical_bytes())
+
+    def validate_against(
+        self,
+        context: AgentContextBundle,
+        manifest: D17Path3TierAManifest,
+        selected: D17Path3SelectedInput,
+        local_request: D17Path3LocalRequestArtifact,
+        pre_invocation_audit: D17Path3TierAPreInvocationAuditRecord,
+        local_qwen_preparation: LocalQwenProviderPreparationRecord,
+        profile: object,
+        model_route_outcome: ModelRouteOutcome,
+        gate_delivery_outcome: TierA07bGateDeliveryOutcome,
+        _error=TierA08RealRunBundleError,
+    ) -> None:
+        self.validate()
+        expected = type(self).create(
+            context, manifest, selected, local_request, pre_invocation_audit,
+            local_qwen_preparation, profile, model_route_outcome, gate_delivery_outcome,
+        )
+        if self.canonical_bytes() != expected.canonical_bytes():
+            raise _error("bundle_live_binding_invalid")
+
+
+def create_tier_a_08_real_run_bundle(
+    context: AgentContextBundle,
+    manifest: D17Path3TierAManifest,
+    selected: D17Path3SelectedInput,
+    local_request: D17Path3LocalRequestArtifact,
+    pre_invocation_audit: D17Path3TierAPreInvocationAuditRecord,
+    local_qwen_preparation: LocalQwenProviderPreparationRecord,
+    profile: object,
+    model_route_outcome: ModelRouteOutcome,
+    gate_delivery_outcome: TierA07bGateDeliveryOutcome,
+    _bundle_type=TierA08RealRunBundlePlaceholder,
+) -> TierA08RealRunBundlePlaceholder:
+    """Create a local no-run Step-7 structure from live validated artifacts."""
+
+    return _bundle_type.create(
+        context, manifest, selected, local_request, pre_invocation_audit,
+        local_qwen_preparation, profile, model_route_outcome, gate_delivery_outcome,
+    )
+
+
+def validate_serialized_tier_a_08_real_run_bundle(
+    payload: object,
+    _bundle_type=TierA08RealRunBundlePlaceholder,
+) -> TierA08RealRunBundlePlaceholder:
+    return (
+        _bundle_type.from_bytes(payload)
+        if type(payload) is bytes
+        else _bundle_type.from_dict(payload)
+    )
