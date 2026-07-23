@@ -10,6 +10,7 @@ network service, real browser, repair route, H1/gold source, or external egress.
 from __future__ import annotations
 
 from collections import Counter
+from copy import deepcopy
 from dataclasses import dataclass
 import hashlib
 import json
@@ -70,6 +71,7 @@ from req2web_generation.result_package import (
     DeterministicResultPackager,
     ResultPackage,
 )
+from req2web_generation.result_package_v2 import RESULT_PACKAGE_V2_SCHEMA_VERSION
 from req2web_generation.schema import PAGE_SPEC_SCHEMA_VERSION, PageSpec
 from req2web_provider.d17_audit import D17Path3TierAPreInvocationAuditRecord
 from req2web_provider.d17_input_view import D17Path3SelectedInput
@@ -210,10 +212,10 @@ class _ScriptedFixtureRegistryEntry:
     raw_response_byte_length: int
     source_class: str
 
-    def validate(self) -> None:
+    def validate(self, _is_sha256_fn=_is_sha256) -> None:
         if (
             not _is_text(self.fixture_key)
-            or not _is_sha256(self.raw_response_sha256)
+            or not _is_sha256_fn(self.raw_response_sha256)
             or not isinstance(self.raw_response_byte_length, int)
             or isinstance(self.raw_response_byte_length, bool)
             or self.raw_response_byte_length < 1
@@ -622,7 +624,7 @@ def _build_scripted_fixture_types(
                 "raw_response_byte_length": len(raw_response.raw_bytes),
             }
 
-        def validate(self) -> None:
+        def validate(self, _is_sha256_fn=_is_sha256) -> None:
             entry = registry_lookup(self.registry_entry_key)
             validate_registry_binding(
                 self.registry_schema_version,
@@ -705,7 +707,7 @@ def _build_scripted_fixture_types(
             result.validate()
             return result
 
-        def validate(self) -> None:
+        def validate(self, _is_sha256_fn=_is_sha256) -> None:
             entry = registry_lookup(self.registry_entry_key)
             validate_registry_binding(
                 self.registry_schema_version,
@@ -721,7 +723,7 @@ def _build_scripted_fixture_types(
                 or self.provider_invoked is not False
                 or self.model_loaded is not False
                 or self.not_sent is not True
-                or not _is_sha256(self.raw_response_sha256)
+                or not _is_sha256_fn(self.raw_response_sha256)
                 or self.raw_response_sha256 != entry.raw_response_sha256
                 or not isinstance(self.raw_response_byte_length, int)
                 or isinstance(self.raw_response_byte_length, bool)
@@ -940,7 +942,7 @@ class ModelRouteOutcome:
             artifacts=self.artifacts,
         )
 
-    def _validate_artifact_values(self) -> None:
+    def _validate_artifact_values(self, _is_sha256_fn=_is_sha256) -> None:
         if set(self.artifacts) != set(_ARTIFACT_KEYS):
             raise _error("artifact_shape_invalid")
         for key, value in self.artifacts.items():
@@ -959,7 +961,7 @@ class ModelRouteOutcome:
             "assembly_report_sha256",
             "assembled_page_spec_sha256",
         ):
-            if self.artifacts[key] is not None and not _is_sha256(self.artifacts[key]):
+            if self.artifacts[key] is not None and not _is_sha256_fn(self.artifacts[key]):
                 raise _error("artifact_shape_invalid")
 
     def _validate_reference_presence(self, expected: bool) -> None:
@@ -2743,7 +2745,8 @@ def _07a_normalized_inventory_sha256(entries: object) -> str:
     return _sha256(_canonical_json_bytes({"files": normalized}))
 
 
-def _build_tier_a_07a_fallback_authority(record_type, package_type):
+def _build_tier_a_07a_fallback_authority(record_type, package_type,
+                                          _safe_id=_07a_safe_id):
     def validate_binding(
         *,
         case_id: object,
@@ -2754,7 +2757,7 @@ def _build_tier_a_07a_fallback_authority(record_type, package_type):
         context: object,
         guidance: object,
     ) -> dict[str, object]:
-        if not _07a_safe_id(case_id):
+        if not _safe_id(case_id):
             raise ValueError("case_id is invalid")
         if type(record) is not record_type:
             raise TypeError("fallback_record must be a FrozenG0FallbackRecord")
@@ -2870,6 +2873,7 @@ def _build_tier_a_07a_artifact_authority(
     staging_path,
     cleanup_directory,
     validate_raw_path,
+    _result_package_schema_version=RESULT_PACKAGE_SCHEMA_VERSION,
 ):
     def artifact_id(prefix: str, digest: str) -> str:
         return prefix + digest[:20]
@@ -3047,7 +3051,7 @@ def _build_tier_a_07a_artifact_authority(
         inventory.sort(key=lambda item: item["path"])
         tree_sha256 = _sha256(_canonical_json_bytes({"files": inventory}))
         return {
-            "model_package_schema_version": RESULT_PACKAGE_SCHEMA_VERSION,
+            "model_package_schema_version": _result_package_schema_version,
             "model_package_id": package.package_id,
             "model_package_manifest_sha256": _sha256(manifest_bytes),
             "model_package_tree_sha256": tree_sha256,
@@ -5356,3 +5360,1122 @@ TierA07aGateDeliveryOutcome.validate_against = (
         fallback_report_projection=_FIXED_07A_FALLBACK_REPORT_PROJECTION,
     )
 )
+
+
+# Tier A-07b one-repair is appended below.
+# This local deterministic slice captures its rule and delivery authorities at
+# class-definition time. Field-gate receipts are replay evidence, not authority.
+
+TIER_A_07B_FIELD_GATE_REPORT_SCHEMA_VERSION = "req2web.orchestration.tier_a_07b_field_gate_report.v1"
+TIER_A_07B_REPAIR_PATCH_SCHEMA_VERSION = "req2web.orchestration.tier_a_07b_repair_patch.v1"
+TIER_A_07B_GATE_DELIVERY_OUTCOME_SCHEMA_VERSION = "req2web.orchestration.tier_a_07b_gate_delivery_outcome.v1"
+TIER_A_07B_FIELD_GATE_AUTHORITY_SCHEMA_VERSION = "req2web.orchestration.tier_a_07b_field_gate_authority.v1"
+TIER_A_07B_FIELD_GATE_RULE_VERSION = "tier-a-07b-scripted-field-rules.v2"
+_07B_REPORT_ID_PREFIX = "tier-a-07b-field-gate-"
+_07B_PATCH_ID_PREFIX = "tier-a-07b-repair-patch-"
+_07B_OUTCOME_ID_PREFIX = "tier-a-07b-gate-delivery-"
+_07B_AUTHORITY_ID_PREFIX = "tier-a-07b-field-gate-authority-"
+_07B_SCOPE_PATTERN = re.compile(r"^pagespec(?:\.(?:title|summary|target_device|page_type)|\.(?:components|states|interactions|acceptance_checks)\.[a-z0-9][a-z0-9-]*\.(?:label|name|user_feedback|description))$")
+_07B_FORBIDDEN = ("/", "\\", "://", "\x00", "\n", "\r", "bearer", "token", "secret", "credential", "authorization", "api_key", "apikey")
+_07B_REPAIRABLE = {"page_title_invalid": "page_title", "component_label_invalid": "component_label", "state_name_invalid": "state_name", "interaction_feedback_invalid": "interaction_feedback", "acceptance_description_invalid": "acceptance_description"}
+
+def _07b_hash(value: object, _sha256_fn=_sha256,
+              _canonical_json_bytes_fn=_canonical_json_bytes) -> str:
+    return _sha256_fn(_canonical_json_bytes_fn(value))
+
+def _07b_safe_public_text(value: object, _forbidden=_07B_FORBIDDEN) -> bool:
+    return type(value) is str and bool(value) and len(value) <= 160 and all(ch.isprintable() for ch in value) and not re.match(r"^[A-Za-z]:", value) and not any(token in value.lower() for token in _forbidden)
+
+def _07b_safe_scope(value: object, _pattern=_07B_SCOPE_PATTERN) -> bool:
+    return type(value) is str and _pattern.fullmatch(value) is not None
+
+def _07b_scope(values: object, name: str, *, allow_empty: bool = True,
+               _safe_scope=_07b_safe_scope) -> tuple[str, ...]:
+    if type(values) is not tuple or (not allow_empty and not values) or values != tuple(sorted(values)) or len(values) != len(set(values)) or any(not _safe_scope(item) for item in values):
+        raise TierA07bGateDeliveryOutcomeError(name + "_invalid")
+    return values
+
+def _07b_page_binding(page_spec: PageSpec, _hash=_07b_hash) -> dict[str, str]:
+    page_spec.validate()
+    payload = page_spec.to_dict()
+    return {"page_id": page_spec.page_id, "page_spec_sha256": _hash(payload), "traceability_sha256": _hash(payload["traceability"])}
+
+def _07b_empty(keys: tuple[str, ...]) -> dict[str, object]:
+    return {key: None for key in keys}
+
+def _07b_slots(page_spec: PageSpec, _safe_id=_07a_safe_id) -> dict[str, tuple[object, str]]:
+    page_spec.validate()
+    slots: dict[str, tuple[object, str]] = {"pagespec.title": (page_spec, "title"), "pagespec.summary": (page_spec, "summary"), "pagespec.target_device": (page_spec, "target_device"), "pagespec.page_type": (page_spec, "page_type")}
+    for collection, prefix, id_name, field in ((page_spec.components, "components", "component_id", "label"), (page_spec.states, "states", "state_id", "name"), (page_spec.interactions, "interactions", "interaction_id", "user_feedback"), (page_spec.acceptance_checks, "acceptance_checks", "check_id", "description")):
+        for item in collection:
+            stable_id = getattr(item, id_name)
+            if _safe_id(stable_id):
+                slots[f"pagespec.{prefix}.{stable_id}.{field}"] = (item, field)
+    return slots
+
+def _07b_policy_scope(error_code: str, page_spec: PageSpec,
+                      _repairable=_07B_REPAIRABLE, _slots=_07b_slots) -> tuple[str, ...]:
+    kind = _repairable.get(error_code)
+    if kind == "page_title":
+        return ("pagespec.title",)
+    forms = {"component_label": ("pagespec.components.", ".label"), "state_name": ("pagespec.states.", ".name"), "interaction_feedback": ("pagespec.interactions.", ".user_feedback"), "acceptance_description": ("pagespec.acceptance_checks.", ".description")}
+    if kind not in forms:
+        return ()
+    left, right = forms[kind]
+    return tuple(sorted(path for path in _slots(page_spec) if path.startswith(left) and path.endswith(right)))
+
+def _07b_intersection(predicted: tuple[str, ...], policy: tuple[str, ...]) -> tuple[str, ...]:
+    return tuple(sorted(set(predicted).intersection(policy)))
+
+def _07b_replace_payload_value(payload: dict[str, object], path: str, value: str) -> None:
+    parts = path.split(".")
+    if len(parts) == 2:
+        payload[parts[1]] = value
+        return
+    if len(parts) != 4:
+        raise TierA07bGateDeliveryOutcomeError("repair_patch_invalid")
+    collection, stable_id, field = parts[1:]
+    id_name = {"components": "component_id", "states": "state_id", "interactions": "interaction_id", "acceptance_checks": "check_id"}.get(collection)
+    values = payload.get(collection)
+    matches = [] if id_name is None or type(values) is not list else [item for item in values if type(item) is dict and item.get(id_name) == stable_id]
+    if len(matches) != 1 or field not in matches[0]:
+        raise TierA07bGateDeliveryOutcomeError("repair_patch_invalid")
+    matches[0][field] = value
+
+def _07b_validate_repaired(before: PageSpec, after: PageSpec, scope: tuple[str, ...],
+                           _slots=_07b_slots,
+                           _replace_payload_value=_07b_replace_payload_value) -> None:
+    before.validate(); after.validate()
+    original, changed = before.to_dict(), after.to_dict()
+    if before.page_id != after.page_id or original["traceability"] != changed["traceability"] or original["use_cases"] != changed["use_cases"] or original["constraints"] != changed["constraints"]:
+        raise TierA07bGateDeliveryOutcomeError("repair_identity_or_traceability_drift")
+    expected = deepcopy(original)
+    slots = _slots(after)
+    for path in scope:
+        if path not in slots:
+            raise TierA07bGateDeliveryOutcomeError("repair_patch_invalid")
+        target, field = slots[path]
+        _replace_payload_value(expected, path, getattr(target, field))
+    if expected != changed:
+        raise TierA07bGateDeliveryOutcomeError("repair_patch_invalid")
+
+class TierA07bGateDeliveryOutcomeError(ValueError):
+    """Unsafe, noncanonical, or non-replayable A-07b state."""
+
+@dataclass(frozen=True)
+class TierA07bFieldGateReport:
+    report_id: str
+    authority_id: str
+    authority_sha256: str
+    rule_version: str
+    case_id: str
+    request_sha256: str
+    field_gate_input_sha256: str
+    page_id: str
+    first_page_spec_sha256: str
+    reported_field: str | None
+    error_code: str
+    expected: str | None
+    actual: str | None
+    predicted_repairable: bool
+    predicted_repair_scope: tuple[str, ...]
+    policy_allowed_scope: tuple[str, ...]
+    repair_eligible: bool
+    decision: str
+    schema_version: str = TIER_A_07B_FIELD_GATE_REPORT_SCHEMA_VERSION
+
+    @classmethod
+    def create(cls, _hash=_07b_hash, _schema_version=TIER_A_07B_FIELD_GATE_REPORT_SCHEMA_VERSION,
+               _id_prefix=_07B_REPORT_ID_PREFIX, **values: object) -> "TierA07bFieldGateReport":
+        values = dict(values); values.setdefault("schema_version", _schema_version)
+        root = {key: (list(value) if key in {"predicted_repair_scope", "policy_allowed_scope"} else value) for key, value in values.items() if key != "report_id"}
+        values["report_id"] = _id_prefix + _hash(root)[:20]
+        result = cls(**values); result.validate(); return result
+
+    def _root(self) -> dict[str, object]:
+        return {"authority_id": self.authority_id, "authority_sha256": self.authority_sha256, "rule_version": self.rule_version, "case_id": self.case_id, "request_sha256": self.request_sha256, "field_gate_input_sha256": self.field_gate_input_sha256, "page_id": self.page_id, "first_page_spec_sha256": self.first_page_spec_sha256, "reported_field": self.reported_field, "error_code": self.error_code, "expected": self.expected, "actual": self.actual, "predicted_repairable": self.predicted_repairable, "predicted_repair_scope": list(self.predicted_repair_scope), "policy_allowed_scope": list(self.policy_allowed_scope), "repair_eligible": self.repair_eligible, "decision": self.decision, "schema_version": self.schema_version}
+
+    def validate(self, _schema_version=TIER_A_07B_FIELD_GATE_REPORT_SCHEMA_VERSION,
+                 _id_prefix=_07B_REPORT_ID_PREFIX, _safe_id=_07a_safe_id,
+                 _scope=_07b_scope, _safe_scope=_07b_safe_scope,
+                 _safe_text=_07b_safe_public_text, _hash=_07b_hash,
+                 _is_sha256_fn=_is_sha256,
+                 _repairable=_07B_REPAIRABLE) -> None:
+        if self.schema_version != _schema_version or not all(_safe_id(value) for value in (self.report_id, self.authority_id, self.rule_version, self.case_id, self.page_id, self.error_code)) or not all(_is_sha256_fn(value) for value in (self.authority_sha256, self.request_sha256, self.field_gate_input_sha256, self.first_page_spec_sha256)) or type(self.predicted_repairable) is not bool or type(self.repair_eligible) is not bool:
+            raise TierA07bGateDeliveryOutcomeError("repair_report_invalid")
+        predicted = _scope(self.predicted_repair_scope, "predicted_scope")
+        policy = _scope(self.policy_allowed_scope, "policy_scope")
+        if self.decision == "repair":
+            if not _safe_scope(self.reported_field) or self.error_code not in _repairable or not _safe_text(self.expected) or not _safe_text(self.actual) or self.expected == self.actual or not self.predicted_repairable or not self.repair_eligible or predicted != (self.reported_field,) or self.reported_field not in policy:
+                raise TierA07bGateDeliveryOutcomeError("repair_report_invalid")
+        elif self.decision == "pass":
+            if self.error_code != "none" or any(value is not None for value in (self.reported_field, self.expected, self.actual)) or self.predicted_repairable or self.repair_eligible or predicted or policy:
+                raise TierA07bGateDeliveryOutcomeError("repair_report_invalid")
+        else:
+            raise TierA07bGateDeliveryOutcomeError("repair_report_invalid")
+        if self.report_id != _id_prefix + _hash(self._root())[:20]:
+            raise TierA07bGateDeliveryOutcomeError("repair_report_invalid")
+
+    def validate_against(self, case_id: object, page_spec: object, request_sha256: object,
+                         _page_binding=_07b_page_binding, _slots=_07b_slots,
+                         _policy_scope=_07b_policy_scope,
+                         _page_spec_type=PageSpec) -> None:
+        self.validate()
+        if type(page_spec) is not _page_spec_type or self.case_id != case_id or self.request_sha256 != request_sha256:
+            raise TierA07bGateDeliveryOutcomeError("repair_report_invalid")
+        binding = _page_binding(page_spec)
+        if self.page_id != binding["page_id"] or self.first_page_spec_sha256 != binding["page_spec_sha256"]:
+            raise TierA07bGateDeliveryOutcomeError("repair_report_invalid")
+        if self.decision == "repair":
+            slots = _slots(page_spec)
+            if self.reported_field not in slots or getattr(*slots[self.reported_field]) != self.actual or _policy_scope(self.error_code, page_spec) != self.policy_allowed_scope:
+                raise TierA07bGateDeliveryOutcomeError("repair_report_invalid")
+
+    def to_dict(self) -> dict[str, object]:
+        self.validate(); return {"report_id": self.report_id, **self._root()}
+    def canonical_bytes(self, _canonical_json_bytes_fn=_canonical_json_bytes) -> bytes:
+        return _canonical_json_bytes_fn(self.to_dict())
+    def sha256(self, _sha256_fn=_sha256) -> str:
+        return _sha256_fn(self.canonical_bytes())
+    @classmethod
+    def from_dict(cls, payload: object) -> "TierA07bFieldGateReport":
+        keys = {"report_id", *cls.create.__annotations__.keys()}
+        expected = {"report_id", "authority_id", "authority_sha256", "rule_version", "case_id", "request_sha256", "field_gate_input_sha256", "page_id", "first_page_spec_sha256", "reported_field", "error_code", "expected", "actual", "predicted_repairable", "predicted_repair_scope", "policy_allowed_scope", "repair_eligible", "decision", "schema_version"}
+        if not isinstance(payload, Mapping) or set(payload) != expected or type(payload["predicted_repair_scope"]) is not list or type(payload["policy_allowed_scope"]) is not list:
+            raise TierA07bGateDeliveryOutcomeError("repair_report_invalid")
+        result = cls(**{key: (tuple(payload[key]) if key in {"predicted_repair_scope", "policy_allowed_scope"} else payload[key]) for key in expected})
+        result.validate(); return result
+    @classmethod
+    def from_bytes(cls, raw: object, _load_canonical_json_fn=_load_canonical_json) -> "TierA07bFieldGateReport":
+        if type(raw) is not bytes:
+            raise TierA07bGateDeliveryOutcomeError("repair_report_invalid")
+        try: result = cls.from_dict(_load_canonical_json_fn(raw))
+        except Exception as exc:
+            if isinstance(exc, TierA07bGateDeliveryOutcomeError): raise
+            raise TierA07bGateDeliveryOutcomeError("repair_report_invalid") from exc
+        if result.canonical_bytes() != raw:
+            raise TierA07bGateDeliveryOutcomeError("repair_report_invalid")
+        return result
+
+@dataclass(frozen=True)
+class TierA07bRepairPatch:
+    patch_id: str
+    report_id: str
+    report_sha256: str
+    first_page_id: str
+    first_page_spec_sha256: str
+    attempt_index: int
+    operations: tuple[tuple[str, str], ...]
+    schema_version: str = TIER_A_07B_REPAIR_PATCH_SCHEMA_VERSION
+
+    @classmethod
+    def create(cls, _hash=_07b_hash, _schema_version=TIER_A_07B_REPAIR_PATCH_SCHEMA_VERSION,
+               _id_prefix=_07B_PATCH_ID_PREFIX, **values: object) -> "TierA07bRepairPatch":
+        root = {"report_id": values["report_id"], "report_sha256": values["report_sha256"], "first_page_id": values["first_page_id"], "first_page_spec_sha256": values["first_page_spec_sha256"], "attempt_index": values["attempt_index"], "operations": [{"path": path, "value": value} for path, value in values["operations"]], "schema_version": _schema_version}
+        result = cls(**values, patch_id=_id_prefix + _hash(root)[:20]); result.validate(); return result
+    def _root(self) -> dict[str, object]:
+        return {"report_id": self.report_id, "report_sha256": self.report_sha256, "first_page_id": self.first_page_id, "first_page_spec_sha256": self.first_page_spec_sha256, "attempt_index": self.attempt_index, "operations": [{"path": path, "value": value} for path, value in self.operations], "schema_version": self.schema_version}
+    def validate(self, _schema_version=TIER_A_07B_REPAIR_PATCH_SCHEMA_VERSION,
+                 _id_prefix=_07B_PATCH_ID_PREFIX, _safe_id=_07a_safe_id,
+                 _safe_scope=_07b_safe_scope, _safe_text=_07b_safe_public_text,
+                 _hash=_07b_hash, _is_sha256_fn=_is_sha256) -> None:
+        if self.schema_version != _schema_version or not all(_safe_id(value) for value in (self.patch_id, self.report_id, self.first_page_id)) or not _is_sha256_fn(self.report_sha256) or not _is_sha256_fn(self.first_page_spec_sha256) or type(self.attempt_index) is not int or self.attempt_index != 1 or type(self.operations) is not tuple or not self.operations or len(self.operations) > 4:
+            raise TierA07bGateDeliveryOutcomeError("repair_request_invalid")
+        paths = tuple(path for path, _ in self.operations)
+        if paths != tuple(sorted(paths)) or len(paths) != len(set(paths)) or any(not _safe_scope(path) or not _safe_text(value) for path, value in self.operations) or self.patch_id != _id_prefix + _hash(self._root())[:20]:
+            raise TierA07bGateDeliveryOutcomeError("repair_request_invalid")
+    def apply(self, report: TierA07bFieldGateReport, page_spec: PageSpec, scope: tuple[str, ...],
+              _page_binding=_07b_page_binding, _slots=_07b_slots,
+              _validate_repaired=_07b_validate_repaired) -> PageSpec:
+        self.validate(); report.validate(); binding = _page_binding(page_spec)
+        if self.report_id != report.report_id or self.report_sha256 != report.sha256() or self.first_page_id != binding["page_id"] or self.first_page_spec_sha256 != binding["page_spec_sha256"] or tuple(path for path, _ in self.operations) != scope:
+            raise TierA07bGateDeliveryOutcomeError("repair_patch_invalid")
+        repaired = deepcopy(page_spec); slots = _slots(repaired)
+        for path, value in self.operations:
+            if path not in slots: raise TierA07bGateDeliveryOutcomeError("repair_patch_invalid")
+            target, field = slots[path]; setattr(target, field, value)
+        _validate_repaired(page_spec, repaired, scope); return repaired
+    def to_dict(self) -> dict[str, object]:
+        self.validate(); return {"patch_id": self.patch_id, **self._root()}
+    def canonical_bytes(self, _canonical_json_bytes_fn=_canonical_json_bytes) -> bytes:
+        return _canonical_json_bytes_fn(self.to_dict())
+    def sha256(self, _sha256_fn=_sha256) -> str:
+        return _sha256_fn(self.canonical_bytes())
+    @classmethod
+    def from_dict(cls, payload: object) -> "TierA07bRepairPatch":
+        keys = {"patch_id", "report_id", "report_sha256", "first_page_id", "first_page_spec_sha256", "attempt_index", "operations", "schema_version"}
+        if not isinstance(payload, Mapping) or set(payload) != keys or type(payload["operations"]) is not list:
+            raise TierA07bGateDeliveryOutcomeError("repair_request_invalid")
+        ops = []
+        for item in payload["operations"]:
+            if not isinstance(item, Mapping) or set(item) != {"path", "value"}: raise TierA07bGateDeliveryOutcomeError("repair_request_invalid")
+            ops.append((item["path"], item["value"]))
+        result = cls(patch_id=payload["patch_id"], report_id=payload["report_id"], report_sha256=payload["report_sha256"], first_page_id=payload["first_page_id"], first_page_spec_sha256=payload["first_page_spec_sha256"], attempt_index=payload["attempt_index"], operations=tuple(ops), schema_version=payload["schema_version"]); result.validate(); return result
+    @classmethod
+    def from_bytes(cls, raw: object, _load_canonical_json_fn=_load_canonical_json) -> "TierA07bRepairPatch":
+        if type(raw) is not bytes: raise TierA07bGateDeliveryOutcomeError("repair_request_invalid")
+        try: result = cls.from_dict(_load_canonical_json_fn(raw))
+        except Exception as exc:
+            if isinstance(exc, TierA07bGateDeliveryOutcomeError): raise
+            raise TierA07bGateDeliveryOutcomeError("repair_request_invalid") from exc
+        if result.canonical_bytes() != raw: raise TierA07bGateDeliveryOutcomeError("repair_request_invalid")
+        return result
+
+
+def _build_tier_a_07b_field_gate_authority(
+    report_type, request_type, request_bytes, _hash=_07b_hash,
+    _sha256_fn=_sha256, _canonical_json_bytes_fn=_canonical_json_bytes,
+    _page_binding=_07b_page_binding, _slots=_07b_slots,
+    _safe_id=_07a_safe_id, _safe_text=_07b_safe_public_text,
+    _policy_scope=_07b_policy_scope,
+    _schema_version=TIER_A_07B_FIELD_GATE_AUTHORITY_SCHEMA_VERSION,
+    _rule_version=TIER_A_07B_FIELD_GATE_RULE_VERSION,
+    _authority_id_prefix=_07B_AUTHORITY_ID_PREFIX,
+    _page_spec_type=PageSpec,
+):
+    registry = {"schema_version": _schema_version, "rule_version": _rule_version, "rules": [{"rule_id": "primary_component_label_suffix", "error_code": "component_label_invalid", "selection": "first_canonical_component_label", "canonical_expected_template": "component-label-{component_id}"}], "immutable": True, "runtime_registration_api": "none", "model_loaded": False, "provider_invoked": False, "network_used": False, "h1_gold_accessed": False}
+    authority_sha256 = _sha256_fn(_canonical_json_bytes_fn(registry))
+    authority_id = _authority_id_prefix + authority_sha256[:20]
+    def evaluate(*, case_id: object, page_spec: object, local_request: object) -> TierA07bFieldGateReport:
+        if not _safe_id(case_id) or type(page_spec) is not _page_spec_type or type(local_request) is not request_type:
+            raise ValueError("field gate inputs are invalid")
+        page_spec.validate()
+        request_raw = request_bytes(local_request)
+        if type(request_raw) is not bytes: raise ValueError("local request bytes are invalid")
+        request_sha256 = _sha256_fn(request_raw); binding = _page_binding(page_spec)
+        input_sha256 = _hash({"authority_id": authority_id, "authority_sha256": authority_sha256, "rule_version": _rule_version, "case_id": case_id, "request_sha256": request_sha256, "page_id": binding["page_id"], "page_spec_sha256": binding["page_spec_sha256"]})
+        paths = tuple(sorted(path for path in _slots(page_spec) if path.startswith("pagespec.components.") and path.endswith(".label")))
+        common = {"authority_id": authority_id, "authority_sha256": authority_sha256, "rule_version": _rule_version, "case_id": case_id, "request_sha256": request_sha256, "field_gate_input_sha256": input_sha256, "page_id": binding["page_id"], "first_page_spec_sha256": binding["page_spec_sha256"]}
+        if not paths:
+            return report_type.create(**common, reported_field=None, error_code="none", expected=None, actual=None, predicted_repairable=False, predicted_repair_scope=(), policy_allowed_scope=(), repair_eligible=False, decision="pass")
+        field = paths[0]; target, name = _slots(page_spec)[field]; actual = getattr(target, name)
+        expected = "component-label-" + field.split(".")[2]
+        if not _safe_text(actual) or not _safe_text(expected): raise ValueError("field gate scalar is invalid")
+        if actual == expected:
+            return report_type.create(**common, reported_field=None, error_code="none", expected=None, actual=None, predicted_repairable=False, predicted_repair_scope=(), policy_allowed_scope=(), repair_eligible=False, decision="pass")
+        return report_type.create(**common, reported_field=field, error_code="component_label_invalid", expected=expected, actual=actual, predicted_repairable=True, predicted_repair_scope=(field,), policy_allowed_scope=_policy_scope("component_label_invalid", page_spec), repair_eligible=True, decision="repair")
+    evaluate.authority_id = authority_id
+    evaluate.authority_sha256 = authority_sha256
+    evaluate.rule_version = _rule_version
+    return evaluate
+
+_FIXED_07B_FIELD_GATE_AUTHORITY = _build_tier_a_07b_field_gate_authority(TierA07bFieldGateReport, D17Path3LocalRequestArtifact, D17Path3LocalRequestArtifact.canonical_bytes)
+
+def create_tier_a_07b_field_gate_report(*, case_id: object, page_spec: object, local_request: object) -> TierA07bFieldGateReport:
+    return _FIXED_07B_FIELD_GATE_AUTHORITY(case_id=case_id, page_spec=page_spec, local_request=local_request)
+
+_07B_COUNT_KEYS = _07A_ACCEPTANCE_COUNT_KEYS
+_07B_FIRST_KEYS = ("page_id", "page_spec_sha256", "traceability_sha256")
+_07B_PATCH_KEYS = ("patch_id", "patch_sha256", "operation_count")
+_07B_REPORT_KEYS = ("report_id", "report_sha256", "authority_id", "authority_sha256", "rule_version", "request_sha256", "field_gate_input_sha256", "error_code", "decision", "repair_eligible")
+_07B_FAILURES = {"model_route_validation_failed", "frozen_g0_fallback_invalid", "output_destination_invalid", "fallback_delivery_failed", "fallback_live_replay_invalid"}
+
+def _07b_empty_counts(_keys=_07B_COUNT_KEYS) -> dict[str, int]: return {key: 0 for key in _keys}
+def _07b_validate_counts(value: object, _keys=_07B_COUNT_KEYS) -> dict[str, int]:
+    if not isinstance(value, Mapping) or set(value) != set(_keys): raise TierA07bGateDeliveryOutcomeError("acceptance_counts_invalid")
+    result = {key: value[key] for key in _keys}
+    if any(type(item) is not int or item < 0 for item in result.values()) or result["pass"] + result["fail"] + result["unknown"] + result["not_supported"] != result["total"]: raise TierA07bGateDeliveryOutcomeError("acceptance_counts_invalid")
+    return result
+
+def _07b_all_or_none(value: object, keys: tuple[str, ...], *, report: bool = False,
+                      _safe_id=_07a_safe_id, _is_sha256_fn=_is_sha256) -> bool:
+    if not isinstance(value, Mapping) or set(value) != set(keys): raise TierA07bGateDeliveryOutcomeError("outcome_state_invalid")
+    present = [item is not None for item in value.values()]
+    if any(present) and not all(present): raise TierA07bGateDeliveryOutcomeError("outcome_state_invalid")
+    if not any(present): return False
+    for key, item in value.items():
+        if key.endswith("sha256") and not _is_sha256_fn(item): raise TierA07bGateDeliveryOutcomeError("outcome_state_invalid")
+        if key in {"inventory_file_count", "operation_count"} and (type(item) is not int or item < 1): raise TierA07bGateDeliveryOutcomeError("outcome_state_invalid")
+        if key == "repair_eligible" and type(item) is not bool: raise TierA07bGateDeliveryOutcomeError("outcome_state_invalid")
+        if key not in {"repair_eligible", "operation_count", "inventory_file_count"} and not key.endswith("sha256") and not _safe_id(item): raise TierA07bGateDeliveryOutcomeError("outcome_state_invalid")
+    if report and value["decision"] not in {"repair", "pass"}: raise TierA07bGateDeliveryOutcomeError("outcome_state_invalid")
+    return True
+
+def _07b_empty_model_binding() -> dict[str, object]: return {"verified": False, "outcome_id": None, "outcome_sha256": None, "disposition": None, "failure_code": None, "assembled_page_id": None, "assembled_page_spec_sha256": None}
+def _07b_model_binding(outcome: ModelRouteOutcome, canonical, _sha256_fn=_sha256) -> dict[str, object]: return {"verified": True, "outcome_id": outcome.outcome_id, "outcome_sha256": _sha256_fn(canonical(outcome)), "disposition": outcome.disposition, "failure_code": None if outcome.failure is None else outcome.failure.code, "assembled_page_id": outcome.artifacts["assembled_page_id"], "assembled_page_spec_sha256": outcome.artifacts["assembled_page_spec_sha256"]}
+
+def _07b_binding_projection(value: object, keys: tuple[str, ...]) -> dict[str, object]:
+    projected = dict(value)
+    if set(projected) != set(keys):
+        raise TierA07bGateDeliveryOutcomeError("live_replay_invalid")
+    return projected
+
+
+def _07b_validate_model_route_binding(value: object, _safe_id=_07a_safe_id,
+                                       _keys=_07A_MODEL_ROUTE_BINDING_KEYS,
+                                       _is_sha256_fn=_is_sha256) -> str:
+    if not isinstance(value, Mapping) or set(value) != set(_keys) or type(value["verified"]) is not bool:
+        raise TierA07bGateDeliveryOutcomeError("outcome_state_invalid")
+    if not value["verified"]:
+        if any(item is not None for key, item in value.items() if key != "verified"):
+            raise TierA07bGateDeliveryOutcomeError("outcome_state_invalid")
+        return "unverified"
+    if not _safe_id(value["outcome_id"]) or not _is_sha256_fn(value["outcome_sha256"]) or value["disposition"] not in {"scripted_fixture_assembled", "fail_closed"}:
+        raise TierA07bGateDeliveryOutcomeError("outcome_state_invalid")
+    failure_code = value["failure_code"]
+    assembled_id = value["assembled_page_id"]
+    assembled_sha256 = value["assembled_page_spec_sha256"]
+    if value["disposition"] == "scripted_fixture_assembled":
+        if failure_code is not None or not _safe_id(assembled_id) or not _is_sha256_fn(assembled_sha256):
+            raise TierA07bGateDeliveryOutcomeError("outcome_state_invalid")
+        return "assembled"
+    if not _safe_id(failure_code) or assembled_id is not None or assembled_sha256 is not None:
+        raise TierA07bGateDeliveryOutcomeError("outcome_state_invalid")
+    return "fail_closed"
+
+def _07b_report_binding(report: TierA07bFieldGateReport) -> dict[str, object]: return {"report_id": report.report_id, "report_sha256": report.sha256(), "authority_id": report.authority_id, "authority_sha256": report.authority_sha256, "rule_version": report.rule_version, "request_sha256": report.request_sha256, "field_gate_input_sha256": report.field_gate_input_sha256, "error_code": report.error_code, "decision": report.decision, "repair_eligible": report.repair_eligible}
+
+_07B_STEP_MODEL = "model_route_live_validation"; _07B_STEP_G0 = "frozen_g0_fallback_validation"; _07B_STEP_PATH = "output_destination_preflight"; _07B_STEP_FIRST = "assembled_first_page_spec_binding"; _07B_STEP_GATE = "captured_field_gate_authority"; _07B_STEP_SCOPE = "repair_policy_scope_intersection"; _07B_STEP_PATCH = "one_repair_patch_application"; _07B_STEP_POST = "captured_field_gate_post_repair"; _07B_STEP_RENDER = "deterministic_render"; _07B_STEP_CONSISTENCY = "consistency_gate"; _07B_STEP_VIEW = "independent_requirement_view"; _07B_STEP_PLAN = "independent_acceptance_plan"; _07B_STEP_BINDING = "acceptance_binding_plan"; _07B_STEP_FIXTURE = "scripted_acceptance_fixture_validation"; _07B_STEP_EXECUTION = "scripted_acceptance_execution"; _07B_STEP_PACKAGE = "g1_result_package_v1"; _07B_STEP_DELIVERY = "g2_one_repair_delivery"; _07B_STEP_FALLBACK = "frozen_g0_fallback_delivery"
+_07B_EARLY_FAILURE_STEPS = {
+    "model_route_validation_failed": (),
+    "frozen_g0_fallback_invalid": (_07B_STEP_MODEL,),
+    "output_destination_invalid": (_07B_STEP_MODEL, _07B_STEP_G0),
+}
+
+def _07b_make_early_failure_outcome(
+    outcome_type,
+    *,
+    case_id: str,
+    failure_code: str,
+    model_route_binding: Mapping[str, object],
+    g0_binding: Mapping[str, object],
+    fallback_binding: Mapping[str, object],
+    _steps: Mapping[str, tuple[str, ...]] = _07B_EARLY_FAILURE_STEPS,
+    _empty: object = _07b_empty,
+    _empty_counts: object = _07b_empty_counts,
+    _first_keys: tuple[str, ...] = _07B_FIRST_KEYS,
+    _report_keys: tuple[str, ...] = _07B_REPORT_KEYS,
+    _patch_keys: tuple[str, ...] = _07B_PATCH_KEYS,
+):
+    """Build the exact no-delivery envelope used by the first three run stages."""
+    if failure_code not in _steps:
+        raise TierA07bGateDeliveryOutcomeError("outcome_state_invalid")
+    return outcome_type.create(
+        status="failed_delivery",
+        case_id=case_id,
+        completed_steps=_steps[failure_code],
+        model_route_binding=dict(model_route_binding),
+        g0_binding=dict(g0_binding),
+        fallback_binding=dict(fallback_binding),
+        first_candidate=_empty(_first_keys),
+        repaired_candidate=_empty(_first_keys),
+        repair_report=_empty(_report_keys),
+        post_repair_gate=_empty(_report_keys),
+        predicted_repair_scope=(),
+        policy_allowed_scope=(),
+        effective_repair_scope=(),
+        repair_patch=_empty(_patch_keys),
+        repair_limit=1,
+        repair_attempted=0,
+        repair_status="not_attempted",
+        g1_package_purpose="not_generated",
+        g2_action="failed_delivery",
+        retry_performed=False,
+        affected_gate_status="not_executed",
+        final_gate_status="not_executed",
+        consistency_status="not_executed",
+        acceptance_status="not_executed",
+        acceptance_counts=_empty_counts(),
+        fallback_reason="not_attempted",
+        fallback_attempted=False,
+        fallback_succeeded=False,
+        delivery_source="unavailable",
+        final_package_schema_version=None,
+        final_package_id=None,
+        final_package_manifest_sha256=None,
+        final_package_tree_sha256=None,
+        final_package_file_count=None,
+        fallback_delivery_report_id=None,
+        fallback_delivery_report_sha256=None,
+        failure_code=failure_code,
+    )
+
+_07B_BASE = (_07B_STEP_MODEL, _07B_STEP_G0, _07B_STEP_PATH)
+_07B_SUCCESS = (*_07B_BASE, _07B_STEP_FIRST, _07B_STEP_GATE, _07B_STEP_SCOPE, _07B_STEP_PATCH, _07B_STEP_POST, _07B_STEP_RENDER, _07B_STEP_CONSISTENCY, _07B_STEP_VIEW, _07B_STEP_PLAN, _07B_STEP_BINDING, _07B_STEP_FIXTURE, _07B_STEP_EXECUTION, _07B_STEP_PACKAGE, _07B_STEP_DELIVERY)
+_07B_PREFIX_INDEX = {"model_route_not_assembled": 3, "repair_receipt_invalid": 4, "field_gate_authority_failed": 4, "field_gate_receipt_mismatch": 5, "repair_not_eligible": 6, "repair_scope_not_authorized": 6, "repair_request_invalid": 6, "repair_patch_invalid": 6, "repair_post_gate_not_pass": 8, "render_failed": 8, "render_live_replay_invalid": 8, "consistency_failed": 9, "consistency_live_replay_invalid": 9, "requirement_view_failed": 10, "requirement_view_live_replay_invalid": 10, "acceptance_plan_failed": 11, "acceptance_plan_live_replay_invalid": 11, "acceptance_binding_failed": 12, "acceptance_binding_live_replay_invalid": 12, "acceptance_fixture_failed": 13, "acceptance_execution_failed": 14, "acceptance_execution_live_replay_invalid": 14, "consistency_or_acceptance_blocked": 15, "model_package_failed": 15, "model_package_live_replay_invalid": 15}
+
+
+def _07b_reason_state(
+    *, first: bool, report: bool, repaired: bool, post: str,
+    pre: str, scope: str, attempted: int, repair_status: str,
+    affected: str, final_gate: str, consistency: str, acceptance: str,
+) -> dict[str, object]:
+    return {
+        "first": first, "report": report, "repaired": repaired, "post": post,
+        "pre": pre, "scope": scope, "attempted": attempted,
+        "repair_status": repair_status, "affected": affected,
+        "final_gate": final_gate, "consistency": consistency,
+        "acceptance": acceptance,
+    }
+
+
+_07B_REASON_STATE = {
+    "model_route_not_assembled": _07b_reason_state(first=False, report=False, repaired=False, post="empty", pre="empty", scope="empty", attempted=0, repair_status="not_attempted", affected="not_executed", final_gate="not_executed", consistency="not_executed", acceptance="not_executed"),
+    "repair_receipt_invalid": _07b_reason_state(first=True, report=False, repaired=False, post="empty", pre="empty", scope="empty", attempted=0, repair_status="not_attempted_receipt_invalid", affected="not_executed", final_gate="not_executed", consistency="not_executed", acceptance="not_executed"),
+    "field_gate_authority_failed": _07b_reason_state(first=True, report=False, repaired=False, post="empty", pre="empty", scope="empty", attempted=0, repair_status="not_attempted_authority_failed", affected="not_executed", final_gate="not_executed", consistency="not_executed", acceptance="not_executed"),
+    "field_gate_receipt_mismatch": _07b_reason_state(first=True, report=False, repaired=False, post="empty", pre="empty", scope="empty", attempted=0, repair_status="not_attempted_receipt_mismatch", affected="field_error", final_gate="not_executed", consistency="not_executed", acceptance="not_executed"),
+    "repair_not_eligible": _07b_reason_state(first=True, report=True, repaired=False, post="empty", pre="pass", scope="empty", attempted=0, repair_status="not_attempted_not_eligible", affected="field_error", final_gate="not_executed", consistency="not_executed", acceptance="not_executed"),
+    "repair_scope_not_authorized": _07b_reason_state(first=True, report=True, repaired=False, post="empty", pre="repair", scope="intersection_empty", attempted=0, repair_status="not_attempted_scope_rejected", affected="field_error", final_gate="not_executed", consistency="not_executed", acceptance="not_executed"),
+    "repair_request_invalid": _07b_reason_state(first=True, report=True, repaired=False, post="empty", pre="repair", scope="effective", attempted=0, repair_status="not_attempted_patch_rejected", affected="field_error", final_gate="not_executed", consistency="not_executed", acceptance="not_executed"),
+    "repair_patch_invalid": _07b_reason_state(first=True, report=True, repaired=False, post="empty", pre="repair", scope="effective", attempted=0, repair_status="not_attempted_patch_rejected", affected="field_error", final_gate="not_executed", consistency="not_executed", acceptance="not_executed"),
+    "repair_post_gate_not_pass": _07b_reason_state(first=True, report=True, repaired=True, post="repair", pre="repair", scope="effective", attempted=1, repair_status="repair_completed_post_gate_failed", affected="failed", final_gate="blocked", consistency="not_executed", acceptance="not_executed"),
+    "render_failed": _07b_reason_state(first=True, report=True, repaired=True, post="pass", pre="repair", scope="effective", attempted=1, repair_status="repair_completed_final_gate_failed", affected="passed", final_gate="blocked", consistency="not_executed", acceptance="not_executed"),
+    "render_live_replay_invalid": _07b_reason_state(first=True, report=True, repaired=True, post="pass", pre="repair", scope="effective", attempted=1, repair_status="repair_completed_final_gate_failed", affected="passed", final_gate="blocked", consistency="not_executed", acceptance="not_executed"),
+    "consistency_failed": _07b_reason_state(first=True, report=True, repaired=True, post="pass", pre="repair", scope="effective", attempted=1, repair_status="repair_completed_final_gate_failed", affected="passed", final_gate="blocked", consistency="not_executed", acceptance="not_executed"),
+    "consistency_live_replay_invalid": _07b_reason_state(first=True, report=True, repaired=True, post="pass", pre="repair", scope="effective", attempted=1, repair_status="repair_completed_final_gate_failed", affected="passed", final_gate="blocked", consistency="not_executed", acceptance="not_executed"),
+    "requirement_view_failed": _07b_reason_state(first=True, report=True, repaired=True, post="pass", pre="repair", scope="effective", attempted=1, repair_status="repair_completed_final_gate_failed", affected="passed", final_gate="blocked", consistency="completed", acceptance="not_executed"),
+    "requirement_view_live_replay_invalid": _07b_reason_state(first=True, report=True, repaired=True, post="pass", pre="repair", scope="effective", attempted=1, repair_status="repair_completed_final_gate_failed", affected="passed", final_gate="blocked", consistency="completed", acceptance="not_executed"),
+    "acceptance_plan_failed": _07b_reason_state(first=True, report=True, repaired=True, post="pass", pre="repair", scope="effective", attempted=1, repair_status="repair_completed_final_gate_failed", affected="passed", final_gate="blocked", consistency="completed", acceptance="not_executed"),
+    "acceptance_plan_live_replay_invalid": _07b_reason_state(first=True, report=True, repaired=True, post="pass", pre="repair", scope="effective", attempted=1, repair_status="repair_completed_final_gate_failed", affected="passed", final_gate="blocked", consistency="completed", acceptance="not_executed"),
+    "acceptance_binding_failed": _07b_reason_state(first=True, report=True, repaired=True, post="pass", pre="repair", scope="effective", attempted=1, repair_status="repair_completed_final_gate_failed", affected="passed", final_gate="blocked", consistency="completed", acceptance="not_executed"),
+    "acceptance_binding_live_replay_invalid": _07b_reason_state(first=True, report=True, repaired=True, post="pass", pre="repair", scope="effective", attempted=1, repair_status="repair_completed_final_gate_failed", affected="passed", final_gate="blocked", consistency="completed", acceptance="not_executed"),
+    "acceptance_fixture_failed": _07b_reason_state(first=True, report=True, repaired=True, post="pass", pre="repair", scope="effective", attempted=1, repair_status="repair_completed_final_gate_failed", affected="passed", final_gate="blocked", consistency="completed", acceptance="not_executed"),
+    "acceptance_execution_failed": _07b_reason_state(first=True, report=True, repaired=True, post="pass", pre="repair", scope="effective", attempted=1, repair_status="repair_completed_final_gate_failed", affected="passed", final_gate="blocked", consistency="completed", acceptance="not_executed"),
+    "acceptance_execution_live_replay_invalid": _07b_reason_state(first=True, report=True, repaired=True, post="pass", pre="repair", scope="effective", attempted=1, repair_status="repair_completed_final_gate_failed", affected="passed", final_gate="blocked", consistency="completed", acceptance="not_executed"),
+    "consistency_or_acceptance_blocked": _07b_reason_state(first=True, report=True, repaired=True, post="pass", pre="repair", scope="effective", attempted=1, repair_status="repair_completed_final_gate_failed", affected="passed", final_gate="blocked", consistency="completed", acceptance="completed"),
+    "model_package_failed": _07b_reason_state(first=True, report=True, repaired=True, post="pass", pre="repair", scope="effective", attempted=1, repair_status="repair_completed_final_gate_failed", affected="passed", final_gate="passed", consistency="pass", acceptance="pass"),
+    "model_package_live_replay_invalid": _07b_reason_state(first=True, report=True, repaired=True, post="pass", pre="repair", scope="effective", attempted=1, repair_status="repair_completed_final_gate_failed", affected="passed", final_gate="passed", consistency="pass", acceptance="pass"),
+}
+def _07b_fallback_prefix(reason: str, _prefix_index=_07B_PREFIX_INDEX,
+                          _success=_07B_SUCCESS) -> tuple[str, ...]:
+    if reason not in _prefix_index: raise TierA07bGateDeliveryOutcomeError("outcome_state_invalid")
+    return _success[:_prefix_index[reason]]
+
+@dataclass(frozen=True)
+class TierA07bGateDeliveryOutcome:
+    status: str; case_id: str; completed_steps: tuple[str, ...]; model_route_binding: Mapping[str, object]; g0_binding: Mapping[str, object]; fallback_binding: Mapping[str, object]; first_candidate: Mapping[str, object]; repaired_candidate: Mapping[str, object]; repair_report: Mapping[str, object]; post_repair_gate: Mapping[str, object]; predicted_repair_scope: tuple[str, ...]; policy_allowed_scope: tuple[str, ...]; effective_repair_scope: tuple[str, ...]; repair_patch: Mapping[str, object]; repair_limit: int; repair_attempted: int; repair_status: str; g1_package_purpose: str; g2_action: str; retry_performed: bool; affected_gate_status: str; final_gate_status: str; consistency_status: str; acceptance_status: str; acceptance_counts: Mapping[str, int]; fallback_reason: str; fallback_attempted: bool; fallback_succeeded: bool; delivery_source: str; final_package_schema_version: str | None; final_package_id: str | None; final_package_manifest_sha256: str | None; final_package_tree_sha256: str | None; final_package_file_count: int | None; fallback_delivery_report_id: str | None; fallback_delivery_report_sha256: str | None; failure_code: str | None; outcome_id: str; schema_version: str = TIER_A_07B_GATE_DELIVERY_OUTCOME_SCHEMA_VERSION
+    @classmethod
+    def create(cls, _hash=_07b_hash,
+               _id_prefix=_07B_OUTCOME_ID_PREFIX, **values: object) -> "TierA07bGateDeliveryOutcome":
+        root = cls._root_values(**values); result = cls(**values, outcome_id=_id_prefix + _hash(root)[:20]); result.validate(); return result
+    @staticmethod
+    def _root_values(_schema_version=TIER_A_07B_GATE_DELIVERY_OUTCOME_SCHEMA_VERSION,
+                     **values: object) -> dict[str, object]:
+        root = dict(values)
+        for key in ("completed_steps", "predicted_repair_scope", "policy_allowed_scope", "effective_repair_scope"): root[key] = list(root[key])
+        for key in ("model_route_binding", "g0_binding", "fallback_binding", "first_candidate", "repaired_candidate", "repair_report", "post_repair_gate", "repair_patch", "acceptance_counts"): root[key] = dict(root[key])
+        root["schema_version"] = _schema_version; return root
+    def _root(self) -> dict[str, object]: return self._root_values(**{key: getattr(self, key) for key in self.__dataclass_fields__ if key not in {"outcome_id", "schema_version"}})
+
+    def validate(self, _schema_version=TIER_A_07B_GATE_DELIVERY_OUTCOME_SCHEMA_VERSION,
+                 _id_prefix=_07B_OUTCOME_ID_PREFIX, _safe_id=_07a_safe_id,
+                 _validate_model_binding=_07b_validate_model_route_binding,
+                 _all_or_none=_07b_all_or_none, _scope=_07b_scope,
+                 _intersection=_07b_intersection, _validate_counts=_07b_validate_counts,
+                 _empty_counts=_07b_empty_counts, _reason_state=_07B_REASON_STATE,
+                 _prefix_index=_07B_PREFIX_INDEX, _fallback_prefix=_07b_fallback_prefix,
+                 _success=_07B_SUCCESS, _failures=frozenset(_07B_FAILURES),
+                 _step_first=_07B_STEP_FIRST, _step_scope=_07B_STEP_SCOPE,
+                 _step_patch=_07B_STEP_PATCH, _step_consistency=_07B_STEP_CONSISTENCY,
+                 _step_execution=_07B_STEP_EXECUTION, _step_fallback=_07B_STEP_FALLBACK,
+                 _step_model=_07B_STEP_MODEL, _step_g0=_07B_STEP_G0,
+                 _model_binding_keys=_07A_MODEL_ROUTE_BINDING_KEYS,
+                 _g0_binding_keys=_07A_G0_BINDING_KEYS,
+                 _fallback_binding_keys=_07A_FALLBACK_BINDING_KEYS,
+                 _first_keys=_07B_FIRST_KEYS, _report_keys=_07B_REPORT_KEYS,
+                 _patch_keys=_07B_PATCH_KEYS,
+                 _result_package_schema_version=RESULT_PACKAGE_SCHEMA_VERSION,
+                 _result_package_v2_schema_version=RESULT_PACKAGE_V2_SCHEMA_VERSION,
+                 _hash=_07b_hash, _is_sha256_fn=_is_sha256) -> None:
+        if self.schema_version != _schema_version or not _safe_id(self.case_id) or type(self.completed_steps) is not tuple or len(self.completed_steps) != len(set(self.completed_steps)) or any(not _safe_id(step) for step in self.completed_steps): raise TierA07bGateDeliveryOutcomeError("outcome_state_invalid")
+        model_binding_state = _validate_model_binding(
+            self.model_route_binding, _keys=_model_binding_keys
+        )
+        g0 = _all_or_none(self.g0_binding, _g0_binding_keys); fallback = _all_or_none(self.fallback_binding, _fallback_binding_keys); first = _all_or_none(self.first_candidate, _first_keys); repaired = _all_or_none(self.repaired_candidate, _first_keys);
+        if first and repaired and (self.first_candidate["page_id"] != self.repaired_candidate["page_id"] or self.first_candidate["traceability_sha256"] != self.repaired_candidate["traceability_sha256"]): raise TierA07bGateDeliveryOutcomeError("outcome_state_invalid")
+        report = _all_or_none(self.repair_report, _report_keys, report=True); post = _all_or_none(self.post_repair_gate, _report_keys, report=True); patch = _all_or_none(self.repair_patch, _patch_keys)
+        predicted = _scope(self.predicted_repair_scope, "predicted_scope"); policy = _scope(self.policy_allowed_scope, "policy_scope"); effective = _scope(self.effective_repair_scope, "effective_scope")
+        if effective != _intersection(predicted, policy): raise TierA07bGateDeliveryOutcomeError("outcome_state_invalid")
+        counts = _validate_counts(self.acceptance_counts)
+
+        def late_state_is_empty() -> bool:
+            return (
+                not first and not repaired and not report and not post and not patch
+                and predicted == () and policy == () and effective == ()
+                and self.repair_attempted == 0 and self.repair_status == "not_attempted"
+                and self.affected_gate_status == "not_executed"
+                and self.final_gate_status == "not_executed"
+                and self.consistency_status == "not_executed"
+                and self.acceptance_status == "not_executed"
+                and counts == _empty_counts()
+            )
+
+        def require_assembled_first_binding() -> None:
+            if (
+                model_binding_state != "assembled" or not first
+                or self.first_candidate["page_id"]
+                != self.model_route_binding["assembled_page_id"]
+                or self.first_candidate["page_spec_sha256"]
+                != self.model_route_binding["assembled_page_spec_sha256"]
+            ):
+                raise TierA07bGateDeliveryOutcomeError("outcome_state_invalid")
+
+        def validate_repair_route_prefix(reason: str) -> None:
+            """Validate the exact reason-specific state before fallback."""
+            state = _reason_state[reason]
+            require_assembled_first_binding()
+            if (
+                first is not state["first"]
+                or report is not state["report"]
+                or repaired is not state["repaired"]
+                or patch is not state["repaired"]
+            ):
+                raise TierA07bGateDeliveryOutcomeError("outcome_state_invalid")
+
+            post_mode = state["post"]
+            if post is not (post_mode != "empty"):
+                raise TierA07bGateDeliveryOutcomeError("outcome_state_invalid")
+            if post_mode == "repair" and (
+                self.post_repair_gate["decision"] != "repair"
+                or self.post_repair_gate["repair_eligible"] is not True
+            ):
+                raise TierA07bGateDeliveryOutcomeError("outcome_state_invalid")
+            if post_mode == "pass" and (
+                self.post_repair_gate["decision"] != "pass"
+                or self.post_repair_gate["repair_eligible"] is not False
+            ):
+                raise TierA07bGateDeliveryOutcomeError("outcome_state_invalid")
+
+            pre_mode = state["pre"]
+            if pre_mode == "repair" and (
+                self.repair_report["decision"] != "repair"
+                or self.repair_report["repair_eligible"] is not True
+            ):
+                raise TierA07bGateDeliveryOutcomeError("outcome_state_invalid")
+            if pre_mode == "pass" and (
+                self.repair_report["decision"] != "pass"
+                or self.repair_report["repair_eligible"] is not False
+            ):
+                raise TierA07bGateDeliveryOutcomeError("outcome_state_invalid")
+
+            scope_mode = state["scope"]
+            if scope_mode == "empty" and (predicted or policy or effective):
+                raise TierA07bGateDeliveryOutcomeError("outcome_state_invalid")
+            if scope_mode == "intersection_empty" and (
+                not predicted or effective
+                or effective != _intersection(predicted, policy)
+            ):
+                raise TierA07bGateDeliveryOutcomeError("outcome_state_invalid")
+            if scope_mode == "effective" and (
+                not predicted or not policy or not effective
+                or effective != _intersection(predicted, policy)
+            ):
+                raise TierA07bGateDeliveryOutcomeError("outcome_state_invalid")
+
+            if (
+                self.repair_attempted != state["attempted"]
+                or self.repair_status != state["repair_status"]
+                or self.affected_gate_status != state["affected"]
+                or self.final_gate_status != state["final_gate"]
+            ):
+                raise TierA07bGateDeliveryOutcomeError("outcome_state_invalid")
+
+            consistency_mode = state["consistency"]
+            if consistency_mode == "not_executed":
+                if self.consistency_status != "not_executed":
+                    raise TierA07bGateDeliveryOutcomeError("outcome_state_invalid")
+            elif consistency_mode == "pass":
+                if self.consistency_status != "pass":
+                    raise TierA07bGateDeliveryOutcomeError("outcome_state_invalid")
+            elif self.consistency_status not in {"pass", "fail"}:
+                raise TierA07bGateDeliveryOutcomeError("outcome_state_invalid")
+
+            acceptance_mode = state["acceptance"]
+            if acceptance_mode == "not_executed":
+                if self.acceptance_status != "not_executed" or counts != _empty_counts():
+                    raise TierA07bGateDeliveryOutcomeError("outcome_state_invalid")
+            else:
+                if self.acceptance_status not in {"pass", "blocked"} or counts["total"] < 1:
+                    raise TierA07bGateDeliveryOutcomeError("outcome_state_invalid")
+                if self.acceptance_status == "pass" and (counts["fail"] or counts["unknown"]):
+                    raise TierA07bGateDeliveryOutcomeError("outcome_state_invalid")
+                if self.acceptance_status == "blocked" and not (counts["fail"] or counts["unknown"]):
+                    raise TierA07bGateDeliveryOutcomeError("outcome_state_invalid")
+                if acceptance_mode == "pass" and self.acceptance_status != "pass":
+                    raise TierA07bGateDeliveryOutcomeError("outcome_state_invalid")
+
+            if reason == "consistency_or_acceptance_blocked" and (
+                self.consistency_status == "pass" and self.acceptance_status == "pass"
+            ):
+                raise TierA07bGateDeliveryOutcomeError("outcome_state_invalid")
+
+        if _step_first not in self.completed_steps and first:
+            raise TierA07bGateDeliveryOutcomeError("outcome_state_invalid")
+        if _step_scope not in self.completed_steps and report:
+            raise TierA07bGateDeliveryOutcomeError("outcome_state_invalid")
+        if _step_patch not in self.completed_steps and (repaired or patch or post or self.repair_attempted):
+            raise TierA07bGateDeliveryOutcomeError("outcome_state_invalid")
+        if _step_consistency not in self.completed_steps and self.consistency_status != "not_executed":
+            raise TierA07bGateDeliveryOutcomeError("outcome_state_invalid")
+        if _step_execution not in self.completed_steps and (self.acceptance_status != "not_executed" or counts != _empty_counts()):
+            raise TierA07bGateDeliveryOutcomeError("outcome_state_invalid")
+        if self.repair_status not in {"not_attempted", "not_attempted_receipt_invalid", "not_attempted_authority_failed", "not_attempted_receipt_mismatch", "not_attempted_not_eligible", "not_attempted_scope_rejected", "not_attempted_patch_rejected", "repair_completed_post_gate_failed", "repair_completed_final_gate_failed", "recovered_success"}: raise TierA07bGateDeliveryOutcomeError("outcome_state_invalid")
+        if type(self.repair_limit) is not int or self.repair_limit != 1 or type(self.repair_attempted) is not int or self.repair_attempted not in {0, 1} or type(self.retry_performed) is not bool or self.retry_performed: raise TierA07bGateDeliveryOutcomeError("outcome_state_invalid")
+        if self.g1_package_purpose not in {"not_generated", "evaluation_only"} or self.g2_action not in {"model_repair", "frozen_g0_fallback", "failed_delivery"} or self.affected_gate_status not in {"not_executed", "field_error", "passed", "failed"} or self.final_gate_status not in {"not_executed", "blocked", "passed"} or self.consistency_status not in {"not_executed", "pass", "fail"} or self.acceptance_status not in {"not_executed", "pass", "blocked"}: raise TierA07bGateDeliveryOutcomeError("outcome_state_invalid")
+        if self.acceptance_status == "pass" and (counts["fail"] or counts["unknown"]):
+            raise TierA07bGateDeliveryOutcomeError("outcome_state_invalid")
+        if self.acceptance_status == "blocked" and not (counts["fail"] or counts["unknown"]):
+            raise TierA07bGateDeliveryOutcomeError("outcome_state_invalid")
+        if type(self.fallback_attempted) is not bool or type(self.fallback_succeeded) is not bool: raise TierA07bGateDeliveryOutcomeError("outcome_state_invalid")
+        package_values = (self.final_package_schema_version, self.final_package_id, self.final_package_manifest_sha256, self.final_package_tree_sha256, self.final_package_file_count); package_present = [item is not None for item in package_values]
+        if any(package_present) and not all(package_present): raise TierA07bGateDeliveryOutcomeError("outcome_state_invalid")
+        if all(package_present) and (self.final_package_schema_version not in {_result_package_schema_version, _result_package_v2_schema_version} or not _safe_id(self.final_package_id) or not _is_sha256_fn(self.final_package_manifest_sha256) or not _is_sha256_fn(self.final_package_tree_sha256) or type(self.final_package_file_count) is not int or self.final_package_file_count < 1): raise TierA07bGateDeliveryOutcomeError("outcome_state_invalid")
+        report_pair = (self.fallback_delivery_report_id, self.fallback_delivery_report_sha256); fallback_report = any(item is not None for item in report_pair)
+        if fallback_report and (not all(item is not None for item in report_pair) or not _safe_id(self.fallback_delivery_report_id) or not _is_sha256_fn(self.fallback_delivery_report_sha256)): raise TierA07bGateDeliveryOutcomeError("outcome_state_invalid")
+        if self.status == "recovered_success":
+            if self.completed_steps != _success or not (self.model_route_binding["verified"] and g0 and fallback and first and repaired and report and post and patch) or self.repair_status != "recovered_success" or self.repair_attempted != 1 or self.repair_report["decision"] != "repair" or self.post_repair_gate["decision"] != "pass" or self.affected_gate_status != "passed" or self.final_gate_status != "passed" or self.consistency_status != "pass" or counts["total"] < 1 or counts["fail"] or counts["unknown"] or self.g1_package_purpose != "evaluation_only" or self.g2_action != "model_repair" or self.fallback_reason != "none" or self.fallback_attempted or self.fallback_succeeded or self.delivery_source != "model_repaired_v1" or not all(package_present) or self.final_package_schema_version != _result_package_schema_version or fallback_report or self.failure_code is not None: raise TierA07bGateDeliveryOutcomeError("outcome_state_invalid")
+            require_assembled_first_binding()
+        elif self.status == "fallback_delivery":
+            if self.fallback_reason not in _prefix_index or self.completed_steps != (*_fallback_prefix(self.fallback_reason), _step_fallback) or not (self.model_route_binding["verified"] and g0 and fallback) or not self.fallback_attempted or not self.fallback_succeeded or self.delivery_source != "g0_frozen_fallback" or self.g1_package_purpose != "not_generated" or self.g2_action != "frozen_g0_fallback" or not all(package_present) or self.final_package_schema_version != _result_package_v2_schema_version or not fallback_report or self.failure_code is not None: raise TierA07bGateDeliveryOutcomeError("outcome_state_invalid")
+            if self.fallback_reason == "model_route_not_assembled":
+                if model_binding_state != "fail_closed" or not late_state_is_empty(): raise TierA07bGateDeliveryOutcomeError("outcome_state_invalid")
+            else:
+                validate_repair_route_prefix(self.fallback_reason)
+        elif self.status == "failed_delivery":
+            if self.failure_code not in _failures or self.delivery_source != "unavailable" or any(package_present) or fallback_report or self.fallback_succeeded or self.g1_package_purpose != "not_generated" or self.g2_action != "failed_delivery": raise TierA07bGateDeliveryOutcomeError("outcome_state_invalid")
+            expected = {"model_route_validation_failed": (), "frozen_g0_fallback_invalid": (_step_model,), "output_destination_invalid": (_step_model, _step_g0)}.get(self.failure_code)
+            if expected is not None and self.completed_steps != expected: raise TierA07bGateDeliveryOutcomeError("outcome_state_invalid")
+            if expected is not None and (self.fallback_reason != "not_attempted" or self.fallback_attempted or self.repair_status != "not_attempted" or not late_state_is_empty()): raise TierA07bGateDeliveryOutcomeError("outcome_state_invalid")
+            if self.failure_code == "model_route_validation_failed" and (model_binding_state != "unverified" or g0 or fallback): raise TierA07bGateDeliveryOutcomeError("outcome_state_invalid")
+            if self.failure_code == "frozen_g0_fallback_invalid" and (model_binding_state == "unverified" or not g0 or fallback): raise TierA07bGateDeliveryOutcomeError("outcome_state_invalid")
+            if self.failure_code == "output_destination_invalid" and (model_binding_state == "unverified" or not g0 or not fallback): raise TierA07bGateDeliveryOutcomeError("outcome_state_invalid")
+            if expected is None:
+                if not self.completed_steps or self.completed_steps[-1] == _step_fallback or self.fallback_reason not in _prefix_index or self.completed_steps != _fallback_prefix(self.fallback_reason) or not self.fallback_attempted:
+                    raise TierA07bGateDeliveryOutcomeError("outcome_state_invalid")
+                if self.fallback_reason == "model_route_not_assembled":
+                    if model_binding_state != "fail_closed" or not late_state_is_empty(): raise TierA07bGateDeliveryOutcomeError("outcome_state_invalid")
+                else:
+                    validate_repair_route_prefix(self.fallback_reason)
+        else: raise TierA07bGateDeliveryOutcomeError("outcome_state_invalid")
+        if self.outcome_id != _id_prefix + _hash(self._root())[:20]: raise TierA07bGateDeliveryOutcomeError("outcome_identity_invalid")
+
+    def to_dict(self) -> dict[str, object]: self.validate(); return {"outcome_id": self.outcome_id, **self._root()}
+    def canonical_bytes(self, _canonical_json_bytes_fn=_canonical_json_bytes) -> bytes: return _canonical_json_bytes_fn(self.to_dict())
+    @classmethod
+    def from_dict(cls, payload: object) -> "TierA07bGateDeliveryOutcome":
+        expected = set(cls.__dataclass_fields__); maps = {"model_route_binding", "g0_binding", "fallback_binding", "first_candidate", "repaired_candidate", "repair_report", "post_repair_gate", "repair_patch", "acceptance_counts"}; lists = {"completed_steps", "predicted_repair_scope", "policy_allowed_scope", "effective_repair_scope"}
+        if not isinstance(payload, Mapping) or set(payload) != expected or any(not isinstance(payload[key], Mapping) for key in maps) or any(type(payload[key]) is not list for key in lists): raise TierA07bGateDeliveryOutcomeError("outcome_schema_invalid")
+        try: result = cls(**{key: tuple(payload[key]) if key in lists else dict(payload[key]) if key in maps else payload[key] for key in expected})
+        except (KeyError, TypeError, ValueError) as exc: raise TierA07bGateDeliveryOutcomeError("outcome_schema_invalid") from exc
+        result.validate(); return result
+    @classmethod
+    def from_bytes(cls, raw: object, _load_canonical_json_fn=_load_canonical_json) -> "TierA07bGateDeliveryOutcome":
+        if type(raw) is not bytes: raise TierA07bGateDeliveryOutcomeError("serialized_bytes_invalid")
+        try: result = cls.from_dict(_load_canonical_json_fn(raw))
+        except Exception as exc:
+            if isinstance(exc, TierA07bGateDeliveryOutcomeError): raise
+            raise TierA07bGateDeliveryOutcomeError("serialized_bytes_invalid") from exc
+        if result.canonical_bytes() != raw: raise TierA07bGateDeliveryOutcomeError("serialized_bytes_invalid")
+        return result
+
+
+def _build_tier_a_07b_run(*, outcome_type, report_type, patch_type, model_type, model_validate, model_structural, model_bytes, model_binding_projection=_07b_model_binding, g0_projection=_07a_g0_binding, fallback_binding_projection=_07b_binding_projection, early_failure_factory=_07b_make_early_failure_outcome, empty_model_binding=_07b_empty_model_binding, empty_binding=_07b_empty, empty_counts=_07b_empty_counts, page_binding_projection=_07b_page_binding, report_binding_projection=_07b_report_binding, scope_intersection=_07b_intersection, fallback_prefix=_07b_fallback_prefix, fixture_authority, assembly_authority, field_gate_authority, renderer_type, render_result_type, render_projection, consistency_type, consistency_projection, requirement_projector, requirement_projection, plan_compiler, plan_projection, binding_compiler, binding_projection, acceptance_fixture_authority, acceptance_executor, browser_projection, count_projection, packager_type, package_type, package_projection, fallback_binding_authority, fallback_deliverer, load_fallback_report, fallback_projection, path_preflight, staging_path, cleanup, commit, rollback, _safe_id=_07a_safe_id, _g0_binding_keys=_07A_G0_BINDING_KEYS, _fallback_binding_keys=_07A_FALLBACK_BINDING_KEYS, _first_keys=_07B_FIRST_KEYS, _report_keys=_07B_REPORT_KEYS, _patch_keys=_07B_PATCH_KEYS, _success=_07B_SUCCESS, _step_fallback=_07B_STEP_FALLBACK):
+    def live_first(outcome: object, fixture: object, context: object, guidance: object) -> PageSpec:
+        if type(outcome) is not model_type: raise TierA07bGateDeliveryOutcomeError("model_route_invalid")
+        live_fixture = fixture_authority(fixture); assembled = assembly_authority(live_fixture.raw_response, context, guidance)
+        expected = {"raw_response_sha256": live_fixture.raw_response.sha256, "raw_response_byte_length": len(live_fixture.raw_response.raw_bytes), "model_semantic_candidate_sha256": assembled.candidate.sha256(), "assembled_page_id": assembled.page_spec.page_id, "assembly_report_id": assembled.report.report_id, "assembly_report_sha256": assembled.report.sha256(), "assembled_page_spec_sha256": assembled.report.assembled_page_spec_sha256}
+        if outcome.disposition != "scripted_fixture_assembled" or dict(outcome.artifacts) != expected: raise TierA07bGateDeliveryOutcomeError("model_route_invalid")
+        return assembled.page_spec
+    def run(self, *, model_route_outcome: object, frozen_g0_reference: object, package: object, context: object, guidance: object, manifest: object, selected: object, local_request: object, pre_invocation_audit: object, local_qwen_preparation: object, execution_branch: object, scripted_local_fixture: object = None, case_id: str, fallback_record: object, fallback_snapshot_dir: object, render_output_dir: object, model_package_output_dir: object, fallback_output_dir: object, scripted_acceptance_fixture: object, field_gate_report: object, repair_patch: object) -> TierA07bGateDeliveryOutcome:
+        if not _safe_id(case_id): raise TierA07bGateDeliveryOutcomeError("case_id_invalid")
+        def make_early(**values: object) -> TierA07bGateDeliveryOutcome:
+            try:
+                return early_failure_factory(outcome_type, **values)
+            except Exception as exc:
+                raise TierA07bGateDeliveryOutcomeError("live_replay_invalid") from exc
+        model_binding = empty_model_binding(); g0_binding = empty_binding(_g0_binding_keys); fallback_binding = empty_binding(_fallback_binding_keys); first = empty_binding(_first_keys); repaired = empty_binding(_first_keys); report_binding = empty_binding(_report_keys); post_binding = empty_binding(_report_keys); patch_binding = empty_binding(_patch_keys); predicted: tuple[str, ...] = (); policy: tuple[str, ...] = (); effective: tuple[str, ...] = ()
+        def make(status: str, steps: tuple[str, ...], **changes: object) -> TierA07bGateDeliveryOutcome:
+            values = {"model_route_binding": model_binding, "g0_binding": g0_binding, "fallback_binding": fallback_binding, "first_candidate": first, "repaired_candidate": repaired, "repair_report": report_binding, "post_repair_gate": post_binding, "predicted_repair_scope": (), "policy_allowed_scope": (), "effective_repair_scope": (), "repair_patch": patch_binding, "repair_limit": 1, "repair_attempted": 0, "repair_status": "not_attempted", "g1_package_purpose": "not_generated", "g2_action": "failed_delivery", "retry_performed": False, "affected_gate_status": "not_executed", "final_gate_status": "not_executed", "consistency_status": "not_executed", "acceptance_status": "not_executed", "acceptance_counts": empty_counts(), "fallback_reason": "not_attempted", "fallback_attempted": False, "fallback_succeeded": False, "delivery_source": "unavailable", "final_package_schema_version": None, "final_package_id": None, "final_package_manifest_sha256": None, "final_package_tree_sha256": None, "final_package_file_count": None, "fallback_delivery_report_id": None, "fallback_delivery_report_sha256": None, "failure_code": None}
+            values.update(changes); return outcome_type.create(status=status, case_id=case_id, completed_steps=steps, **values)
+        def failed(code: str, steps: tuple[str, ...], **changes: object) -> TierA07bGateDeliveryOutcome: return make("failed_delivery", steps, failure_code=code, **changes)
+        try:
+            if type(model_route_outcome) is not model_type: raise TypeError("model outcome")
+            model_validate(model_route_outcome, frozen_g0_reference=frozen_g0_reference, package=package, context=context, guidance=guidance, manifest=manifest, selected=selected, local_request=local_request, pre_invocation_audit=pre_invocation_audit, local_qwen_preparation=local_qwen_preparation, execution_branch=execution_branch, scripted_local_fixture=scripted_local_fixture)
+            model_structural(model_route_outcome)
+        except Exception:
+            return make_early(
+                case_id=case_id,
+                failure_code="model_route_validation_failed",
+                model_route_binding=model_binding, g0_binding=g0_binding,
+                fallback_binding=fallback_binding,
+            )
+        try:
+            model_binding = model_binding_projection(model_route_outcome, model_bytes)
+            g0_binding = g0_projection(model_route_outcome.frozen_g0_reference)
+        except Exception as exc:
+            raise TierA07bGateDeliveryOutcomeError("live_replay_invalid") from exc
+        try: fallback_binding = fallback_binding_authority(case_id=case_id, record=fallback_record, snapshot_dir=fallback_snapshot_dir, reference=frozen_g0_reference, package=package, context=context, guidance=guidance)
+        except Exception:
+            return make_early(
+                case_id=case_id,
+                failure_code="frozen_g0_fallback_invalid",
+                model_route_binding=model_binding, g0_binding=g0_binding,
+                fallback_binding=fallback_binding,
+            )
+        try:
+            fallback_binding = fallback_binding_projection(
+                fallback_binding, _fallback_binding_keys
+            )
+        except Exception as exc:
+            raise TierA07bGateDeliveryOutcomeError("live_replay_invalid") from exc
+        try: destinations = path_preflight(render_output_dir, model_package_output_dir, fallback_output_dir, package_dir=package.package_dir, snapshot_dir=fallback_snapshot_dir)
+        except Exception:
+            return make_early(
+                case_id=case_id,
+                failure_code="output_destination_invalid",
+                model_route_binding=model_binding, g0_binding=g0_binding,
+                fallback_binding=fallback_binding,
+            )
+        def fallback(reason: str, *, attempted: int = 0, repair_status: str = "not_attempted", affected: str = "not_executed", final_gate: str = "not_executed", consistency: str = "not_executed", acceptance: str = "not_executed", counts: Mapping[str, int] | None = None) -> TierA07bGateDeliveryOutcome:
+            prefix = fallback_prefix(reason); acceptance_counts = empty_counts() if counts is None else dict(counts)
+            try: stage = staging_path(destinations.fallback_output_dir, "tier-a-07b-fallback-staging")
+            except Exception: return failed("fallback_delivery_failed", prefix, predicted_repair_scope=predicted, policy_allowed_scope=policy, effective_repair_scope=effective, repair_attempted=attempted, repair_status=repair_status, affected_gate_status=affected, final_gate_status=final_gate, consistency_status=consistency, acceptance_status=acceptance, acceptance_counts=acceptance_counts, fallback_reason=reason, fallback_attempted=True)
+            receipt = None
+            try: delivered_stage = fallback_deliverer(fallback_snapshot_dir, fallback_record, stage)
+            except Exception:
+                cleanup(stage); return failed("fallback_delivery_failed", prefix, predicted_repair_scope=predicted, policy_allowed_scope=policy, effective_repair_scope=effective, repair_attempted=attempted, repair_status=repair_status, affected_gate_status=affected, final_gate_status=final_gate, consistency_status=consistency, acceptance_status=acceptance, acceptance_counts=acceptance_counts, fallback_reason=reason, fallback_attempted=True)
+            try:
+                delivered_stage.validate_against(fallback_snapshot_dir, stage / "result_package", fallback_record); fallback_projection(delivered_stage); receipt = commit(stage, destinations.fallback_output_dir, destination_existed=destinations.fallback_existed); delivered = load_fallback_report(destinations.fallback_output_dir, fallback_snapshot_dir, fallback_record)
+                if delivered.to_dict() != delivered_stage.to_dict(): raise ValueError("fallback changed")
+            except Exception:
+                cleanup(stage); rollback(receipt, destinations.fallback_output_dir); return failed("fallback_live_replay_invalid", prefix, predicted_repair_scope=predicted, policy_allowed_scope=policy, effective_repair_scope=effective, repair_attempted=attempted, repair_status=repair_status, affected_gate_status=affected, final_gate_status=final_gate, consistency_status=consistency, acceptance_status=acceptance, acceptance_counts=acceptance_counts, fallback_reason=reason, fallback_attempted=True)
+            return make("fallback_delivery", (*prefix, _step_fallback), g1_package_purpose="not_generated", g2_action="frozen_g0_fallback", predicted_repair_scope=predicted, policy_allowed_scope=policy, effective_repair_scope=effective, repair_attempted=attempted, repair_status=repair_status, affected_gate_status=affected, final_gate_status=final_gate, consistency_status=consistency, acceptance_status=acceptance, acceptance_counts=acceptance_counts, fallback_reason=reason, fallback_attempted=True, fallback_succeeded=True, delivery_source="g0_frozen_fallback", final_package_schema_version=delivered.package_schema_version, final_package_id=delivered.package_id, final_package_manifest_sha256=fallback_binding["package_manifest_sha256"], final_package_tree_sha256=delivered.delivered_package_tree_sha256, final_package_file_count=len(delivered.delivered_inventory), fallback_delivery_report_id=delivered.report_id, fallback_delivery_report_sha256=delivered.report_sha256)
+        if model_binding["disposition"] == "fail_closed":
+            return fallback("model_route_not_assembled")
+        try:
+            first_page = live_first(model_route_outcome, scripted_local_fixture, context, guidance)
+            if first_page.page_id != frozen_g0_reference.page_id: raise ValueError("same case")
+            first = page_binding_projection(first_page)
+        except Exception as exc:
+            raise TierA07bGateDeliveryOutcomeError("live_replay_invalid") from exc
+        try: supplied = report_type.from_bytes(field_gate_report)
+        except Exception: return fallback("repair_receipt_invalid", repair_status="not_attempted_receipt_invalid")
+        try: authority = field_gate_authority(case_id=case_id, page_spec=first_page, local_request=local_request)
+        except Exception: return fallback("field_gate_authority_failed", repair_status="not_attempted_authority_failed")
+        try:
+            if supplied.canonical_bytes() != authority.canonical_bytes(): raise ValueError("receipt mismatch")
+            authority.validate_against(case_id, first_page, authority.request_sha256); report_binding = report_binding_projection(authority)
+        except Exception: return fallback("field_gate_receipt_mismatch", repair_status="not_attempted_receipt_mismatch", affected="field_error")
+        predicted, policy = authority.predicted_repair_scope, authority.policy_allowed_scope; effective = scope_intersection(predicted, policy)
+        if authority.decision != "repair" or not authority.repair_eligible: return fallback("repair_not_eligible", repair_status="not_attempted_not_eligible", affected="field_error")
+        if not effective: return fallback("repair_scope_not_authorized", repair_status="not_attempted_scope_rejected", affected="field_error")
+        try: patch = patch_type.from_bytes(repair_patch)
+        except Exception: return fallback("repair_request_invalid", repair_status="not_attempted_patch_rejected", affected="field_error")
+        try:
+            repaired_page = patch.apply(authority, first_page, effective); repaired = page_binding_projection(repaired_page); patch_binding = {"patch_id": patch.patch_id, "patch_sha256": patch.sha256(), "operation_count": len(patch.operations)}
+        except Exception: return fallback("repair_patch_invalid", repair_status="not_attempted_patch_rejected", affected="field_error")
+        try:
+            post = field_gate_authority(case_id=case_id, page_spec=repaired_page, local_request=local_request); post_binding = report_binding_projection(post)
+            if post.decision != "pass" or (post.authority_id, post.authority_sha256, post.rule_version, post.request_sha256) != (authority.authority_id, authority.authority_sha256, authority.rule_version, authority.request_sha256): raise ValueError("post gate")
+        except Exception: return fallback("repair_post_gate_not_pass", attempted=1, repair_status="repair_completed_post_gate_failed", affected="failed", final_gate="blocked")
+
+        try: render_stage = staging_path(destinations.render_output_dir, "tier-a-07b-render-staging")
+        except Exception: return fallback("render_live_replay_invalid", attempted=1, repair_status="repair_completed_final_gate_failed", affected="passed", final_gate="blocked")
+        render_receipt = None
+        try: staged_render = renderer_type().render(repaired_page, render_stage)
+        except Exception:
+            cleanup(render_stage); return fallback("render_failed", attempted=1, repair_status="repair_completed_final_gate_failed", affected="passed", final_gate="blocked")
+        try:
+            render_projection(repaired_page, staged_render); render_receipt = commit(render_stage, destinations.render_output_dir, destination_existed=destinations.render_existed)
+            render_result = render_result_type(page_id=repaired_page.page_id, output_dir=destinations.render_output_dir, index_html=destinations.render_output_dir / "index.html", styles_css=destinations.render_output_dir / "styles.css", app_js=destinations.render_output_dir / "app.js", render_manifest=destinations.render_output_dir / "render_manifest.json")
+            render_projection(repaired_page, render_result)
+        except Exception:
+            cleanup(render_stage); rollback(render_receipt, destinations.render_output_dir); return fallback("render_live_replay_invalid", attempted=1, repair_status="repair_completed_final_gate_failed", affected="passed", final_gate="blocked")
+        try: consistency = consistency_type().check(repaired_page, render_result)
+        except Exception: return fallback("consistency_failed", attempted=1, repair_status="repair_completed_final_gate_failed", affected="passed", final_gate="blocked")
+        try: consistency_projection(consistency); consistency_status = "pass" if consistency.passed else "fail"
+        except Exception: return fallback("consistency_live_replay_invalid", attempted=1, repair_status="repair_completed_final_gate_failed", affected="passed", final_gate="blocked")
+        try: view = requirement_projector(context)
+        except Exception: return fallback("requirement_view_failed", attempted=1, repair_status="repair_completed_final_gate_failed", affected="passed", final_gate="blocked", consistency=consistency_status)
+        try: requirement_projection(view)
+        except Exception: return fallback("requirement_view_live_replay_invalid", attempted=1, repair_status="repair_completed_final_gate_failed", affected="passed", final_gate="blocked", consistency=consistency_status)
+        try: plan = plan_compiler(view)
+        except Exception: return fallback("acceptance_plan_failed", attempted=1, repair_status="repair_completed_final_gate_failed", affected="passed", final_gate="blocked", consistency=consistency_status)
+        try:
+            plan.validate_against(view); plan_projection(plan)
+        except Exception: return fallback("acceptance_plan_live_replay_invalid", attempted=1, repair_status="repair_completed_final_gate_failed", affected="passed", final_gate="blocked", consistency=consistency_status)
+        try: binding = binding_compiler(view, plan, repaired_page, render_result)
+        except Exception: return fallback("acceptance_binding_failed", attempted=1, repair_status="repair_completed_final_gate_failed", affected="passed", final_gate="blocked", consistency=consistency_status)
+        try:
+            binding.validate_against(view, plan, repaired_page, render_result); binding_projection(binding)
+        except Exception: return fallback("acceptance_binding_live_replay_invalid", attempted=1, repair_status="repair_completed_final_gate_failed", affected="passed", final_gate="blocked", consistency=consistency_status)
+        try: fixture = acceptance_fixture_authority(scripted_acceptance_fixture)
+        except Exception: return fallback("acceptance_fixture_failed", attempted=1, repair_status="repair_completed_final_gate_failed", affected="passed", final_gate="blocked", consistency=consistency_status)
+        try: browser = acceptance_executor(fixture, binding)
+        except Exception: return fallback("acceptance_execution_failed", attempted=1, repair_status="repair_completed_final_gate_failed", affected="passed", final_gate="blocked", consistency=consistency_status)
+        try:
+            browser.validate_against(binding); browser_projection(browser); counts = count_projection(browser); acceptance_status = "blocked" if counts["fail"] or counts["unknown"] else "pass"
+        except Exception: return fallback("acceptance_execution_live_replay_invalid", attempted=1, repair_status="repair_completed_final_gate_failed", affected="passed", final_gate="blocked", consistency=consistency_status)
+        if consistency_status != "pass" or acceptance_status != "pass": return fallback("consistency_or_acceptance_blocked", attempted=1, repair_status="repair_completed_final_gate_failed", affected="passed", final_gate="blocked", consistency=consistency_status, acceptance=acceptance_status, counts=counts)
+        try: package_stage = staging_path(destinations.model_package_output_dir, "tier-a-07b-model-package-staging")
+        except Exception: return fallback("model_package_live_replay_invalid", attempted=1, repair_status="repair_completed_final_gate_failed", affected="passed", final_gate="passed", consistency=consistency_status, acceptance=acceptance_status, counts=counts)
+        package_receipt = None
+        try: staged_package = packager_type().package(context, repaired_page, render_result, consistency, package_stage)
+        except Exception:
+            cleanup(package_stage); return fallback("model_package_failed", attempted=1, repair_status="repair_completed_final_gate_failed", affected="passed", final_gate="passed", consistency=consistency_status, acceptance=acceptance_status, counts=counts)
+        try:
+            staged_projection = package_projection(staged_package, package_stage); package_receipt = commit(package_stage, destinations.model_package_output_dir, destination_existed=destinations.model_package_existed)
+            result_package = package_type(package_id=staged_package.package_id, page_id=staged_package.page_id, package_dir=destinations.model_package_output_dir, entrypoint=staged_package.entrypoint, result_summary=staged_package.result_summary, package_manifest=staged_package.package_manifest)
+            final_projection = package_projection(result_package, destinations.model_package_output_dir)
+            if staged_projection != final_projection: raise ValueError("package changed")
+        except Exception:
+            cleanup(package_stage); rollback(package_receipt, destinations.model_package_output_dir); return fallback("model_package_live_replay_invalid", attempted=1, repair_status="repair_completed_final_gate_failed", affected="passed", final_gate="passed", consistency=consistency_status, acceptance=acceptance_status, counts=counts)
+        return make("recovered_success", _success, g1_package_purpose="evaluation_only", g2_action="model_repair", repaired_candidate=repaired, predicted_repair_scope=predicted, policy_allowed_scope=policy, effective_repair_scope=effective, repair_patch=patch_binding, repair_attempted=1, repair_status="recovered_success", affected_gate_status="passed", final_gate_status="passed", consistency_status=consistency_status, acceptance_status=acceptance_status, acceptance_counts=counts, fallback_reason="none", delivery_source="model_repaired_v1", final_package_schema_version=final_projection["model_package_schema_version"], final_package_id=final_projection["model_package_id"], final_package_manifest_sha256=final_projection["model_package_manifest_sha256"], final_package_tree_sha256=final_projection["model_package_tree_sha256"], final_package_file_count=final_projection["model_package_file_count"])
+    return run
+
+class TierA07bOneRepairOrchestrator:
+    """Captured local deterministic/synthetic one-repair route; no model call."""
+    __slots__ = ()
+    run = _build_tier_a_07b_run(outcome_type=TierA07bGateDeliveryOutcome, report_type=TierA07bFieldGateReport, patch_type=TierA07bRepairPatch, model_type=ModelRouteOutcome, model_validate=ModelRouteOutcome.validate_against, model_structural=ModelRouteOutcome.validate, model_bytes=ModelRouteOutcome.canonical_bytes, model_binding_projection=_07b_model_binding, g0_projection=_07a_g0_binding, fallback_binding_projection=_07b_binding_projection, early_failure_factory=_07b_make_early_failure_outcome, empty_model_binding=_07b_empty_model_binding, empty_binding=_07b_empty, empty_counts=_07b_empty_counts, page_binding_projection=_07b_page_binding, report_binding_projection=_07b_report_binding, scope_intersection=_07b_intersection, fallback_prefix=_07b_fallback_prefix, fixture_authority=_FIXED_LIVE_FIXTURE_AUTHORITY, assembly_authority=_FIXED_CANONICAL_ASSEMBLY_AUTHORITY, field_gate_authority=_FIXED_07B_FIELD_GATE_AUTHORITY, renderer_type=DeterministicPageRenderer, render_result_type=RenderResult, render_projection=_FIXED_07A_RENDER_PROJECTION, consistency_type=MinimalConsistencyChecker, consistency_projection=_FIXED_07A_CONSISTENCY_PROJECTION, requirement_projector=project_requirement_view, requirement_projection=_FIXED_07A_REQUIREMENT_PROJECTION, plan_compiler=compile_acceptance_plan, plan_projection=_FIXED_07A_PLAN_PROJECTION, binding_compiler=compile_acceptance_binding, binding_projection=_FIXED_07A_BINDING_PROJECTION, acceptance_fixture_authority=_FIXED_ACCEPTANCE_FIXTURE_AUTHORITY, acceptance_executor=_FIXED_ACCEPTANCE_EXECUTION_AUTHORITY, browser_projection=_FIXED_07A_BROWSER_PROJECTION, count_projection=_FIXED_07A_ACCEPTANCE_COUNTS, packager_type=DeterministicResultPackager, package_type=ResultPackage, package_projection=_FIXED_07A_PACKAGE_PROJECTION, fallback_binding_authority=_FIXED_07A_FALLBACK_BINDING_AUTHORITY, fallback_deliverer=deliver_frozen_g0_fallback, load_fallback_report=_FIXED_07A_LOAD_FALLBACK_REPORT, fallback_projection=_FIXED_07A_FALLBACK_REPORT_PROJECTION, path_preflight=_FIXED_07A_PATH_PREFLIGHT, staging_path=_FIXED_07A_STAGING_PATH, cleanup=_FIXED_07A_CLEANUP_DIRECTORY, commit=_FIXED_07A_COMMIT_STAGING, rollback=_FIXED_07A_ROLLBACK_COMMIT)
+
+
+def _build_tier_a_07b_validate_against(*, runner, report_type, patch_type, model_type, model_validate, model_structural, model_bytes, model_binding_projection, g0_projection, fallback_binding_projection, early_failure_factory, empty_model_binding, empty_binding, report_binding_projection, fixture_authority, assembly_authority, field_gate_authority, render_result_type, consistency_type, package_type, package_projection, package_live_binding, fallback_binding_authority, fallback_loader, path_preflight, path_replay, staging_path, cleanup, _safe_id=_07a_safe_id, _g0_binding_keys=_07A_G0_BINDING_KEYS, _fallback_binding_keys=_07A_FALLBACK_BINDING_KEYS, _early_failure_steps=frozenset(_07B_EARLY_FAILURE_STEPS), _step_render=_07B_STEP_RENDER):
+    def first_page(outcome: object, fixture: object, context: object, guidance: object) -> PageSpec:
+        if type(outcome) is not model_type:
+            raise TypeError("model route type")
+        live_fixture = fixture_authority(fixture)
+        return assembly_authority(live_fixture.raw_response, context, guidance).page_spec
+
+    def validate_against(self: TierA07bGateDeliveryOutcome, **args: object) -> None:
+        self.validate()
+
+        def make_early_failure(**values: object) -> TierA07bGateDeliveryOutcome:
+            try:
+                return early_failure_factory(type(self), **values)
+            except Exception as exc:
+                raise TierA07bGateDeliveryOutcomeError("live_replay_invalid") from exc
+
+        def replay_early_failure_envelope() -> TierA07bGateDeliveryOutcome | None:
+            case_id = args["case_id"]
+            if not _safe_id(case_id):
+                raise ValueError("case_id is invalid")
+            model_binding = empty_model_binding()
+            g0_binding = empty_binding(_g0_binding_keys)
+            fallback_binding = empty_binding(_fallback_binding_keys)
+            try:
+                outcome = args["model_route_outcome"]
+                if type(outcome) is not model_type:
+                    raise TypeError("model outcome")
+                model_validate(
+                    outcome,
+                    frozen_g0_reference=args["frozen_g0_reference"],
+                    package=args["package"], context=args["context"],
+                    guidance=args["guidance"], manifest=args["manifest"],
+                    selected=args["selected"], local_request=args["local_request"],
+                    pre_invocation_audit=args["pre_invocation_audit"],
+                    local_qwen_preparation=args["local_qwen_preparation"],
+                    execution_branch=args["execution_branch"],
+                    scripted_local_fixture=args.get("scripted_local_fixture"),
+                )
+                model_structural(outcome)
+            except Exception:
+                try:
+                    return make_early_failure(
+                        case_id=case_id,
+                        failure_code="model_route_validation_failed",
+                        model_route_binding=model_binding, g0_binding=g0_binding,
+                        fallback_binding=fallback_binding,
+                    )
+                except Exception as exc:
+                    raise TierA07bGateDeliveryOutcomeError("live_replay_invalid") from exc
+            model_binding = model_binding_projection(outcome, model_bytes)
+            g0_binding = g0_projection(outcome.frozen_g0_reference)
+            try:
+                fallback_binding = fallback_binding_authority(
+                    case_id=case_id, record=args["fallback_record"],
+                    snapshot_dir=args["fallback_snapshot_dir"],
+                    reference=args["frozen_g0_reference"],
+                    package=args["package"], context=args["context"],
+                    guidance=args["guidance"],
+                )
+            except Exception:
+                try:
+                    return make_early_failure(
+                        case_id=case_id,
+                        failure_code="frozen_g0_fallback_invalid",
+                        model_route_binding=model_binding, g0_binding=g0_binding,
+                        fallback_binding=fallback_binding,
+                    )
+                except Exception as exc:
+                    raise TierA07bGateDeliveryOutcomeError("live_replay_invalid") from exc
+            fallback_binding = fallback_binding_projection(
+                fallback_binding, _fallback_binding_keys
+            )
+            try:
+                path_preflight(
+                    args["render_output_dir"], args["model_package_output_dir"],
+                    args["fallback_output_dir"],
+                    package_dir=args["package"].package_dir,
+                    snapshot_dir=args["fallback_snapshot_dir"],
+                )
+            except Exception:
+                try:
+                    return make_early_failure(
+                        case_id=case_id,
+                        failure_code="output_destination_invalid",
+                        model_route_binding=model_binding, g0_binding=g0_binding,
+                        fallback_binding=fallback_binding,
+                    )
+                except Exception as exc:
+                    raise TierA07bGateDeliveryOutcomeError("live_replay_invalid") from exc
+            return None
+
+        if self.status == "failed_delivery" and self.failure_code in _early_failure_steps:
+            try:
+                replay = replay_early_failure_envelope()
+                if replay is None or replay.canonical_bytes() != self.canonical_bytes():
+                    raise ValueError("early failure replay mismatch")
+            except Exception as exc:
+                raise TierA07bGateDeliveryOutcomeError("live_replay_invalid") from exc
+            return
+
+        # Replay in the exact run order.  A later path failure is valid only
+        # when the current model-route and frozen-G0 stages are still valid.
+        try:
+            model_validate(
+                args["model_route_outcome"],
+                frozen_g0_reference=args["frozen_g0_reference"],
+                package=args["package"], context=args["context"],
+                guidance=args["guidance"], manifest=args["manifest"],
+                selected=args["selected"], local_request=args["local_request"],
+                pre_invocation_audit=args["pre_invocation_audit"],
+                local_qwen_preparation=args["local_qwen_preparation"],
+                execution_branch=args["execution_branch"],
+                scripted_local_fixture=args.get("scripted_local_fixture"),
+            )
+            model_structural(args["model_route_outcome"])
+        except Exception as exc:
+            raise TierA07bGateDeliveryOutcomeError("live_replay_invalid") from exc
+        try:
+            actual_model = model_binding_projection(args["model_route_outcome"], model_bytes)
+            actual_g0 = g0_projection(args["model_route_outcome"].frozen_g0_reference)
+            if dict(self.model_route_binding) != actual_model or dict(self.g0_binding) != actual_g0:
+                raise ValueError("model route binding mismatch")
+        except Exception as exc:
+            raise TierA07bGateDeliveryOutcomeError("live_replay_invalid") from exc
+
+        try:
+            actual_fallback = fallback_binding_authority(
+                case_id=args["case_id"], record=args["fallback_record"],
+                snapshot_dir=args["fallback_snapshot_dir"],
+                reference=args["frozen_g0_reference"], package=args["package"],
+                context=args["context"], guidance=args["guidance"],
+            )
+        except Exception as exc:
+            raise TierA07bGateDeliveryOutcomeError("live_replay_invalid") from exc
+        try:
+            actual_fallback = fallback_binding_projection(
+                actual_fallback, _fallback_binding_keys
+            )
+        except Exception as exc:
+            raise TierA07bGateDeliveryOutcomeError("live_replay_invalid") from exc
+        if dict(self.fallback_binding) != actual_fallback:
+            raise TierA07bGateDeliveryOutcomeError("live_replay_invalid")
+
+        render_expected = _step_render in self.completed_steps and self.failure_code is None
+        try:
+            path_replay(
+                args["render_output_dir"], args["model_package_output_dir"],
+                args["fallback_output_dir"], package_dir=args["package"].package_dir,
+                snapshot_dir=args["fallback_snapshot_dir"],
+                render_expected=render_expected,
+                model_package_expected=self.status == "recovered_success",
+                fallback_expected=self.status == "fallback_delivery",
+            )
+        except Exception as exc:
+            raise TierA07bGateDeliveryOutcomeError("live_replay_invalid") from exc
+
+        if self.repair_report["report_id"] is not None:
+            try:
+                receipt = report_type.from_bytes(args["field_gate_report"])
+                first = first_page(
+                    args["model_route_outcome"], args.get("scripted_local_fixture"),
+                    args["context"], args["guidance"],
+                )
+                authority = field_gate_authority(
+                    case_id=args["case_id"], page_spec=first,
+                    local_request=args["local_request"],
+                )
+                if receipt.canonical_bytes() != authority.canonical_bytes() or dict(self.repair_report) != report_binding_projection(authority):
+                    raise ValueError("pre repair receipt mismatch")
+                if self.status == "recovered_success":
+                    repaired = patch_type.from_bytes(args["repair_patch"]).apply(
+                        authority, first, self.effective_repair_scope
+                    )
+                    post = field_gate_authority(
+                        case_id=args["case_id"], page_spec=repaired,
+                        local_request=args["local_request"],
+                    )
+                    if post.decision != "pass" or dict(self.post_repair_gate) != report_binding_projection(post):
+                        raise ValueError("post repair receipt mismatch")
+            except Exception as exc:
+                raise TierA07bGateDeliveryOutcomeError("live_replay_invalid") from exc
+
+        if self.status == "recovered_success":
+            try:
+                package_dir = args["model_package_output_dir"]
+                package = package_type(
+                    package_id=self.final_package_id,
+                    page_id=self.repaired_candidate["page_id"],
+                    package_dir=package_dir, entrypoint="page/index.html",
+                    result_summary="result_summary.json",
+                    package_manifest="package_manifest.json",
+                )
+                projection = package_projection(package, package_dir)
+                if projection["model_package_id"] != self.final_package_id or projection["model_package_manifest_sha256"] != self.final_package_manifest_sha256 or projection["model_package_tree_sha256"] != self.final_package_tree_sha256 or projection["model_package_file_count"] != self.final_package_file_count:
+                    raise ValueError("package mismatch")
+                first = first_page(args["model_route_outcome"], args.get("scripted_local_fixture"), args["context"], args["guidance"])
+                receipt = field_gate_authority(case_id=args["case_id"], page_spec=first, local_request=args["local_request"])
+                repaired = patch_type.from_bytes(args["repair_patch"]).apply(receipt, first, self.effective_repair_scope)
+                render_dir = args["render_output_dir"]
+                render = render_result_type(
+                    page_id=repaired.page_id, output_dir=render_dir,
+                    index_html=render_dir / "index.html", styles_css=render_dir / "styles.css",
+                    app_js=render_dir / "app.js", render_manifest=render_dir / "render_manifest.json",
+                )
+                consistency = consistency_type().check(repaired, render)
+                package_live_binding(
+                    context=args["context"], page_spec=repaired,
+                    render_result=render, consistency_report=consistency,
+                    supplied_package=package, supplied_dir=package_dir,
+                )
+            except Exception as exc:
+                raise TierA07bGateDeliveryOutcomeError("live_replay_invalid") from exc
+        elif self.status == "fallback_delivery":
+            try:
+                fallback = fallback_loader(
+                    args["fallback_output_dir"], args["fallback_snapshot_dir"],
+                    args["fallback_record"],
+                )
+                if fallback.report_id != self.fallback_delivery_report_id or fallback.report_sha256 != self.fallback_delivery_report_sha256 or fallback.package_id != self.final_package_id or fallback.delivered_package_tree_sha256 != self.final_package_tree_sha256:
+                    raise ValueError("fallback mismatch")
+            except Exception as exc:
+                raise TierA07bGateDeliveryOutcomeError("live_replay_invalid") from exc
+
+        replay_root = None
+        try:
+            replay_root = staging_path(args["model_package_output_dir"], "tier-a-07b-replay")
+            replay_root.mkdir()
+            replay_args = dict(args)
+            replay_args.update({
+                "render_output_dir": replay_root / "render",
+                "model_package_output_dir": replay_root / "model-package",
+                "fallback_output_dir": replay_root / "fallback",
+            })
+            replay = runner(**replay_args)
+            if replay.to_dict() != self.to_dict():
+                raise ValueError("canonical replay mismatch")
+        except Exception as exc:
+            raise TierA07bGateDeliveryOutcomeError("live_replay_invalid") from exc
+        finally:
+            if replay_root is not None:
+                cleanup(replay_root)
+    return validate_against
+
+TierA07bGateDeliveryOutcome.validate_against = _build_tier_a_07b_validate_against(runner=TierA07bOneRepairOrchestrator().run, report_type=TierA07bFieldGateReport, patch_type=TierA07bRepairPatch, model_type=ModelRouteOutcome, model_validate=ModelRouteOutcome.validate_against, model_structural=ModelRouteOutcome.validate, model_bytes=ModelRouteOutcome.canonical_bytes, model_binding_projection=_07b_model_binding, g0_projection=_07a_g0_binding, fallback_binding_projection=_07b_binding_projection, early_failure_factory=_07b_make_early_failure_outcome, empty_model_binding=_07b_empty_model_binding, empty_binding=_07b_empty, report_binding_projection=_07b_report_binding, fallback_binding_authority=_FIXED_07A_FALLBACK_BINDING_AUTHORITY, fixture_authority=_FIXED_LIVE_FIXTURE_AUTHORITY, assembly_authority=_FIXED_CANONICAL_ASSEMBLY_AUTHORITY, field_gate_authority=_FIXED_07B_FIELD_GATE_AUTHORITY, render_result_type=RenderResult, consistency_type=MinimalConsistencyChecker, package_type=ResultPackage, package_projection=_FIXED_07A_PACKAGE_PROJECTION, package_live_binding=_FIXED_07A_PACKAGE_LIVE_BINDING, fallback_loader=_FIXED_07A_LOAD_FALLBACK_REPORT, path_preflight=_FIXED_07A_PATH_PREFLIGHT, path_replay=_FIXED_07A_PATH_REPLAY, staging_path=_FIXED_07A_STAGING_PATH, cleanup=_FIXED_07A_CLEANUP_DIRECTORY)
+
+def _07b_live_first_page_spec(model_route_outcome: object, scripted_local_fixture: object, context: object, guidance: object) -> PageSpec:
+    return _FIXED_CANONICAL_ASSEMBLY_AUTHORITY(_FIXED_LIVE_FIXTURE_AUTHORITY(scripted_local_fixture).raw_response, context, guidance).page_spec
+
+def validate_serialized_tier_a_07b_gate_delivery_outcome(payload: object) -> TierA07bGateDeliveryOutcome:
+    return TierA07bGateDeliveryOutcome.from_bytes(payload) if type(payload) is bytes else TierA07bGateDeliveryOutcome.from_dict(payload)
