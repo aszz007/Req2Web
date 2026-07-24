@@ -71,6 +71,7 @@ from req2web_generation.result_package import (
     RESULT_PACKAGE_SCHEMA_VERSION,
     DeterministicResultPackager,
     ResultPackage,
+    _json_bytes as _FIXED_RESULT_PACKAGE_JSON_BYTES,
 )
 from req2web_generation.result_package_v2 import RESULT_PACKAGE_V2_SCHEMA_VERSION
 from req2web_generation.schema import PAGE_SPEC_SCHEMA_VERSION, PageSpec
@@ -6239,14 +6240,123 @@ class TierA07bOneRepairOrchestrator:
     run = _build_tier_a_07b_run(outcome_type=TierA07bGateDeliveryOutcome, report_type=TierA07bFieldGateReport, patch_type=TierA07bRepairPatch, model_type=ModelRouteOutcome, model_validate=ModelRouteOutcome.validate_against, model_structural=ModelRouteOutcome.validate, model_bytes=ModelRouteOutcome.canonical_bytes, model_binding_projection=_07b_model_binding, g0_projection=_07a_g0_binding, fallback_binding_projection=_07b_binding_projection, early_failure_factory=_07b_make_early_failure_outcome, empty_model_binding=_07b_empty_model_binding, empty_binding=_07b_empty, empty_counts=_07b_empty_counts, page_binding_projection=_07b_page_binding, report_binding_projection=_07b_report_binding, scope_intersection=_07b_intersection, fallback_prefix=_07b_fallback_prefix, fixture_authority=_FIXED_LIVE_FIXTURE_AUTHORITY, assembly_authority=_FIXED_CANONICAL_ASSEMBLY_AUTHORITY, field_gate_authority=_FIXED_07B_FIELD_GATE_AUTHORITY, renderer_type=DeterministicPageRenderer, render_result_type=RenderResult, render_projection=_FIXED_07A_RENDER_PROJECTION, consistency_type=MinimalConsistencyChecker, consistency_projection=_FIXED_07A_CONSISTENCY_PROJECTION, requirement_projector=project_requirement_view, requirement_projection=_FIXED_07A_REQUIREMENT_PROJECTION, plan_compiler=compile_acceptance_plan, plan_projection=_FIXED_07A_PLAN_PROJECTION, binding_compiler=compile_acceptance_binding, binding_projection=_FIXED_07A_BINDING_PROJECTION, acceptance_fixture_authority=_FIXED_ACCEPTANCE_FIXTURE_AUTHORITY, acceptance_executor=_FIXED_ACCEPTANCE_EXECUTION_AUTHORITY, browser_projection=_FIXED_07A_BROWSER_PROJECTION, count_projection=_FIXED_07A_ACCEPTANCE_COUNTS, packager_type=DeterministicResultPackager, package_type=ResultPackage, package_projection=_FIXED_07A_PACKAGE_PROJECTION, fallback_binding_authority=_FIXED_07A_FALLBACK_BINDING_AUTHORITY, fallback_deliverer=deliver_frozen_g0_fallback, load_fallback_report=_FIXED_07A_LOAD_FALLBACK_REPORT, fallback_projection=_FIXED_07A_FALLBACK_REPORT_PROJECTION, path_preflight=_FIXED_07A_PATH_PREFLIGHT, staging_path=_FIXED_07A_STAGING_PATH, cleanup=_FIXED_07A_CLEANUP_DIRECTORY, commit=_FIXED_07A_COMMIT_STAGING, rollback=_FIXED_07A_ROLLBACK_COMMIT)
 
 
-def _build_tier_a_07b_validate_against(*, runner, report_type, patch_type, model_type, model_validate, model_structural, model_bytes, model_binding_projection, g0_projection, fallback_binding_projection, early_failure_factory, empty_model_binding, empty_binding, report_binding_projection, fixture_authority, assembly_authority, field_gate_authority, render_result_type, consistency_type, package_type, package_projection, package_live_binding, fallback_binding_authority, fallback_loader, path_preflight, path_replay, staging_path, cleanup, _safe_id=_07a_safe_id, _g0_binding_keys=_07A_G0_BINDING_KEYS, _fallback_binding_keys=_07A_FALLBACK_BINDING_KEYS, _early_failure_steps=frozenset(_07B_EARLY_FAILURE_STEPS), _step_render=_07B_STEP_RENDER):
+def _build_tier_a_07b_read_only_package_verifier(
+    *,
+    package_type,
+    package_gate,
+    package_id_deriver,
+    package_summary_builder,
+    package_manifest_builder,
+    package_json_bytes,
+    binding_projection,
+    load_bytes,
+    sha256_fn,
+    canonical_json_bytes,
+    result_package_schema_version,
+):
+    """Verify an existing ResultPackage v1 against captured inputs without writing."""
+
+    def verify(
+        *,
+        context: object,
+        page_spec: object,
+        render_result: object,
+        consistency_report: object,
+        acceptance_binding: object,
+        supplied_package: object,
+        supplied_dir: object,
+    ) -> dict[str, object]:
+        if type(supplied_package) is not package_type:
+            raise TypeError("model package has the wrong type")
+        binding_projection(acceptance_binding)
+        supplied_package.validate()
+        root = getattr(supplied_package.package_dir, "resolve")(strict=True)
+        expected_root = getattr(supplied_dir, "resolve")(strict=True)
+        if root != expected_root:
+            raise ValueError("model package destination is inconsistent")
+        source_files, internal_files = package_gate(
+            context, page_spec, render_result, consistency_report
+        )
+        expected_package_id = package_id_deriver(source_files, internal_files)
+        expected_summary = package_summary_builder(
+            expected_package_id, page_spec, consistency_report
+        )
+        expected_files = {
+            **source_files,
+            **internal_files,
+            "result_summary.json": package_json_bytes(expected_summary),
+        }
+        expected_manifest = package_manifest_builder(
+            expected_package_id, page_spec.page_id, expected_files
+        )
+        expected_files[supplied_package.package_manifest] = package_json_bytes(
+            expected_manifest
+        )
+        if (
+            supplied_package.package_id != expected_package_id
+            or supplied_package.page_id != page_spec.page_id
+            or supplied_package.entrypoint != "page/index.html"
+            or supplied_package.result_summary != "result_summary.json"
+            or supplied_package.package_manifest != "package_manifest.json"
+        ):
+            raise ValueError("model package identity is inconsistent")
+        for relative_path, expected_bytes in expected_files.items():
+            actual_path = root.joinpath(*relative_path.split("/"))
+            if not actual_path.is_file() or load_bytes(actual_path) != expected_bytes:
+                raise ValueError("model package content is inconsistent")
+        expected_inventory = [dict(item) for item in expected_manifest["files"]]
+        expected_inventory.append(
+            {
+                "path": supplied_package.package_manifest,
+                "role": "package_manifest",
+                "size": len(expected_files[supplied_package.package_manifest]),
+                "sha256": sha256_fn(expected_files[supplied_package.package_manifest]),
+            }
+        )
+        expected_inventory.sort(key=lambda item: item["path"])
+        expected_projection = {
+            "model_package_schema_version": result_package_schema_version,
+            "model_package_id": expected_package_id,
+            "model_package_manifest_sha256": sha256_fn(
+                expected_files[supplied_package.package_manifest]
+            ),
+            "model_package_tree_sha256": sha256_fn(
+                canonical_json_bytes({"files": expected_inventory})
+            ),
+            "model_package_file_count": len(expected_inventory),
+        }
+        # ResultPackage.validate() has already verified the actual manifest,
+        # full file inventory, and declared hashes. Every actual package byte
+        # above is then compared to the captured in-memory expected file set,
+        # so this independently recomputed projection is also the actual one.
+        return expected_projection
+
+    return verify
+
+
+_FIXED_07B_READ_ONLY_PACKAGE_VERIFIER = _build_tier_a_07b_read_only_package_verifier(
+    package_type=ResultPackage,
+    package_gate=DeterministicResultPackager()._gate,
+    package_id_deriver=DeterministicResultPackager._derive_package_id,
+    package_summary_builder=DeterministicResultPackager._build_summary,
+    package_manifest_builder=DeterministicResultPackager._build_manifest,
+    package_json_bytes=_FIXED_RESULT_PACKAGE_JSON_BYTES,
+    binding_projection=_FIXED_07A_BINDING_PROJECTION,
+    load_bytes=_FIXED_07A_READ_BYTES,
+    sha256_fn=_sha256,
+    canonical_json_bytes=_canonical_json_bytes,
+    result_package_schema_version=RESULT_PACKAGE_SCHEMA_VERSION,
+)
+
+
+def _build_tier_a_07b_validate_against(*, runner, report_type, patch_type, model_type, model_validate, model_structural, model_bytes, model_binding_projection, g0_projection, fallback_binding_projection, early_failure_factory, empty_model_binding, empty_binding, report_binding_projection, fixture_authority, assembly_authority, field_gate_authority, render_result_type, render_projection, consistency_type, consistency_projection, requirement_projector, requirement_projection, plan_compiler, plan_projection, binding_compiler, binding_projection, acceptance_fixture_authority, acceptance_executor, browser_projection, count_projection, package_type, package_projection, read_only_package_verifier, fallback_binding_authority, fallback_loader, path_preflight, path_replay, staging_path, cleanup, _safe_id=_07a_safe_id, _g0_binding_keys=_07A_G0_BINDING_KEYS, _fallback_binding_keys=_07A_FALLBACK_BINDING_KEYS, _early_failure_steps=frozenset(_07B_EARLY_FAILURE_STEPS), _step_render=_07B_STEP_RENDER, _step_view=_07B_STEP_VIEW, _step_plan=_07B_STEP_PLAN, _step_binding=_07B_STEP_BINDING, _step_fixture=_07B_STEP_FIXTURE, _step_execution=_07B_STEP_EXECUTION):
     def first_page(outcome: object, fixture: object, context: object, guidance: object) -> PageSpec:
         if type(outcome) is not model_type:
             raise TypeError("model route type")
         live_fixture = fixture_authority(fixture)
         return assembly_authority(live_fixture.raw_response, context, guidance).page_spec
 
-    def validate_against(self: TierA07bGateDeliveryOutcome, **args: object) -> None:
+    def validate_read_only(self: TierA07bGateDeliveryOutcome, **args: object) -> None:
         self.validate()
 
         def make_early_failure(**values: object) -> TierA07bGateDeliveryOutcome:
@@ -6395,6 +6505,7 @@ def _build_tier_a_07b_validate_against(*, runner, report_type, patch_type, model
         except Exception as exc:
             raise TierA07bGateDeliveryOutcomeError("live_replay_invalid") from exc
 
+        replayed_repaired_page = None
         if self.repair_report["report_id"] is not None:
             try:
                 receipt = report_type.from_bytes(args["field_gate_report"])
@@ -6408,16 +6519,62 @@ def _build_tier_a_07b_validate_against(*, runner, report_type, patch_type, model
                 )
                 if receipt.canonical_bytes() != authority.canonical_bytes() or dict(self.repair_report) != report_binding_projection(authority):
                     raise ValueError("pre repair receipt mismatch")
-                if self.status == "recovered_success":
-                    repaired = patch_type.from_bytes(args["repair_patch"]).apply(
+                if self.status == "recovered_success" or self.acceptance_status != "not_executed":
+                    replayed_repaired_page = patch_type.from_bytes(args["repair_patch"]).apply(
                         authority, first, self.effective_repair_scope
                     )
                     post = field_gate_authority(
-                        case_id=args["case_id"], page_spec=repaired,
+                        case_id=args["case_id"], page_spec=replayed_repaired_page,
                         local_request=args["local_request"],
                     )
                     if post.decision != "pass" or dict(self.post_repair_gate) != report_binding_projection(post):
                         raise ValueError("post repair receipt mismatch")
+            except Exception as exc:
+                raise TierA07bGateDeliveryOutcomeError("live_replay_invalid") from exc
+
+        if self.acceptance_status != "not_executed":
+            try:
+                required_steps = (
+                    _step_view, _step_plan, _step_binding, _step_fixture,
+                    _step_execution,
+                )
+                if any(step not in self.completed_steps for step in required_steps):
+                    raise ValueError("acceptance steps are incomplete")
+                if replayed_repaired_page is None:
+                    raise ValueError("acceptance replay has no repaired page")
+                render_dir = args["render_output_dir"]
+                render = render_result_type(
+                    page_id=replayed_repaired_page.page_id, output_dir=render_dir,
+                    index_html=render_dir / "index.html", styles_css=render_dir / "styles.css",
+                    app_js=render_dir / "app.js", render_manifest=render_dir / "render_manifest.json",
+                )
+                render_projection(replayed_repaired_page, render)
+                consistency = consistency_type().check(replayed_repaired_page, render)
+                consistency_projection(consistency)
+                consistency_status = "pass" if consistency.passed else "fail"
+                if consistency_status != self.consistency_status:
+                    raise ValueError("acceptance consistency mismatch")
+                view = requirement_projector(args["context"])
+                requirement_projection(view)
+                plan = plan_compiler(view)
+                plan.validate_against(view)
+                plan_projection(plan)
+                binding = binding_compiler(view, plan, replayed_repaired_page, render)
+                binding.validate_against(view, plan, replayed_repaired_page, render)
+                binding_identity = binding_projection(binding)
+                fixture = acceptance_fixture_authority(args["scripted_acceptance_fixture"])
+                browser = acceptance_executor(fixture, binding)
+                browser.validate_against(binding)
+                browser_projection(browser)
+                if (
+                    browser.source_binding_plan_sha256
+                    != binding_identity["acceptance_binding_plan_sha256"]
+                ):
+                    raise ValueError("browser binding identity mismatch")
+                counts = count_projection(browser)
+                acceptance_status = "blocked" if counts["fail"] or counts["unknown"] else "pass"
+                if dict(self.acceptance_counts) != counts or self.acceptance_status != acceptance_status:
+                    raise ValueError("acceptance replay mismatch")
             except Exception as exc:
                 raise TierA07bGateDeliveryOutcomeError("live_replay_invalid") from exc
 
@@ -6444,11 +6601,22 @@ def _build_tier_a_07b_validate_against(*, runner, report_type, patch_type, model
                     app_js=render_dir / "app.js", render_manifest=render_dir / "render_manifest.json",
                 )
                 consistency = consistency_type().check(repaired, render)
-                package_live_binding(
+                projection = read_only_package_verifier(
                     context=args["context"], page_spec=repaired,
                     render_result=render, consistency_report=consistency,
-                    supplied_package=package, supplied_dir=package_dir,
+                    acceptance_binding=binding, supplied_package=package,
+                    supplied_dir=package_dir,
                 )
+                if (
+                    projection["model_package_id"] != self.final_package_id
+                    or projection["model_package_manifest_sha256"]
+                    != self.final_package_manifest_sha256
+                    or projection["model_package_tree_sha256"]
+                    != self.final_package_tree_sha256
+                    or projection["model_package_file_count"]
+                    != self.final_package_file_count
+                ):
+                    raise ValueError("package replay mismatch")
             except Exception as exc:
                 raise TierA07bGateDeliveryOutcomeError("live_replay_invalid") from exc
         elif self.status == "fallback_delivery":
@@ -6462,6 +6630,10 @@ def _build_tier_a_07b_validate_against(*, runner, report_type, patch_type, model
             except Exception as exc:
                 raise TierA07bGateDeliveryOutcomeError("live_replay_invalid") from exc
 
+    def validate_against(self: TierA07bGateDeliveryOutcome, **args: object) -> None:
+        validate_read_only(self, **args)
+        if self.status == "failed_delivery" and self.failure_code in _early_failure_steps:
+            return
         replay_root = None
         try:
             replay_root = staging_path(args["model_package_output_dir"], "tier-a-07b-replay")
@@ -6480,9 +6652,103 @@ def _build_tier_a_07b_validate_against(*, runner, report_type, patch_type, model
         finally:
             if replay_root is not None:
                 cleanup(replay_root)
-    return validate_against
+    return validate_against, validate_read_only
 
-TierA07bGateDeliveryOutcome.validate_against = _build_tier_a_07b_validate_against(runner=TierA07bOneRepairOrchestrator().run, report_type=TierA07bFieldGateReport, patch_type=TierA07bRepairPatch, model_type=ModelRouteOutcome, model_validate=ModelRouteOutcome.validate_against, model_structural=ModelRouteOutcome.validate, model_bytes=ModelRouteOutcome.canonical_bytes, model_binding_projection=_07b_model_binding, g0_projection=_07a_g0_binding, fallback_binding_projection=_07b_binding_projection, early_failure_factory=_07b_make_early_failure_outcome, empty_model_binding=_07b_empty_model_binding, empty_binding=_07b_empty, report_binding_projection=_07b_report_binding, fallback_binding_authority=_FIXED_07A_FALLBACK_BINDING_AUTHORITY, fixture_authority=_FIXED_LIVE_FIXTURE_AUTHORITY, assembly_authority=_FIXED_CANONICAL_ASSEMBLY_AUTHORITY, field_gate_authority=_FIXED_07B_FIELD_GATE_AUTHORITY, render_result_type=RenderResult, consistency_type=MinimalConsistencyChecker, package_type=ResultPackage, package_projection=_FIXED_07A_PACKAGE_PROJECTION, package_live_binding=_FIXED_07A_PACKAGE_LIVE_BINDING, fallback_loader=_FIXED_07A_LOAD_FALLBACK_REPORT, path_preflight=_FIXED_07A_PATH_PREFLIGHT, path_replay=_FIXED_07A_PATH_REPLAY, staging_path=_FIXED_07A_STAGING_PATH, cleanup=_FIXED_07A_CLEANUP_DIRECTORY)
+TierA07bGateDeliveryOutcome.validate_against, _FIXED_07B_READ_ONLY_VALIDATE_AGAINST = _build_tier_a_07b_validate_against(runner=TierA07bOneRepairOrchestrator().run, report_type=TierA07bFieldGateReport, patch_type=TierA07bRepairPatch, model_type=ModelRouteOutcome, model_validate=ModelRouteOutcome.validate_against, model_structural=ModelRouteOutcome.validate, model_bytes=ModelRouteOutcome.canonical_bytes, model_binding_projection=_07b_model_binding, g0_projection=_07a_g0_binding, fallback_binding_projection=_07b_binding_projection, early_failure_factory=_07b_make_early_failure_outcome, empty_model_binding=_07b_empty_model_binding, empty_binding=_07b_empty, report_binding_projection=_07b_report_binding, fallback_binding_authority=_FIXED_07A_FALLBACK_BINDING_AUTHORITY, fixture_authority=_FIXED_LIVE_FIXTURE_AUTHORITY, assembly_authority=_FIXED_CANONICAL_ASSEMBLY_AUTHORITY, field_gate_authority=_FIXED_07B_FIELD_GATE_AUTHORITY, render_result_type=RenderResult, render_projection=_FIXED_07A_RENDER_PROJECTION, consistency_type=MinimalConsistencyChecker, consistency_projection=_FIXED_07A_CONSISTENCY_PROJECTION, requirement_projector=project_requirement_view, requirement_projection=_FIXED_07A_REQUIREMENT_PROJECTION, plan_compiler=compile_acceptance_plan, plan_projection=_FIXED_07A_PLAN_PROJECTION, binding_compiler=compile_acceptance_binding, binding_projection=_FIXED_07A_BINDING_PROJECTION, acceptance_fixture_authority=_FIXED_ACCEPTANCE_FIXTURE_AUTHORITY, acceptance_executor=_FIXED_ACCEPTANCE_EXECUTION_AUTHORITY, browser_projection=_FIXED_07A_BROWSER_PROJECTION, count_projection=_FIXED_07A_ACCEPTANCE_COUNTS, package_type=ResultPackage, package_projection=_FIXED_07A_PACKAGE_PROJECTION, read_only_package_verifier=_FIXED_07B_READ_ONLY_PACKAGE_VERIFIER, fallback_loader=_FIXED_07A_LOAD_FALLBACK_REPORT, path_preflight=_FIXED_07A_PATH_PREFLIGHT, path_replay=_FIXED_07A_PATH_REPLAY, staging_path=_FIXED_07A_STAGING_PATH, cleanup=_FIXED_07A_CLEANUP_DIRECTORY)
+
+_CAPTURED_07B_GATE_OUTCOME_TYPE = TierA07bGateDeliveryOutcome
+_CAPTURED_07B_MODEL_ROUTE_TYPE = ModelRouteOutcome
+_CAPTURED_07B_FIXTURE_TYPE = ScriptedLocalFixture
+_CAPTURED_07B_ACCEPTANCE_FIXTURE_TYPE = ScriptedAcceptanceFixture
+_CAPTURED_07B_REPORT_TYPE = TierA07bFieldGateReport
+_CAPTURED_07B_PATCH_TYPE = TierA07bRepairPatch
+_CAPTURED_07B_FALLBACK_RECORD_TYPE = FrozenG0FallbackRecord
+_CAPTURED_07B_G0_REFERENCE_TYPE = FrozenG0PackageReference
+_CAPTURED_07B_G0_PACKAGE_TYPE = RetrievalEnhancedResultPackage
+_CAPTURED_07B_CONTEXT_TYPE = AgentContextBundle
+_CAPTURED_07B_GUIDANCE_TYPE = RetrievalGuidance
+_CAPTURED_07B_MANIFEST_TYPE = D17Path3TierAManifest
+_CAPTURED_07B_SELECTED_TYPE = D17Path3SelectedInput
+_CAPTURED_07B_REQUEST_TYPE = D17Path3LocalRequestArtifact
+_CAPTURED_07B_AUDIT_TYPE = D17Path3TierAPreInvocationAuditRecord
+_CAPTURED_07B_PREPARATION_TYPE = LocalQwenProviderPreparationRecord
+
+
+def verify_tier_a_07b_gate_delivery_read_only(
+    outcome: object,
+    *,
+    model_route_outcome: object,
+    frozen_g0_reference: object,
+    package: object,
+    context: object,
+    guidance: object,
+    manifest: object,
+    selected: object,
+    local_request: object,
+    pre_invocation_audit: object,
+    local_qwen_preparation: object,
+    scripted_local_fixture: object,
+    fallback_record: object,
+    fallback_snapshot_dir: object,
+    render_output_dir: object,
+    model_package_output_dir: object,
+    fallback_output_dir: object,
+    scripted_acceptance_fixture: object,
+    field_gate_report: object,
+    repair_patch: object,
+) -> None:
+    """Replay the captured Tier A-07b authorities without filesystem writes.
+
+    The case authority is the exact field-gate report; callers cannot supply a
+    replacement case identifier or execution branch. Existing render/package/
+    fallback paths are inspected only. No package is created, copied, staged,
+    committed, rolled back, or cleaned up by this verifier.
+    """
+
+    exact = (
+        (outcome, _CAPTURED_07B_GATE_OUTCOME_TYPE),
+        (model_route_outcome, _CAPTURED_07B_MODEL_ROUTE_TYPE),
+        (frozen_g0_reference, _CAPTURED_07B_G0_REFERENCE_TYPE),
+        (package, _CAPTURED_07B_G0_PACKAGE_TYPE),
+        (context, _CAPTURED_07B_CONTEXT_TYPE),
+        (guidance, _CAPTURED_07B_GUIDANCE_TYPE),
+        (manifest, _CAPTURED_07B_MANIFEST_TYPE),
+        (selected, _CAPTURED_07B_SELECTED_TYPE),
+        (local_request, _CAPTURED_07B_REQUEST_TYPE),
+        (pre_invocation_audit, _CAPTURED_07B_AUDIT_TYPE),
+        (local_qwen_preparation, _CAPTURED_07B_PREPARATION_TYPE),
+        (scripted_local_fixture, _CAPTURED_07B_FIXTURE_TYPE),
+        (fallback_record, _CAPTURED_07B_FALLBACK_RECORD_TYPE),
+        (scripted_acceptance_fixture, _CAPTURED_07B_ACCEPTANCE_FIXTURE_TYPE),
+        (field_gate_report, _CAPTURED_07B_REPORT_TYPE),
+        (repair_patch, _CAPTURED_07B_PATCH_TYPE),
+    )
+    if any(type(value) is not expected for value, expected in exact):
+        raise TierA07bGateDeliveryOutcomeError("live_replay_invalid")
+    _FIXED_07B_READ_ONLY_VALIDATE_AGAINST(
+        outcome,
+        model_route_outcome=model_route_outcome,
+        frozen_g0_reference=frozen_g0_reference,
+        package=package,
+        context=context,
+        guidance=guidance,
+        manifest=manifest,
+        selected=selected,
+        local_request=local_request,
+        pre_invocation_audit=pre_invocation_audit,
+        local_qwen_preparation=local_qwen_preparation,
+        execution_branch="scripted_local_fixture",
+        scripted_local_fixture=scripted_local_fixture,
+        case_id=field_gate_report.case_id,
+        fallback_record=fallback_record,
+        fallback_snapshot_dir=fallback_snapshot_dir,
+        render_output_dir=render_output_dir,
+        model_package_output_dir=model_package_output_dir,
+        fallback_output_dir=fallback_output_dir,
+        scripted_acceptance_fixture=scripted_acceptance_fixture,
+        field_gate_report=field_gate_report.canonical_bytes(),
+        repair_patch=repair_patch.canonical_bytes(),
+    )
 
 def _07b_live_first_page_spec(model_route_outcome: object, scripted_local_fixture: object, context: object, guidance: object) -> PageSpec:
     return _FIXED_CANONICAL_ASSEMBLY_AUTHORITY(_FIXED_LIVE_FIXTURE_AUTHORITY(scripted_local_fixture).raw_response, context, guidance).page_spec
