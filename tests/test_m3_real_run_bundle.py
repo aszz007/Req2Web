@@ -196,6 +196,15 @@ class TierA08RealRunBundleTests(unittest.TestCase):
     def test_route_no_run_cleanup_and_extra_key_drift_are_rejected(self):
         outcome = TierA07bOneRepairOrchestrator().run(**self.route_args("strict"))
         payload = self.bundle(outcome).to_dict()
+        self.assertEqual(
+            payload["cleanup_linkage"],
+            {
+                "tier_a_step_8_status": "implemented_local_controls_schema_only",
+                "cleanup_policy_status": "not_created",
+                "cleanup_receipt_status": "not_created",
+                "cleanup_action_status": "not_executed",
+            },
+        )
         variants = []
         extra = deepcopy(payload); extra["provider_url"] = "https://example.invalid"; variants.append(extra)
         run = deepcopy(payload); run["run_occurred"] = True; variants.append(run)

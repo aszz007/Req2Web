@@ -6781,7 +6781,7 @@ class TierA08RealRunBundlePlaceholder:
                 "cost_state": "not_run", "cost": None,
             },
             "cleanup_linkage": {
-                "tier_a_step_8_status": "not_implemented",
+                "tier_a_step_8_status": "implemented_local_controls_schema_only",
                 "cleanup_policy_status": "not_created",
                 "cleanup_receipt_status": "not_created",
                 "cleanup_action_status": "not_executed",
@@ -6948,7 +6948,7 @@ class TierA08RealRunBundlePlaceholder:
             raise _error("bundle_state_invalid")
         cleanup = _mapping(self.cleanup_linkage, _cleanup_keys)
         if cleanup != {
-            "tier_a_step_8_status": "not_implemented", "cleanup_policy_status": "not_created",
+            "tier_a_step_8_status": "implemented_local_controls_schema_only", "cleanup_policy_status": "not_created",
             "cleanup_receipt_status": "not_created", "cleanup_action_status": "not_executed",
         }:
             raise _error("bundle_cleanup_invalid")
