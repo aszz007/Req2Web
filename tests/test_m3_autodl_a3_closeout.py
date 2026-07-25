@@ -315,6 +315,112 @@ class A3CloseoutFoundationTests(unittest.TestCase):
             self.assertEqual(bundle.sha256(), original_bundle.sha256())
             self.assertEqual(receipt.sha256(), original_receipt.sha256())
 
+    def test_definition_time_capture_resists_grouped_builtin_rebinding(self):
+        bundle = self.complete_bundle()
+        receipt = a3.evaluate_a3_closeout_readiness(bundle)
+        artifacts = (
+            self.policy,
+            self.trigger,
+            self.process(),
+            self.deletion(),
+            self.release(),
+            self.revocation(),
+            bundle,
+            receipt,
+        )
+        snapshots = tuple(
+            (artifact.__class__, artifact.to_dict(), artifact.canonical_bytes(), artifact.sha256())
+            for artifact in artifacts
+        )
+        rebound_calls = []
+
+        def rebound(name):
+            def fail(*args, **kwargs):
+                rebound_calls.append(name)
+                raise AssertionError(f"rebound builtin used: {name}")
+
+            return fail
+
+        replacements = {
+            name: rebound(name)
+            for name in (
+                "type", "len", "dict", "list", "tuple", "frozenset", "sorted",
+                "set", "zip", "any", "enumerate", "bytes", "bool", "int", "str",
+                "TypeError", "ValueError", "UnicodeDecodeError", "KeyError", "object",
+            )
+        }
+        with patch.multiple(a3, create=True, **replacements):
+            for artifact, (artifact_class, data, raw, sha256) in zip(artifacts, snapshots):
+                artifact.validate()
+                self.assertEqual(artifact.to_dict(), data)
+                self.assertEqual(artifact.canonical_bytes(), raw)
+                self.assertEqual(artifact.sha256(), sha256)
+                self.assertEqual(artifact_class(data).canonical_bytes(), raw)
+                self.assertEqual(artifact_class.from_dict(data).canonical_bytes(), raw)
+                self.assertEqual(artifact_class.from_bytes(raw).canonical_bytes(), raw)
+
+            rebuilt_policy = a3.create_a3_closeout_policy()
+            rebuilt_trigger = a3.create_a3_closeout_trigger(
+                rebuilt_policy,
+                "real-a1-plan-example",
+                "1" * 64,
+                "real-a1-execution-receipt-example",
+                "2" * 64,
+                "2026-07-25T00:00:00Z",
+            )
+            rebuilt_bundle = a3.create_a3_closeout_evidence_bundle(
+                rebuilt_policy,
+                rebuilt_trigger,
+                [self.process(), self.deletion(), self.release(), self.revocation()],
+            )
+            rebuilt_receipt = a3.evaluate_a3_closeout_readiness(rebuilt_bundle)
+            parsed_bundle, parsed_receipt = a3.validate_a3_closeout_bundle_bytes(
+                rebuilt_bundle.canonical_bytes(), rebuilt_receipt.canonical_bytes(),
+            )
+            a3.validate_a3_closeout_readiness_against(parsed_receipt, parsed_bundle)
+            self.assertEqual(parsed_bundle.sha256(), rebuilt_bundle.sha256())
+            self.assertEqual(parsed_receipt.sha256(), rebuilt_receipt.sha256())
+
+            class DictSubclass(dict):
+                pass
+
+            self.rejected(
+                lambda: a3.A3CloseoutPolicy.from_dict(DictSubclass(self.policy.to_dict())),
+                "policy_exact_keys_invalid",
+            )
+            self.rejected(
+                lambda: a3.A3CloseoutPolicy.from_bytes(b"{"),
+                "canonical_bytes_invalid",
+            )
+            self.rejected(
+                lambda: a3.create_a3_instance_release_evidence(
+                    self.policy,
+                    self.trigger,
+                    source_artifact_id="autodl-control-plane-observation",
+                    source_artifact_sha256="9" * 64,
+                    observed_at_utc="2026-07-25T00:30:00Z",
+                    instance_id_sha256="a" * 64,
+                    release_request_sha256="b" * 64,
+                    control_plane_state="unknown",
+                    storage_state=r"C:\secret\path",
+                    billing_state="token=abc123",
+                ),
+                "release_state_tuple_invalid",
+            )
+            forged = self.policy.to_dict()
+            forged["cleanup_mode"] = "forged"
+            reidentify(forged, "policy_id", "autodl-a3-policy-")
+            self.rejected(
+                lambda: a3.A3CloseoutPolicy(forged),
+                "policy_cleanup_invalid",
+            )
+            self.rejected(
+                lambda: a3.A3CloseoutPolicy.from_bytes(canonical(forged)),
+                "policy_cleanup_invalid",
+            )
+
+        self.assertEqual(rebound_calls, [])
+
     def test_cli_validates_only_local_canonical_bytes(self):
         bundle = self.complete_bundle()
         receipt = a3.evaluate_a3_closeout_readiness(bundle)

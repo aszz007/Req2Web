@@ -22,6 +22,25 @@ def _build_contract() -> dict[str, object]:
     timedelta_type = timedelta
     utc = timezone.utc
     frozen_setattr = object.__setattr__
+    exact_type = type
+    length_of = len
+    dict_type = dict
+    list_type = list
+    tuple_type = tuple
+    frozen_set_type = frozenset
+    sort_values = sorted
+    set_type = set
+    zip_values = zip
+    any_value = any
+    enumerate_values = enumerate
+    bytes_type = bytes
+    bool_type = bool
+    int_type = int
+    str_type = str
+    type_error = TypeError
+    value_error = ValueError
+    unicode_decode_error = UnicodeDecodeError
+    key_error = KeyError
 
     schemas = {
         "policy": "req2web.runtime.autodl_a3_policy.v1",
@@ -94,7 +113,7 @@ def _build_contract() -> dict[str, object]:
             "a2_unlocked", "h1_allowed", "formal_quality_allowed", "physical_erasure_claimed",
         ),
     }
-    keysets = {name: frozenset(value) for name, value in keys.items()}
+    keysets = {name: frozen_set_type(value) for name, value in keys.items()}
 
     def canonical(value: object) -> bytes:
         try:
@@ -102,44 +121,44 @@ def _build_contract() -> dict[str, object]:
                 value, ensure_ascii=False, sort_keys=True,
                 separators=(",", ":"), allow_nan=False,
             ).encode("utf-8")
-        except (TypeError, ValueError) as exc:
+        except (type_error, value_error) as exc:
             raise error_type("canonical_json_invalid") from exc
 
     def digest(raw: bytes) -> str:
         return sha256_fn(raw).hexdigest()
 
     def exact_map(value: object, name: str, code: str) -> dict[str, object]:
-        if type(value) is not dict or len(value) != len(keys[name]) or frozenset(value) != keysets[name]:
+        if exact_type(value) is not dict_type or length_of(value) != length_of(keys[name]) or frozen_set_type(value) != keysets[name]:
             raise error_type(code)
-        return dict(value)
+        return dict_type(value)
 
     def exact_list(value: object, code: str) -> list[object]:
-        if type(value) is not list:
+        if exact_type(value) is not list_type:
             raise error_type(code)
-        return list(value)
+        return list_type(value)
 
     def parse_bytes(raw: object) -> dict[str, object]:
-        if type(raw) is not bytes or raw.startswith(b"\xef\xbb\xbf"):
+        if exact_type(raw) is not bytes_type or raw.startswith(b"\xef\xbb\xbf"):
             raise error_type("canonical_bytes_invalid")
         try:
             value = loads(raw.decode("utf-8"))
-        except (UnicodeDecodeError, ValueError) as exc:
+        except (unicode_decode_error, value_error) as exc:
             raise error_type("canonical_bytes_invalid") from exc
-        if type(value) is not dict or canonical(value) != raw:
+        if exact_type(value) is not dict_type or canonical(value) != raw:
             raise error_type("canonical_bytes_invalid")
         return value
 
     def req_bool(value: object, expected: bool, code: str) -> None:
-        if type(value) is not bool or value is not expected:
+        if exact_type(value) is not bool_type or value is not expected:
             raise error_type(code)
 
     def req_int(value: object, code: str, minimum: int = 0) -> int:
-        if type(value) is not int or value < minimum:
+        if exact_type(value) is not int_type or value < minimum:
             raise error_type(code)
         return value
 
     def req_text(value: object, code: str) -> str:
-        if type(value) is not str or not value or len(value) > 256:
+        if exact_type(value) is not str_type or not value or length_of(value) > 256:
             raise error_type(code)
         return value
 
@@ -150,18 +169,18 @@ def _build_contract() -> dict[str, object]:
         return text
 
     def req_hash(value: object, code: str, allow_absent: bool = False) -> str:
-        if type(value) is not str or fullmatch(r"[0-9a-f]{64}", value) is None:
+        if exact_type(value) is not str_type or fullmatch(r"[0-9a-f]{64}", value) is None:
             raise error_type(code)
         if value == absent_hash and not allow_absent:
             raise error_type(code)
         return value
 
     def parse_time(value: object, code: str) -> datetime:
-        if type(value) is not str or fullmatch(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z", value) is None:
+        if exact_type(value) is not str_type or fullmatch(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z", value) is None:
             raise error_type(code)
         try:
             return datetime_type.strptime(value, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=utc)
-        except ValueError as exc:
+        except value_error as exc:
             raise error_type(code) from exc
 
     def format_time(value: datetime) -> str:
@@ -214,7 +233,7 @@ def _build_contract() -> dict[str, object]:
 
     def validate_policy(value: object) -> dict[str, object]:
         data = exact_map(value, "policy", "policy_exact_keys_invalid")
-        if data["schema_version"] != schemas["policy"] or data["evidence_categories"] != list(categories):
+        if data["schema_version"] != schemas["policy"] or data["evidence_categories"] != list_type(categories):
             raise error_type("policy_schema_or_categories_invalid")
         if data["remote_deadline_minutes"] != remote_deadline_minutes:
             raise error_type("policy_remote_deadline_invalid")
@@ -235,7 +254,7 @@ def _build_contract() -> dict[str, object]:
     def create_policy():
         root = {
             "schema_version": schemas["policy"], "policy_id": "pending",
-            "evidence_categories": list(categories),
+            "evidence_categories": list_type(categories),
             "remote_deadline_minutes": remote_deadline_minutes,
             "cleanup_mode": cleanup_mode,
             "local_archive_retention_days": local_archive_retention_days,
@@ -246,7 +265,7 @@ def _build_contract() -> dict[str, object]:
         return Policy(validate_policy(identify("autodl-a3-policy-", root, "policy_id")))
 
     def parse_policy(value: object):
-        if type(value) is not Policy:
+        if exact_type(value) is not Policy:
             raise error_type("policy_type_invalid")
         return policy_from_dict(value.data)
 
@@ -293,7 +312,7 @@ def _build_contract() -> dict[str, object]:
         return Trigger(validate_trigger(identify("autodl-a3-trigger-", root, "trigger_id")))
 
     def parse_trigger(value: object):
-        if type(value) is not Trigger:
+        if exact_type(value) is not Trigger:
             raise error_type("trigger_type_invalid")
         return trigger_from_dict(value.data)
 
@@ -334,12 +353,12 @@ def _build_contract() -> dict[str, object]:
         if data["status"] not in ("process_termination_observed", "process_termination_incomplete", "not_executed"):
             raise error_type("process_status_invalid")
         for field in ("term_sent", "kill_sent"):
-            if type(data[field]) is not bool:
+            if exact_type(data[field]) is not bool_type:
                 raise error_type(f"process_{field}_invalid")
         req_int(data["grace_seconds"], "process_grace_invalid")
         for field in ("pid_sha256", "pgid_sha256", "cgroup_sha256"):
             req_hash(data[field], f"process_{field}_invalid", data["status"] == "not_executed")
-        counts = tuple(req_int(data[field], f"process_{field}_invalid") for field in ("post_process_count", "post_gpu_process_count", "post_listener_count"))
+        counts = tuple_type(req_int(data[field], f"process_{field}_invalid") for field in ("post_process_count", "post_gpu_process_count", "post_listener_count"))
         req_bool(data["physical_erasure_claimed"], False, "process_physical_erasure_invalid")
         if data["status"] == "process_termination_observed" and (data["term_sent"] is not True or counts != (0, 0, 0)):
             raise error_type("process_observed_state_invalid")
@@ -452,7 +471,7 @@ def _build_contract() -> dict[str, object]:
         states = (control_plane_state, storage_state, billing_state)
         try:
             status = release_status_by_tuple[states]
-        except KeyError as exc:
+        except key_error as exc:
             raise error_type("release_state_tuple_invalid") from exc
         if source_artifact_sha256 == absent_hash and status != "not_executed":
             raise error_type("release_not_executed_state_invalid")
@@ -534,30 +553,30 @@ def _build_contract() -> dict[str, object]:
     evidence_parsers = (Process.from_dict, Deletion.from_dict, Release.from_dict, Revocation.from_dict)
 
     def parse_evidence_objects(values: object) -> tuple[object, ...]:
-        if type(values) not in (list, tuple) or len(values) != 4:
+        if exact_type(values) not in (list_type, tuple_type) or length_of(values) != 4:
             raise error_type("bundle_evidence_count_invalid")
         result = []
-        for index, (value, expected_type, parser) in enumerate(zip(values, evidence_types, evidence_parsers)):
-            if type(value) is not expected_type:
+        for index, (value, expected_type, parser) in enumerate_values(zip_values(values, evidence_types, evidence_parsers)):
+            if exact_type(value) is not expected_type:
                 raise error_type("bundle_evidence_type_invalid")
             parsed = parser(value.data)
             if parsed.data["category"] != categories[index]:
                 raise error_type("bundle_evidence_order_invalid")
             result.append(parsed)
-        return tuple(result)
+        return tuple_type(result)
 
     def parse_evidence_dicts(values: object) -> tuple[object, ...]:
         rows = exact_list(values, "bundle_evidence_invalid")
-        if len(rows) != 4:
+        if length_of(rows) != 4:
             raise error_type("bundle_evidence_count_invalid")
-        result = tuple(parser(row) for parser, row in zip(evidence_parsers, rows))
-        if tuple(item.data["category"] for item in result) != categories:
+        result = tuple_type(parser(row) for parser, row in zip_values(evidence_parsers, rows))
+        if tuple_type(item.data["category"] for item in result) != categories:
             raise error_type("bundle_evidence_order_invalid")
         return result
 
     def validate_bundle(value: object) -> dict[str, object]:
         data = exact_map(value, "bundle", "bundle_exact_keys_invalid")
-        if data["schema_version"] != schemas["bundle"] or data["evidence_order"] != list(categories):
+        if data["schema_version"] != schemas["bundle"] or data["evidence_order"] != list_type(categories):
             raise error_type("bundle_schema_or_order_invalid")
         policy = policy_from_dict(data["policy"])
         trigger = trigger_from_dict(data["trigger"])
@@ -579,7 +598,7 @@ def _build_contract() -> dict[str, object]:
         expected_inventory = []
         for item in evidence:
             raw = item.canonical_bytes()
-            expected_inventory.append({"category": item.data["category"], "evidence_id": item.data["evidence_id"], "bytes": len(raw), "sha256": digest(raw)})
+            expected_inventory.append({"category": item.data["category"], "evidence_id": item.data["evidence_id"], "bytes": length_of(raw), "sha256": digest(raw)})
         inventory = exact_list(data["inventory"], "bundle_inventory_invalid")
         parsed_inventory = []
         for row in inventory:
@@ -606,11 +625,11 @@ def _build_contract() -> dict[str, object]:
         inventory = []
         for item in parsed_evidence:
             raw = item.canonical_bytes()
-            inventory.append({"category": item.data["category"], "evidence_id": item.data["evidence_id"], "bytes": len(raw), "sha256": digest(raw)})
+            inventory.append({"category": item.data["category"], "evidence_id": item.data["evidence_id"], "bytes": length_of(raw), "sha256": digest(raw)})
         root = {
             "schema_version": schemas["bundle"], "bundle_id": "pending",
             "policy": parsed_policy.to_dict(), "trigger": parsed_trigger.to_dict(),
-            "evidence_order": list(categories), "evidence": [item.to_dict() for item in parsed_evidence],
+            "evidence_order": list_type(categories), "evidence": [item.to_dict() for item in parsed_evidence],
             "inventory": inventory, "tree_sha256": digest(canonical(inventory)),
             "external_action_authorized": False, "cleanup_complete": False,
             "manager_consumable": False, "physical_erasure_claimed": False,
@@ -618,7 +637,7 @@ def _build_contract() -> dict[str, object]:
         return Bundle(validate_bundle(identify("autodl-a3-bundle-", root, "bundle_id")))
 
     def parse_bundle(value: object):
-        if type(value) is not Bundle:
+        if exact_type(value) is not Bundle:
             raise error_type("bundle_type_invalid")
         return bundle_from_dict(value.data)
 
@@ -629,12 +648,12 @@ def _build_contract() -> dict[str, object]:
 
     def readiness_state(bundle) -> tuple[str, list[str], bool]:
         parsed = parse_bundle(bundle)
-        statuses = tuple(item.data["status"] for item in parse_evidence_dicts(parsed.data["evidence"]))
+        statuses = tuple_type(item.data["status"] for item in parse_evidence_dicts(parsed.data["evidence"]))
         if statuses == ("not_executed",) * 4:
             return "a3_not_executed", ["a3_not_executed"], False
         if statuses == complete_statuses:
             return "a3_structural_evidence_ready_not_manager_consumable", [], True
-        failures = sorted(f"{category}_incomplete" for category, actual, expected in zip(categories, statuses, complete_statuses) if actual != expected)
+        failures = sort_values(f"{category}_incomplete" for category, actual, expected in zip_values(categories, statuses, complete_statuses) if actual != expected)
         return "a3_evidence_incomplete", failures, False
 
     def validate_receipt(value: object) -> dict[str, object]:
@@ -646,15 +665,15 @@ def _build_contract() -> dict[str, object]:
         if data["status"] not in ("a3_structural_evidence_ready_not_manager_consumable", "a3_evidence_incomplete", "a3_not_executed"):
             raise error_type("readiness_receipt_status_invalid")
         codes = exact_list(data["failure_codes"], "readiness_receipt_failure_codes_invalid")
-        incomplete_codes = tuple(f"{category}_incomplete" for category in categories)
-        allowed_codes = frozenset(("a3_not_executed",) + incomplete_codes)
+        incomplete_codes = tuple_type(f"{category}_incomplete" for category in categories)
+        allowed_codes = frozen_set_type(("a3_not_executed",) + incomplete_codes)
         if (
-            any(type(code) is not str or code not in allowed_codes for code in codes)
-            or codes != sorted(set(codes))
+            any_value(exact_type(code) is not str_type or code not in allowed_codes for code in codes)
+            or codes != sort_values(set_type(codes))
         ):
             raise error_type("readiness_receipt_failure_codes_invalid")
         ready = data["structural_evidence_ready"]
-        if type(ready) is not bool:
+        if exact_type(ready) is not bool_type:
             raise error_type("readiness_receipt_structural_flag_invalid")
         status = data["status"]
         if status == "a3_structural_evidence_ready_not_manager_consumable":
@@ -687,7 +706,7 @@ def _build_contract() -> dict[str, object]:
         return Receipt(validate_receipt(identify("autodl-a3-readiness-", root, "receipt_id")))
 
     def validate_receipt_against(receipt, bundle) -> None:
-        if type(receipt) is not Receipt:
+        if exact_type(receipt) is not Receipt:
             raise error_type("readiness_receipt_type_invalid")
         parsed_receipt = Receipt.from_dict(receipt.data)
         expected = evaluate_readiness(parse_bundle(bundle))
