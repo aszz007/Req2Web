@@ -64,6 +64,19 @@ _MAX_FILE_BYTES = MappingProxyType({
     RECEIPT_FILENAME: 262_144,
     EVIDENCE_COMMIT_FILENAME: 262_144,
 })
+_A1_PRODUCTION_GATE_OWNER_SNAPSHOT_SCHEMA = (
+    "req2web.runtime.real_a1_production_gate_result_owning_snapshot.v1"
+)
+_A1_PRODUCTION_GATE_OWNER_SNAPSHOT_ABI = (
+    "req2web.runtime.real_a1_production_gate_result_owning_snapshot.abi.v1"
+)
+_A1_PRODUCTION_GATE_OWNER_GENERATION_SENTINEL = object()
+_A1_PRODUCTION_GATE_OWNER_GENERATION = (
+    "real-a1-production-gate-owner-generation-"
+    + hashlib.sha256(
+        str(id(_A1_PRODUCTION_GATE_OWNER_GENERATION_SENTINEL)).encode("ascii")
+    ).hexdigest()[:20]
+)
 
 
 class A1ProductionGateError(ValueError):
@@ -83,6 +96,7 @@ def _build_gate_authorities():
     mapping_type = Mapping
     mapping_proxy_type = MappingProxyType
     exact_type = type
+    object_new = object.__new__
     dumps = json.dumps
     loads = json.loads
     sha256_ctor = hashlib.sha256
@@ -110,6 +124,47 @@ def _build_gate_authorities():
     synthetic_decision_registry = {}
     result_registry = {}
     roles = ("control", "package", "model", "evidence")
+    owner_snapshot_schema = _A1_PRODUCTION_GATE_OWNER_SNAPSHOT_SCHEMA
+    owner_snapshot_abi = _A1_PRODUCTION_GATE_OWNER_SNAPSHOT_ABI
+    owner_generation = _A1_PRODUCTION_GATE_OWNER_GENERATION
+    owner_generation_sentinel = _A1_PRODUCTION_GATE_OWNER_GENERATION_SENTINEL
+    module_namespace = globals()
+    owner_generation_key = "_A1_PRODUCTION_GATE_OWNER_GENERATION"
+    owner_metadata_query = object()
+    owner_metadata_keys = (
+        "authority_schema", "authority_abi", "authority_generation",
+    )
+    artifact_provenance_keys = (
+        "report_id", "report_sha256", "gate_receipt_id",
+        "gate_receipt_sha256", "bundle_id", "bundle_sha256",
+    )
+    decision_provenance_keys = (
+        "validation_mode", "status", "next_state", "manager_a1_passed",
+        "a2_unlocked", "provider_invoked", "project_data_transferred",
+        "h1_allowed", "formal_quality_allowed", "validated_at_utc",
+        "report_id", "report_sha256", "gate_receipt_id",
+        "gate_receipt_sha256", "bundle_id", "bundle_sha256",
+    )
+    result_snapshot_keys = (
+        "report_bytes", "receipt_bytes", "bundle_bytes",
+        "artifact_provenance", "decision", "decision_provenance",
+        "manager_authority", "return_code",
+    )
+    owner_snapshot_keys = owner_metadata_keys + (
+        "validation_mode", "action_time_git_sha", "plan_id",
+        "plan_sha256", "control_id", "control_sha256",
+        "gate_report_canonical_bytes", "gate_report_id",
+        "gate_report_sha256", "gate_receipt_canonical_bytes",
+        "gate_receipt_id", "gate_receipt_sha256",
+        "gate_bundle_canonical_bytes", "gate_bundle_id",
+        "gate_bundle_sha256", "manager_authority",
+        "decision_validation_mode", "decision_status",
+        "decision_next_state", "decision_manager_a1_passed",
+        "decision_a2_unlocked", "decision_provider_invoked",
+        "decision_project_data_transferred", "decision_h1_allowed",
+        "decision_formal_quality_allowed", "decision_validated_at_utc",
+        "return_code", "snapshot_sha256",
+    )
 
     def utc_now():
         return datetime_type.now(utc_timezone).strftime(utc_format)
@@ -315,17 +370,52 @@ def _build_gate_authorities():
             raise error_type("gate_receipt_type_invalid")
         return receipt_from_dict(value.data)
 
+    def build_gate_receipt_from_report_data(value):
+        report_data = validate_report_data(value)
+        production = report_data["validation_mode"] == "production_linux"
+        root = {
+            "schema_version": receipt_schema,
+            "report_id": report_data["report_id"],
+            "report_sha256": digest(canon(dict(report_data))),
+            "plan_id": report_data["plan_id"],
+            "control_id": report_data["control_id"],
+            "observation_id": report_data["observation_id"],
+            "receipt_id": report_data["receipt_id"],
+            "commit_id": report_data["commit_id"],
+            "status": (
+                "production_bundle_recorded_not_manager_authority"
+                if production
+                else "synthetic_not_manager_consumable"
+            ),
+            "next_state": (
+                "requires_owning_bundle_replay"
+                if production
+                else "blocked_synthetic_test"
+            ),
+            "manager_a1_passed": False,
+            "a2_unlocked": False,
+            "provider_invoked": False,
+            "project_data_transferred": False,
+            "h1_allowed": False,
+            "formal_quality_allowed": False,
+        }
+        root["gate_receipt_id"] = artifact_id(
+            "real-a1-production-gate-receipt-", root
+        )
+        return validate_receipt_data(root)
+
     def validate_bundle_data(value):
         data = dict(exact_map(value, bundle_keys, "gate_bundle_exact_keys_invalid"))
         if data["schema_version"] != bundle_schema:
             raise error_type("gate_bundle_schema_invalid")
-        report = report_from_dict(data["report"])
-        receipt = receipt_from_dict(data["receipt"])
-        receipt.validate_against(report)
+        report_data = validate_report_data(data["report"])
+        receipt_data = validate_receipt_data(data["receipt"])
+        if receipt_data != build_gate_receipt_from_report_data(report_data):
+            raise error_type("gate_receipt_replay_invalid")
         root = {
             "schema_version": bundle_schema,
-            "report": report.to_dict(),
-            "receipt": receipt.to_dict(),
+            "report": dict(report_data),
+            "receipt": dict(receipt_data),
         }
         if data["bundle_id"] != artifact_id("real-a1-production-gate-bundle-", root):
             raise error_type("gate_bundle_identity_invalid")
@@ -584,36 +674,47 @@ def _build_gate_authorities():
 
     result_type = A1ProductionGateResult
 
-    def parse_result_snapshot(instance):
+    def replay_registered_result_data(instance):
         snapshot = registered_decision_data(
             result_registry,
             result_type,
             instance,
             "production_gate_result_not_registered",
         )
-        report = report_type.from_bytes(snapshot["report_bytes"])
-        receipt = receipt_type.from_bytes(snapshot["receipt_bytes"])
-        bundle = bundle_type.from_bytes(snapshot["bundle_bytes"])
-        report, receipt, bundle = parse_provenance_components(
-            report,
-            receipt,
-            bundle,
-        )
-        current_artifacts = {
-            "report_id": report.data["report_id"],
-            "report_sha256": report.sha256(),
-            "gate_receipt_id": receipt.data["gate_receipt_id"],
-            "gate_receipt_sha256": receipt.sha256(),
-            "bundle_id": bundle.data["bundle_id"],
-            "bundle_sha256": bundle.sha256(),
-        }
+        if set(snapshot) != set(result_snapshot_keys):
+            raise TypeError("production_gate_result_snapshot_shape_invalid")
+        if exact_type(snapshot["manager_authority"]) is not bool:
+            raise TypeError("production_gate_result_manager_authority_invalid")
+        if exact_type(snapshot["return_code"]) is not int:
+            raise TypeError("production_gate_result_return_code_invalid")
+        report_bytes = snapshot["report_bytes"]
+        receipt_bytes = snapshot["receipt_bytes"]
+        bundle_bytes = snapshot["bundle_bytes"]
+        report_data = validate_report_data(parse_json(report_bytes))
+        receipt_data = validate_receipt_data(parse_json(receipt_bytes))
+        bundle_data = validate_bundle_data(parse_json(bundle_bytes))
         if (
-            report.canonical_bytes() != snapshot["report_bytes"]
-            or receipt.canonical_bytes() != snapshot["receipt_bytes"]
-            or bundle.canonical_bytes() != snapshot["bundle_bytes"]
-            or current_artifacts != dict(snapshot["artifact_provenance"])
+            canon(dict(report_data)) != report_bytes
+            or canon(dict(receipt_data)) != receipt_bytes
+            or canon(dict(bundle_data)) != bundle_bytes
+            or receipt_data != build_gate_receipt_from_report_data(report_data)
+            or bundle_data["report"] != report_data
+            or bundle_data["receipt"] != receipt_data
         ):
             raise TypeError("production_gate_result_snapshot_invalid")
+        current_artifacts = {
+            "report_id": report_data["report_id"],
+            "report_sha256": digest(report_bytes),
+            "gate_receipt_id": receipt_data["gate_receipt_id"],
+            "gate_receipt_sha256": digest(receipt_bytes),
+            "bundle_id": bundle_data["bundle_id"],
+            "bundle_sha256": digest(bundle_bytes),
+        }
+        if (
+            set(snapshot["artifact_provenance"]) != set(artifact_provenance_keys)
+            or current_artifacts != dict(snapshot["artifact_provenance"])
+        ):
+            raise TypeError("production_gate_result_artifact_provenance_invalid")
         manager_authority = snapshot["manager_authority"]
         decision = snapshot["decision"]
         decision_registry = (
@@ -621,18 +722,42 @@ def _build_gate_authorities():
             if manager_authority
             else synthetic_decision_registry
         )
-        _, _, _, decision_provenance = validate_registered_provenance(
+        _, _, _, decision_provenance = validate_registered_provenance_data(
             decision_registry,
             decision,
-            report,
-            receipt,
-            bundle,
+            report_data,
+            receipt_data,
+            bundle_data,
             manager_authority,
         )
-        if dict(decision_provenance) != dict(snapshot["decision_provenance"]):
+        if (
+            set(snapshot["decision_provenance"]) != set(decision_provenance_keys)
+            or dict(decision_provenance) != dict(snapshot["decision_provenance"])
+        ):
             raise TypeError("production_gate_result_decision_provenance_invalid")
         if snapshot["return_code"] != 0:
             raise TypeError("gate_result_binding_invalid")
+        return (
+            snapshot,
+            report_data,
+            receipt_data,
+            bundle_data,
+            decision,
+            decision_provenance,
+        )
+
+    def parse_result_snapshot(instance):
+        (
+            snapshot,
+            report_data,
+            receipt_data,
+            bundle_data,
+            decision,
+            _,
+        ) = replay_registered_result_data(instance)
+        report = report_type(report_data)
+        receipt = receipt_type(receipt_data)
+        bundle = bundle_type(bundle_data)
         return snapshot, report, receipt, bundle, decision
 
     def read_exact_files(validation):
@@ -797,31 +922,7 @@ def _build_gate_authorities():
 
     def build_gate_receipt(report):
         parsed = parse_report(report)
-        production = parsed.data["validation_mode"] == "production_linux"
-        root = {
-            "schema_version": receipt_schema,
-            "report_id": parsed.data["report_id"],
-            "report_sha256": parsed.sha256(),
-            "plan_id": parsed.data["plan_id"],
-            "control_id": parsed.data["control_id"],
-            "observation_id": parsed.data["observation_id"],
-            "receipt_id": parsed.data["receipt_id"],
-            "commit_id": parsed.data["commit_id"],
-            "status": (
-                "production_bundle_recorded_not_manager_authority"
-                if production
-                else "synthetic_not_manager_consumable"
-            ),
-            "next_state": "requires_owning_bundle_replay" if production else "blocked_synthetic_test",
-            "manager_a1_passed": False,
-            "a2_unlocked": False,
-            "provider_invoked": False,
-            "project_data_transferred": False,
-            "h1_allowed": False,
-            "formal_quality_allowed": False,
-        }
-        root["gate_receipt_id"] = artifact_id("real-a1-production-gate-receipt-", root)
-        return validate_receipt_data(root)
+        return build_gate_receipt_from_report_data(parsed.data)
 
     def build_bundle(report, receipt):
         parsed_report = parse_report(report)
@@ -856,6 +957,80 @@ def _build_gate_authorities():
             raise TypeError("gate_bundle_nested_binding_invalid")
         return parsed_report, parsed_receipt, parsed_bundle
 
+    def validate_registered_provenance_data(
+        registry,
+        decision,
+        report_data,
+        receipt_data,
+        bundle_data,
+        manager_required,
+    ):
+        code = (
+            "validated_manager_decision_not_registered"
+            if manager_required
+            else "synthetic_gate_decision_not_registered"
+        )
+        expected_decision_type = (
+            manager_decision_type if manager_required else synthetic_decision_type
+        )
+        provenance = registered_decision_data(
+            registry,
+            expected_decision_type,
+            decision,
+            code,
+        )
+        parsed_report_data = validate_report_data(report_data)
+        parsed_receipt_data = validate_receipt_data(receipt_data)
+        parsed_bundle_data = validate_bundle_data(bundle_data)
+        if (
+            parsed_receipt_data
+            != build_gate_receipt_from_report_data(parsed_report_data)
+            or parsed_bundle_data["report"] != parsed_report_data
+            or parsed_bundle_data["receipt"] != parsed_receipt_data
+        ):
+            raise TypeError("gate_bundle_nested_binding_invalid")
+        expected = (
+            {
+                "validation_mode": "production_linux",
+                "status": "validated_manager_a1_passed",
+                "next_state": "a2_unlocked_not_executed",
+                "manager_a1_passed": True,
+                "a2_unlocked": True,
+            }
+            if manager_required
+            else {
+                "validation_mode": "synthetic_test_only",
+                "status": "synthetic_validated_not_manager_consumable",
+                "next_state": "blocked_synthetic_test",
+                "manager_a1_passed": False,
+                "a2_unlocked": False,
+            }
+        )
+        if (
+            set(provenance) != set(decision_provenance_keys)
+            or any(provenance[key] != value for key, value in expected.items())
+            or provenance["report_id"] != parsed_report_data["report_id"]
+            or provenance["report_sha256"] != digest(canon(dict(parsed_report_data)))
+            or provenance["gate_receipt_id"]
+            != parsed_receipt_data["gate_receipt_id"]
+            or provenance["gate_receipt_sha256"]
+            != digest(canon(dict(parsed_receipt_data)))
+            or provenance["bundle_id"] != parsed_bundle_data["bundle_id"]
+            or provenance["bundle_sha256"]
+            != digest(canon(dict(parsed_bundle_data)))
+        ):
+            raise TypeError(
+                "manager_decision_bundle_binding_invalid"
+                if manager_required
+                else "synthetic_decision_bundle_binding_invalid"
+            )
+        return (
+            parsed_report_data,
+            parsed_receipt_data,
+            parsed_bundle_data,
+            provenance,
+        )
+
     def validate_registered_provenance(
         registry,
         decision,
@@ -864,53 +1039,19 @@ def _build_gate_authorities():
         bundle,
         manager_required,
     ):
-        code = (
-            "validated_manager_decision_not_registered"
-            if manager_required
-            else "synthetic_gate_decision_not_registered"
-        )
-        expected_decision_type = manager_decision_type if manager_required else synthetic_decision_type
-        provenance = registered_decision_data(
-            registry,
-            expected_decision_type,
-            decision,
-            code,
-        )
         parsed_report, parsed_receipt, parsed_bundle = parse_provenance_components(
             report,
             receipt,
             bundle,
         )
-        if manager_required:
-            expected = {
-                "validation_mode": "production_linux",
-                "status": "validated_manager_a1_passed",
-                "next_state": "a2_unlocked_not_executed",
-                "manager_a1_passed": True,
-                "a2_unlocked": True,
-            }
-        else:
-            expected = {
-                "validation_mode": "synthetic_test_only",
-                "status": "synthetic_validated_not_manager_consumable",
-                "next_state": "blocked_synthetic_test",
-                "manager_a1_passed": False,
-                "a2_unlocked": False,
-            }
-        if (
-            any(provenance[key] != value for key, value in expected.items())
-            or provenance["report_id"] != parsed_report.data["report_id"]
-            or provenance["report_sha256"] != parsed_report.sha256()
-            or provenance["gate_receipt_id"] != parsed_receipt.data["gate_receipt_id"]
-            or provenance["gate_receipt_sha256"] != parsed_receipt.sha256()
-            or provenance["bundle_id"] != parsed_bundle.data["bundle_id"]
-            or provenance["bundle_sha256"] != parsed_bundle.sha256()
-        ):
-            raise TypeError(
-                "manager_decision_bundle_binding_invalid"
-                if manager_required
-                else "synthetic_decision_bundle_binding_invalid"
-            )
+        _, _, _, provenance = validate_registered_provenance_data(
+            registry,
+            decision,
+            parsed_report.data,
+            parsed_receipt.data,
+            parsed_bundle.data,
+            manager_required,
+        )
         return parsed_report, parsed_receipt, parsed_bundle, provenance
 
     def register_decision(manager_authority, data):
@@ -1174,6 +1315,96 @@ def _build_gate_authorities():
         )
         return True
 
+    def ensure_owner_generation():
+        _ = owner_generation_sentinel
+        if module_namespace.get(owner_generation_key) != owner_generation:
+            raise error_type(
+                "a1_production_gate_owner_generation_drift_"
+                "restart_and_rebuild_required"
+            )
+
+    def owner_snapshot_hash(value):
+        rows = []
+        for key in owner_snapshot_keys:
+            if key == "snapshot_sha256":
+                continue
+            item = value[key]
+            if exact_type(item) is bytes:
+                rows.append([key, "bytes_hex", item.hex()])
+            elif exact_type(item) is bool:
+                rows.append([key, "bool", item])
+            elif exact_type(item) is int:
+                rows.append([key, "int", item])
+            elif exact_type(item) is str:
+                rows.append([key, "str", item])
+            else:
+                raise error_type("a1_production_gate_owner_snapshot_type_invalid")
+        return digest(canon(rows))
+
+    def read_owning_result_snapshot(instance=owner_metadata_query):
+        ensure_owner_generation()
+        metadata = mapping_proxy_type(
+            {
+                "authority_schema": owner_snapshot_schema,
+                "authority_abi": owner_snapshot_abi,
+                "authority_generation": owner_generation,
+            }
+        )
+        if instance is owner_metadata_query:
+            return metadata
+        (
+            snapshot,
+            report_data,
+            receipt_data,
+            bundle_data,
+            _,
+            decision_provenance,
+        ) = replay_registered_result_data(instance)
+        root = {
+            **dict(metadata),
+            "validation_mode": report_data["validation_mode"],
+            "action_time_git_sha": report_data["action_time_git_sha"],
+            "plan_id": report_data["plan_id"],
+            "plan_sha256": report_data["plan_sha256"],
+            "control_id": report_data["control_id"],
+            "control_sha256": report_data["control_sha256"],
+            "gate_report_canonical_bytes": snapshot["report_bytes"],
+            "gate_report_id": report_data["report_id"],
+            "gate_report_sha256": digest(snapshot["report_bytes"]),
+            "gate_receipt_canonical_bytes": snapshot["receipt_bytes"],
+            "gate_receipt_id": receipt_data["gate_receipt_id"],
+            "gate_receipt_sha256": digest(snapshot["receipt_bytes"]),
+            "gate_bundle_canonical_bytes": snapshot["bundle_bytes"],
+            "gate_bundle_id": bundle_data["bundle_id"],
+            "gate_bundle_sha256": digest(snapshot["bundle_bytes"]),
+            "manager_authority": snapshot["manager_authority"],
+            "decision_validation_mode": decision_provenance["validation_mode"],
+            "decision_status": decision_provenance["status"],
+            "decision_next_state": decision_provenance["next_state"],
+            "decision_manager_a1_passed": decision_provenance[
+                "manager_a1_passed"
+            ],
+            "decision_a2_unlocked": decision_provenance["a2_unlocked"],
+            "decision_provider_invoked": decision_provenance[
+                "provider_invoked"
+            ],
+            "decision_project_data_transferred": decision_provenance[
+                "project_data_transferred"
+            ],
+            "decision_h1_allowed": decision_provenance["h1_allowed"],
+            "decision_formal_quality_allowed": decision_provenance[
+                "formal_quality_allowed"
+            ],
+            "decision_validated_at_utc": decision_provenance[
+                "validated_at_utc"
+            ],
+            "return_code": snapshot["return_code"],
+        }
+        root["snapshot_sha256"] = owner_snapshot_hash(root)
+        if set(root) != set(owner_snapshot_keys):
+            raise error_type("a1_production_gate_owner_snapshot_shape_invalid")
+        return mapping_proxy_type(root)
+
     def decision_registry_counts_for_tests():
         return {
             "manager": len(manager_decision_registry),
@@ -1199,6 +1430,7 @@ def _build_gate_authorities():
         "validate_synthetic_decision_provenance_for_tests": validate_synthetic_decision_provenance_for_tests,
         "make_synthetic_result_for_tests": make_synthetic_result_for_tests,
         "decision_registry_counts_for_tests": decision_registry_counts_for_tests,
+        "read_owning_result_snapshot": read_owning_result_snapshot,
         "canon": canon,
         "digest": digest,
         "parse_json": parse_json,
@@ -1219,4 +1451,7 @@ _validate_synthetic_gate_bundle_for_tests = _GATE_AUTHORITIES["validate_syntheti
 _validate_synthetic_decision_provenance_for_tests = _GATE_AUTHORITIES["validate_synthetic_decision_provenance_for_tests"]
 _make_synthetic_gate_result_for_tests = _GATE_AUTHORITIES["make_synthetic_result_for_tests"]
 _decision_registry_counts_for_tests = _GATE_AUTHORITIES["decision_registry_counts_for_tests"]
+_read_a1_production_gate_result_owning_snapshot = _GATE_AUTHORITIES[
+    "read_owning_result_snapshot"
+]
 _validate_committed_evidence_for_tests = _GATE_AUTHORITIES["validate_evidence"]

@@ -986,5 +986,103 @@ class A1ProductionGateTests(unittest.TestCase):
             self.assertNotIn(forbidden, cli)
 
 
+    def test_private_owner_snapshot_accessor_is_immutable_and_descriptor_independent(self):
+        decision = self.validate_saved_bundle()
+        result = gate._make_synthetic_gate_result_for_tests(
+            self.report,
+            self.gate_receipt,
+            self.bundle,
+            decision,
+        )
+        metadata = gate._read_a1_production_gate_result_owning_snapshot()
+        snapshot = gate._read_a1_production_gate_result_owning_snapshot(result)
+        self.assertEqual(
+            metadata["authority_schema"],
+            "req2web.runtime.real_a1_production_gate_result_owning_snapshot.v1",
+        )
+        self.assertEqual(snapshot["authority_generation"], metadata["authority_generation"])
+        self.assertEqual(snapshot["gate_report_id"], self.report.data["report_id"])
+        self.assertEqual(
+            snapshot["gate_report_sha256"],
+            hashlib.sha256(snapshot["gate_report_canonical_bytes"]).hexdigest(),
+        )
+        self.assertFalse(snapshot["manager_authority"])
+        self.assertFalse(snapshot["decision_manager_a1_passed"])
+        self.assertFalse(snapshot["decision_a2_unlocked"])
+        self.assertEqual(snapshot["return_code"], 0)
+        self.assertEqual(len(snapshot["snapshot_sha256"]), 64)
+        with self.assertRaises(TypeError):
+            snapshot["manager_authority"] = True
+        self.assertFalse(
+            hasattr(runtime_package, "_read_a1_production_gate_result_owning_snapshot")
+        )
+
+        forged = object()
+        targets = []
+        for cls in (
+            gate.A1ProductionGateResult,
+            gate.ValidatedA1ManagerDecision,
+            gate._SyntheticA1GateDecision,
+        ):
+            for name, descriptor in vars(cls).items():
+                if isinstance(descriptor, property):
+                    targets.append((cls, name, descriptor))
+        method_names = {
+            gate.A1ProductionGateReport: (
+                "from_dict", "from_bytes", "validate", "to_dict",
+                "canonical_bytes", "sha256",
+            ),
+            gate.A1ProductionGateReceipt: (
+                "from_dict", "from_bytes", "validate", "to_dict",
+                "canonical_bytes", "sha256", "validate_against",
+            ),
+            gate.A1ProductionGateBundle: (
+                "from_dict", "from_bytes", "validate", "to_dict",
+                "canonical_bytes", "sha256", "report", "receipt",
+            ),
+        }
+        for cls, names in method_names.items():
+            for name in names:
+                targets.append((cls, name, vars(cls)[name]))
+        try:
+            for cls, name, descriptor in targets:
+                if isinstance(descriptor, property):
+                    replacement = property(lambda self, value=forged: value)
+                elif isinstance(descriptor, classmethod):
+                    replacement = classmethod(
+                        lambda cls, *args, value=forged, **kwargs: value
+                    )
+                else:
+                    replacement = lambda *args, value=forged, **kwargs: value
+                setattr(cls, name, replacement)
+            replay = gate._read_a1_production_gate_result_owning_snapshot(result)
+            self.assertEqual(replay, snapshot)
+        finally:
+            for cls, name, descriptor in reversed(targets):
+                setattr(cls, name, descriptor)
+
+    def test_private_owner_snapshot_generation_drift_fails_closed(self):
+        decision = self.validate_saved_bundle()
+        result = gate._make_synthetic_gate_result_for_tests(
+            self.report,
+            self.gate_receipt,
+            self.bundle,
+            decision,
+        )
+        generation = gate._A1_PRODUCTION_GATE_OWNER_GENERATION
+        try:
+            gate._A1_PRODUCTION_GATE_OWNER_GENERATION = "reloaded-owner-generation"
+            with self.assertRaisesRegex(
+                gate.A1ProductionGateError,
+                "owner_generation_drift_restart_and_rebuild_required",
+            ):
+                gate._read_a1_production_gate_result_owning_snapshot(result)
+        finally:
+            gate._A1_PRODUCTION_GATE_OWNER_GENERATION = generation
+        replay = gate._read_a1_production_gate_result_owning_snapshot(result)
+        self.assertEqual(replay["authority_generation"], generation)
+
+
+
 if __name__ == "__main__":
     unittest.main()
