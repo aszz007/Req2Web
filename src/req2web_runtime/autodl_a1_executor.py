@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime, timezone
 import hashlib
 import json
 import os
@@ -26,6 +27,7 @@ from .autodl_a1_operational import (
 PHASE_EVENT_SCHEMA = "req2web.runtime.real_a1_phase_event.v1"
 PRODUCTION_OBSERVATION_SCHEMA = "req2web.runtime.real_a1_production_observation.v1"
 EXECUTION_RECEIPT_SCHEMA = "req2web.runtime.real_a1_execution_receipt.v1"
+EVIDENCE_COMMIT_SCHEMA = "req2web.runtime.real_a1_evidence_commit.v1"
 CHANNEL_SCHEMA = "req2web.runtime.real_a1_probe_channel.v1"
 WORKER_AUTHORITY = "req2web.runtime.autodl_a1_probe_worker.v1"
 WORKER_VERSION = "1"
@@ -34,14 +36,19 @@ EXPECTED_SUFFIX = "A1 operational probe acknowledged."
 PHASE_EVENT_FILENAME = "phase_events.json"
 OBSERVATION_FILENAME = "production_observation.json"
 RECEIPT_FILENAME = "execution_receipt.json"
-_ALLOWED_ARTIFACT_FILES = (PHASE_EVENT_FILENAME, OBSERVATION_FILENAME, RECEIPT_FILENAME)
+EVIDENCE_COMMIT_FILENAME = "evidence_commit.json"
+_PAYLOAD_ARTIFACT_FILES = (PHASE_EVENT_FILENAME, OBSERVATION_FILENAME, RECEIPT_FILENAME)
+_ALLOWED_ARTIFACT_FILES = (*_PAYLOAD_ARTIFACT_FILES, EVIDENCE_COMMIT_FILENAME)
 _CHANNEL_READ_CHUNK_BYTES = 4096
 _MAX_CHANNEL_EVENT_LINE_BYTES = 65536
 _MAX_CHANNEL_BUFFER_BYTES = 131072
 
 _PHASE_KEYS = ("schema_version", "event_id", "plan_id", "control_id", "sequence", "phase", "transition", "parent_elapsed_ms", "channel_sha256", "channel_length", "status", "failure_code")
-_OBSERVATION_KEYS = ("schema_version", "observation_id", "plan_id", "plan_sha256", "control_id", "control_sha256", "package_manifest_sha256", "model_inventory_sha256", "action_time_git_sha", "worker_authority", "worker_version", "phase_events", "phase_inventory_sha256", "runtime", "gpu", "resources", "model", "processor", "probe", "network", "root_contract", "decision", "failure_codes")
+_OBSERVATION_KEYS = ("schema_version", "observation_id", "plan_id", "plan_sha256", "control_id", "control_sha256", "package_manifest_sha256", "model_inventory_sha256", "action_time_git_sha", "worker_authority", "worker_version", "execution_started_utc", "execution_completed_utc", "root_invariants", "phase_events", "phase_inventory_sha256", "runtime", "gpu", "resources", "model", "processor", "probe", "network", "root_contract", "decision", "failure_codes")
+_ROOT_INVARIANT_KEYS = ("role", "normalized_path_sha256", "marker_id", "marker_sha256", "expected_state")
 _RECEIPT_KEYS = ("schema_version", "receipt_id", "plan_id", "plan_sha256", "control_id", "control_sha256", "observation_id", "observation_sha256", "status", "next_state", "failure_codes", "a2_unlocked", "provider_invoked", "project_data_transferred", "compatibility_run_occurred", "h1_allowed", "formal_quality_allowed", "manager_a1_passed")
+_COMMIT_KEYS = ("schema_version", "commit_id", "plan_id", "plan_sha256", "control_id", "control_sha256", "observation_id", "observation_sha256", "receipt_id", "receipt_sha256", "action_time_git_sha", "worker_authority", "worker_version", "files", "tree_sha256")
+_COMMIT_ROW_KEYS = ("relative_path", "bytes", "sha256")
 _CHANNEL_KEYS = ("schema_version", "sequence", "phase", "transition", "payload")
 _PHASE_ORDER = (("setup", "started"), ("setup", "completed"), ("load", "started"), ("load", "completed"), ("probe", "started"), ("probe", "completed"))
 _FAILURE_CODES = (
@@ -69,6 +76,7 @@ def _build_executor_authorities():
     phase_event_schema = PHASE_EVENT_SCHEMA
     production_observation_schema = PRODUCTION_OBSERVATION_SCHEMA
     execution_receipt_schema = EXECUTION_RECEIPT_SCHEMA
+    evidence_commit_schema = EVIDENCE_COMMIT_SCHEMA
     channel_schema = CHANNEL_SCHEMA
     worker_authority = WORKER_AUTHORITY
     worker_version = WORKER_VERSION
@@ -88,9 +96,22 @@ def _build_executor_authorities():
     phase_keys = tuple(_PHASE_KEYS)
     observation_keys = tuple(_OBSERVATION_KEYS)
     receipt_keys = tuple(_RECEIPT_KEYS)
+    commit_keys = tuple(_COMMIT_KEYS)
+    commit_row_keys = tuple(_COMMIT_ROW_KEYS)
+    payload_artifact_files = tuple(_PAYLOAD_ARTIFACT_FILES)
     channel_keys = tuple(_CHANNEL_KEYS)
     phase_order = tuple(_PHASE_ORDER)
-    failure_codes = tuple(_FAILURE_CODES)
+    failure_codes = tuple(_FAILURE_CODES) + ("authorization_window_invalid",)
+    root_invariant_keys = tuple(_ROOT_INVARIANT_KEYS)
+    datetime_type = datetime
+    utc_timezone = timezone.utc
+    utc_format = "%Y-%m-%dT%H:%M:%SZ"
+
+    def utc_now_real():
+        return datetime_type.now(utc_timezone).strftime(utc_format)
+
+    def parse_utc(value):
+        return datetime_type.strptime(value, utc_format).replace(tzinfo=utc_timezone)
     fixed_prompt_hash = sha256_ctor(fixed_prompt.encode("utf-8")).hexdigest()
     expected_suffix_hash = sha256_ctor(expected_suffix.encode("utf-8")).hexdigest()
 
@@ -243,6 +264,22 @@ def _build_executor_authorities():
             check_hex(data[key], "production_observation_hash_invalid")
         if type(data["action_time_git_sha"]) is not str or len(data["action_time_git_sha"]) != 40:
             raise error_type("production_observation_action_sha_invalid")
+        try:
+            started = parse_utc(data["execution_started_utc"])
+            completed = parse_utc(data["execution_completed_utc"])
+        except Exception as exc:
+            raise error_type("production_observation_time_invalid") from exc
+        if started > completed:
+            raise error_type("production_observation_time_invalid")
+        invariants = data["root_invariants"]
+        if type(invariants) is not list or [item.get("role") for item in invariants if isinstance(item, mapping_type)] != ["control", "package", "model", "evidence"]:
+            raise error_type("production_observation_root_invariants_invalid")
+        for item in invariants:
+            row = dict(exact_map(item, root_invariant_keys, "production_observation_root_invariant_invalid"))
+            check_hex(row["normalized_path_sha256"], "production_observation_root_invariant_invalid")
+            check_hex(row["marker_sha256"], "production_observation_root_invariant_invalid")
+            if type(row["marker_id"]) is not str or type(row["expected_state"]) is not str:
+                raise error_type("production_observation_root_invariant_invalid")
         events = data["phase_events"]
         if type(events) is not list:
             raise error_type("phase_event_inventory_invalid")
@@ -319,6 +356,14 @@ def _build_executor_authorities():
                 validate_success_payload({key: validated[key] for key in ("runtime", "gpu", "resources", "model", "processor", "probe", "network")}, parsed_plan)
             if validated["plan_id"] != parsed_plan.plan_id or validated["plan_sha256"] != parsed_plan.sha256() or validated["control_id"] != parsed_controls.data["control_id"] or validated["control_sha256"] != parsed_controls.sha256() or validated["package_manifest_sha256"] != parsed_plan.data["package_manifest_sha256"] or validated["model_inventory_sha256"] != parsed_plan.data["model_inventory_sha256"] or validated["action_time_git_sha"] != parsed_plan.data["action_time_git_sha"]:
                 raise error_type("production_observation_binding_invalid")
+            if validated["decision"] == "pass":
+                disposition = parsed_plan.data["no_action_plan"]["approved_disposition"]
+                approval = parse_utc(disposition["approval_timestamp_utc"])
+                expiry = parse_utc(disposition["authorization_expiry_utc"])
+                started = parse_utc(validated["execution_started_utc"])
+                completed = parse_utc(validated["execution_completed_utc"])
+                if not approval <= started <= completed <= expiry:
+                    raise error_type("production_observation_authorization_window_invalid")
 
     observation_type = A1ProductionObservation
     observation_from_dict = A1ProductionObservation.from_dict
@@ -378,11 +423,95 @@ def _build_executor_authorities():
             if validate_receipt_data(self.data) != expected:
                 raise error_type("execution_receipt_replay_invalid")
 
+    receipt_type = A1ExecutionReceipt
+    receipt_from_dict = A1ExecutionReceipt.from_dict
+
+    def parse_receipt(value):
+        if type(value) is not receipt_type:
+            raise error_type("execution_receipt_type_invalid")
+        return receipt_from_dict(value.data)
+
+    def validate_commit_data(value):
+        data = dict(exact_map(value, commit_keys, "evidence_commit_exact_keys_invalid"))
+        if data["schema_version"] != evidence_commit_schema or data["worker_authority"] != worker_authority or data["worker_version"] != worker_version:
+            raise error_type("evidence_commit_boundary_invalid")
+        for key in ("plan_sha256", "control_sha256", "observation_sha256", "receipt_sha256", "tree_sha256"):
+            check_hex(data[key], "evidence_commit_hash_invalid")
+        if type(data["action_time_git_sha"]) is not str or len(data["action_time_git_sha"]) != 40 or any(char not in "0123456789abcdef" for char in data["action_time_git_sha"]):
+            raise error_type("evidence_commit_action_sha_invalid")
+        rows = data["files"]
+        if type(rows) is not list or len(rows) != len(payload_artifact_files):
+            raise error_type("evidence_commit_files_invalid")
+        normalized = []
+        for index, row in enumerate(rows):
+            row_data = dict(exact_map(row, commit_row_keys, "evidence_commit_row_invalid"))
+            if row_data["relative_path"] != payload_artifact_files[index] or type(row_data["bytes"]) is not int or type(row_data["bytes"]) is bool or row_data["bytes"] < 1:
+                raise error_type("evidence_commit_row_invalid")
+            check_hex(row_data["sha256"], "evidence_commit_row_hash_invalid")
+            normalized.append(row_data)
+        if data["tree_sha256"] != digest(canon(normalized)):
+            raise error_type("evidence_commit_tree_invalid")
+        for key, prefix in (("plan_id", "real-a1-plan-"), ("control_id", "real-a1-control-"), ("observation_id", "real-a1-production-observation-"), ("receipt_id", "real-a1-execution-receipt-")):
+            if type(data[key]) is not str or not data[key].startswith(prefix):
+                raise error_type("evidence_commit_binding_invalid")
+        root = {key: data[key] for key in commit_keys if key != "commit_id"}
+        if data["commit_id"] != artifact_id("real-a1-evidence-commit-", root):
+            raise error_type("evidence_commit_identity_invalid")
+        return data
+
+    def build_commit_marker(observation, receipt, payload_bytes):
+        parsed_observation = parse_observation(observation)
+        parsed_receipt = parse_receipt(receipt)
+        payloads = dict(exact_map(payload_bytes, payload_artifact_files, "evidence_commit_payload_inventory_invalid"))
+        phase_bytes = payloads[payload_artifact_files[0]]
+        observation_bytes = payloads[payload_artifact_files[1]]
+        receipt_bytes = payloads[payload_artifact_files[2]]
+        if observation_bytes != parsed_observation.canonical_bytes() or receipt_bytes != parsed_receipt.canonical_bytes() or phase_bytes != canon(parsed_observation.data["phase_events"]):
+            raise error_type("evidence_commit_payload_replay_invalid")
+        if parsed_receipt.data["plan_id"] != parsed_observation.data["plan_id"] or parsed_receipt.data["plan_sha256"] != parsed_observation.data["plan_sha256"] or parsed_receipt.data["control_id"] != parsed_observation.data["control_id"] or parsed_receipt.data["control_sha256"] != parsed_observation.data["control_sha256"] or parsed_receipt.data["observation_id"] != parsed_observation.data["observation_id"] or parsed_receipt.data["observation_sha256"] != parsed_observation.sha256():
+            raise error_type("evidence_commit_nested_binding_invalid")
+        rows = [{"relative_path": name, "bytes": len(payloads[name]), "sha256": digest(payloads[name])} for name in payload_artifact_files]
+        root = {"schema_version": evidence_commit_schema, "plan_id": parsed_observation.data["plan_id"], "plan_sha256": parsed_observation.data["plan_sha256"], "control_id": parsed_observation.data["control_id"], "control_sha256": parsed_observation.data["control_sha256"], "observation_id": parsed_observation.data["observation_id"], "observation_sha256": parsed_observation.sha256(), "receipt_id": parsed_receipt.data["receipt_id"], "receipt_sha256": parsed_receipt.sha256(), "action_time_git_sha": parsed_observation.data["action_time_git_sha"], "worker_authority": worker_authority, "worker_version": worker_version, "files": rows, "tree_sha256": digest(canon(rows))}
+        root["commit_id"] = artifact_id("real-a1-evidence-commit-", root)
+        return validate_commit_data(root)
+
+    @dataclass(frozen=True)
+    class A1EvidenceCommitMarker:
+        data: Mapping[str, object]
+
+        @classmethod
+        def from_dict(cls, value):
+            return cls(validate_commit_data(value))
+
+        @classmethod
+        def from_bytes(cls, raw):
+            return cls(validate_commit_data(parse_json(raw)))
+
+        def validate(self):
+            validate_commit_data(self.data)
+
+        def to_dict(self):
+            return dict(validate_commit_data(self.data))
+
+        def canonical_bytes(self):
+            return canon(dict(validate_commit_data(self.data)))
+
+        def sha256(self):
+            return digest(canon(dict(validate_commit_data(self.data))))
+
+        def validate_against(self, observation, receipt, phase_events_bytes, observation_bytes, receipt_bytes):
+            parsed_observation = parse_observation(observation)
+            parsed_receipt = parse_receipt(receipt)
+            expected = build_commit_marker(parsed_observation, parsed_receipt, {payload_artifact_files[0]: phase_events_bytes, payload_artifact_files[1]: observation_bytes, payload_artifact_files[2]: receipt_bytes})
+            if validate_commit_data(self.data) != expected:
+                raise error_type("evidence_commit_replay_invalid")
+
     def build_observation(plan, controls, events, measurements, decision, failure_list, root_contract):
         parsed_plan = parse_plan(plan)
         parsed_controls = parse_controls(controls)
         parsed_events = [phase_from_dict(event.to_dict() if isinstance(event, A1ProductionPhaseEvent) else event) for event in events]
-        root = {"schema_version": production_observation_schema, "plan_id": parsed_plan.plan_id, "plan_sha256": parsed_plan.sha256(), "control_id": parsed_controls.data["control_id"], "control_sha256": parsed_controls.sha256(), "package_manifest_sha256": parsed_plan.data["package_manifest_sha256"], "model_inventory_sha256": parsed_plan.data["model_inventory_sha256"], "action_time_git_sha": parsed_plan.data["action_time_git_sha"], "worker_authority": worker_authority, "worker_version": worker_version, "phase_events": [event.to_dict() for event in parsed_events], "phase_inventory_sha256": digest(canon([event.to_dict() for event in parsed_events])), **measurements, "root_contract": root_contract, "decision": decision, "failure_codes": list(failure_list)}
+        completed_utc = root_contract.completed_utc or root_contract.utc_now()
+        root = {"schema_version": production_observation_schema, "plan_id": parsed_plan.plan_id, "plan_sha256": parsed_plan.sha256(), "control_id": parsed_controls.data["control_id"], "control_sha256": parsed_controls.sha256(), "package_manifest_sha256": parsed_plan.data["package_manifest_sha256"], "model_inventory_sha256": parsed_plan.data["model_inventory_sha256"], "action_time_git_sha": parsed_plan.data["action_time_git_sha"], "worker_authority": worker_authority, "worker_version": worker_version, "execution_started_utc": root_contract.started_utc, "execution_completed_utc": completed_utc, "root_invariants": root_contract.root_invariants, "phase_events": [event.to_dict() for event in parsed_events], "phase_inventory_sha256": digest(canon([event.to_dict() for event in parsed_events])), **measurements, "root_contract": root_contract, "decision": decision, "failure_codes": list(failure_list)}
         root["observation_id"] = artifact_id("real-a1-production-observation-", root)
         return validate_observation_data(root)
 
@@ -407,9 +536,22 @@ def _build_executor_authorities():
             raise error_type("channel_invalid")
         return data
 
-    def root_contract(controls, argv, environment):
+    class RootContractState(dict):
+        pass
+
+    def root_contract(controls, argv, environment, root_bindings=None, _utc_now=utc_now_real):
         markers = {item["role"]: item for item in controls.data["root_markers"]}
-        return {"control_marker_sha256": markers["control"]["marker_sha256"], "package_marker_sha256": markers["package"]["marker_sha256"], "model_marker_sha256": markers["model"]["marker_sha256"], "evidence_marker_sha256": markers["evidence"]["marker_sha256"], "argv_sha256": digest(canon(argv)), "environment_sha256": digest(canon(environment)), "project_payload_contract": "fixed_roots_argv_env_prompt_only_not_global_host_claim"}
+        if root_bindings is None:
+            invariants = [{"role": role, "normalized_path_sha256": digest(("synthetic-test-root:" + role).encode("utf-8")), "marker_id": markers[role]["marker_id"], "marker_sha256": markers[role]["marker_sha256"], "expected_state": markers[role]["expected_state"]} for role in ("control", "package", "model", "evidence")]
+        else:
+            invariants = [{key: root_bindings[role][key] for key in root_invariant_keys} for role in ("control", "package", "model", "evidence")]
+        result = RootContractState({"control_marker_sha256": markers["control"]["marker_sha256"], "package_marker_sha256": markers["package"]["marker_sha256"], "model_marker_sha256": markers["model"]["marker_sha256"], "evidence_marker_sha256": markers["evidence"]["marker_sha256"], "argv_sha256": digest(canon(argv)), "environment_sha256": digest(canon(environment)), "project_payload_contract": "fixed_roots_argv_env_prompt_only_not_global_host_claim"})
+        result.started_utc = _utc_now()
+        result.completed_utc = None
+        result.utc_now = _utc_now
+        result.root_invariants = invariants
+        return result
+
 
     def success_payload_for_tests(plan, parent_netns="net:[100]", child_netns="net:[200]"):
         parsed_plan = parse_plan(plan)
@@ -430,9 +572,18 @@ def _build_executor_authorities():
         parsed_plan = parse_plan(plan)
         parsed_controls = parse_controls(controls)
         events = []
+        disposition = parsed_plan.data["no_action_plan"]["approved_disposition"]
+        approval = parse_utc(disposition["approval_timestamp_utc"])
+        expiry = parse_utc(disposition["authorization_expiry_utc"])
+        started = parse_utc(contract.started_utc)
+        grace = parsed_plan.data["limits"]["cancel_grace_seconds"] * 1000
+        if not approval <= started <= expiry:
+            cancel_adapter(adapter, grace)
+            observation = failure_observation(parsed_plan, parsed_controls, events, "authorization_window_invalid", contract)
+            receipt = A1ExecutionReceipt(build_receipt(parsed_plan, parsed_controls, observation))
+            return observation, receipt
         phase_started = {"setup": 0, "load": None, "probe": None}
         limits = {"setup": parsed_plan.data["limits"]["setup_seconds"] * 1000, "load": parsed_plan.data["limits"]["load_seconds"] * 1000, "probe": parsed_plan.data["limits"]["probe_seconds"] * 1000}
-        grace = parsed_plan.data["limits"]["cancel_grace_seconds"] * 1000
         final_payload = None
         for index, expected in enumerate(phase_order, 1):
             phase, transition = expected
@@ -491,6 +642,12 @@ def _build_executor_authorities():
             observation = failure_observation(parsed_plan, parsed_controls, events, "channel_invalid", contract)
             receipt = A1ExecutionReceipt(build_receipt(parsed_plan, parsed_controls, observation))
             return observation, receipt
+        contract.completed_utc = contract.utc_now()
+        completed = parse_utc(contract.completed_utc)
+        if not approval <= started <= completed <= expiry:
+            observation = failure_observation(parsed_plan, parsed_controls, events, "authorization_window_invalid", contract)
+            receipt = A1ExecutionReceipt(build_receipt(parsed_plan, parsed_controls, observation))
+            return observation, receipt
         try:
             measurements = validate_success_payload(final_payload, parsed_plan)
             observation = A1ProductionObservation(build_observation(parsed_plan, parsed_controls, events, measurements, "pass", [], contract))
@@ -541,25 +698,36 @@ def _build_executor_authorities():
         def channel_clean(self):
             return True
 
-    def scripted_run_for_tests(plan, controls, script, survive_terminate=False):
+    def scripted_run_for_tests(plan, controls, script, survive_terminate=False, utc_values=None, root_bindings=None):
         adapter = ScriptedAdapter(script, survive_terminate)
-        contract = root_contract(controls, ["private-scripted-test"], {"mode": "private-scripted-test"})
+        values = iter(utc_values or ("2026-07-25T00:00:00Z", "2026-07-25T00:00:01Z", "2026-07-25T00:00:02Z"))
+        last = [None]
+        def test_utc_now():
+            try:
+                last[0] = next(values)
+            except StopIteration:
+                pass
+            return last[0]
+        contract = root_contract(controls, ["private-scripted-test"], {"mode": "private-scripted-test"}, root_bindings, _utc_now=test_utc_now)
         observation, receipt = monitor_adapter(plan, controls, adapter, contract)
         return observation, receipt, {"terminate": adapter.terminated, "kill": adapter.killed, "elapsed_ms": adapter.elapsed_ms()}
 
     def channel_bytes_for_tests(sequence, phase, transition, payload=None):
         return canon({"schema_version": channel_schema, "sequence": sequence, "phase": phase, "transition": transition, "payload": payload or {}})
 
-    return {"A1ProductionPhaseEvent": A1ProductionPhaseEvent, "A1ProductionObservation": A1ProductionObservation, "A1ExecutionReceipt": A1ExecutionReceipt, "validate_phase_data": validate_phase_data, "validate_observation_data": validate_observation_data, "validate_receipt_data": validate_receipt_data, "build_observation": build_observation, "build_receipt": build_receipt, "failure_observation": failure_observation, "monitor_adapter": monitor_adapter, "scripted_run_for_tests": scripted_run_for_tests, "channel_bytes_for_tests": channel_bytes_for_tests, "success_payload_for_tests": success_payload_for_tests, "canon": canon, "digest": digest, "parse_json": parse_json, "root_contract": root_contract, "parse_plan": parse_plan, "parse_controls": parse_controls}
+    return {"A1ProductionPhaseEvent": A1ProductionPhaseEvent, "A1ProductionObservation": A1ProductionObservation, "A1ExecutionReceipt": A1ExecutionReceipt, "A1EvidenceCommitMarker": A1EvidenceCommitMarker, "validate_phase_data": validate_phase_data, "validate_observation_data": validate_observation_data, "validate_receipt_data": validate_receipt_data, "validate_commit_data": validate_commit_data, "build_commit_marker": build_commit_marker, "build_observation": build_observation, "build_receipt": build_receipt, "failure_observation": failure_observation, "monitor_adapter": monitor_adapter, "scripted_run_for_tests": scripted_run_for_tests, "channel_bytes_for_tests": channel_bytes_for_tests, "success_payload_for_tests": success_payload_for_tests, "canon": canon, "digest": digest, "parse_json": parse_json, "root_contract": root_contract, "parse_plan": parse_plan, "parse_controls": parse_controls}
 
 
 _EXECUTOR_AUTHORITIES = _build_executor_authorities()
 A1ProductionPhaseEvent = _EXECUTOR_AUTHORITIES["A1ProductionPhaseEvent"]
 A1ProductionObservation = _EXECUTOR_AUTHORITIES["A1ProductionObservation"]
 A1ExecutionReceipt = _EXECUTOR_AUTHORITIES["A1ExecutionReceipt"]
+A1EvidenceCommitMarker = _EXECUTOR_AUTHORITIES["A1EvidenceCommitMarker"]
 _validate_phase_event_data = _EXECUTOR_AUTHORITIES["validate_phase_data"]
 _validate_production_observation_data = _EXECUTOR_AUTHORITIES["validate_observation_data"]
 _validate_execution_receipt_data = _EXECUTOR_AUTHORITIES["validate_receipt_data"]
+_validate_evidence_commit_data = _EXECUTOR_AUTHORITIES["validate_commit_data"]
+_build_evidence_commit_marker = _EXECUTOR_AUTHORITIES["build_commit_marker"]
 _run_scripted_executor_for_tests = _EXECUTOR_AUTHORITIES["scripted_run_for_tests"]
 _channel_bytes_for_tests = _EXECUTOR_AUTHORITIES["channel_bytes_for_tests"]
 _success_payload_for_tests = _EXECUTOR_AUTHORITIES["success_payload_for_tests"]
@@ -821,10 +989,14 @@ def _write_executor_artifacts(
     _path_type=Path,
     _observation_type=A1ProductionObservation,
     _receipt_type=A1ExecutionReceipt,
+    _commit_type=A1EvidenceCommitMarker,
+    _build_commit=_build_evidence_commit_marker,
     _canon=_captured_canon,
     _phase_filename=PHASE_EVENT_FILENAME,
     _observation_filename=OBSERVATION_FILENAME,
     _receipt_filename=RECEIPT_FILENAME,
+    _commit_filename=EVIDENCE_COMMIT_FILENAME,
+    _payload_files=_PAYLOAD_ARTIFACT_FILES,
     _allowed_files=_ALLOWED_ARTIFACT_FILES,
     _write=_write_exclusive,
     _error_type=RealA1ExecutorError,
@@ -841,9 +1013,13 @@ def _write_executor_artifacts(
         _observation_filename: parsed_observation.canonical_bytes(),
         _receipt_filename: parsed_receipt.canonical_bytes(),
     }
-    if tuple(payloads) != _allowed_files:
+    if tuple(payloads) != _payload_files:
+        raise _error_type("executor_payload_artifact_inventory_invalid")
+    commit_marker = _commit_type(_build_commit(parsed_observation, parsed_receipt, payloads))
+    published = {**payloads, _commit_filename: commit_marker.canonical_bytes()}
+    if tuple(published) != _allowed_files:
         raise _error_type("executor_artifact_inventory_invalid")
-    for name, content in payloads.items():
+    for name, content in published.items():
         _write(staging / name, content)
 
 
@@ -906,15 +1082,17 @@ def _build_production_runner():
         adapter = None
         parent_netns = "not_observed"
         command = [unshare, "--net", "--fork", "--mount-proc", executable, "-m", worker_module, "--plan", stringify(plan_path), "--controls", stringify(controls_path), "--package-root", stringify(package_root), "--model-root", stringify(model_root), "--parent-netns-id", parent_netns]
-        contract = root_contract_fn(preparation.controls, command, environment)
+        contract = None
         try:
             parent_netns = readlink("/proc/self/ns/net")
             command[-1] = parent_netns
-            contract = root_contract_fn(preparation.controls, command, environment)
+            contract = root_contract_fn(preparation.controls, command, environment, preparation.root_bindings)
             process = popen(command, stdin=devnull, stdout=pipe, stderr=devnull, cwd="/", env=environment, shell=False, start_new_session=True)
             adapter = adapter_type(process)
             observation, receipt = monitor(preparation.plan, preparation.controls, adapter, contract)
         except exception_type:
+            if contract is None:
+                contract = root_contract_fn(preparation.controls, command, environment, preparation.root_bindings)
             if adapter is not None:
                 adapter.terminate()
                 if not adapter.wait(30000):

@@ -52,18 +52,27 @@ class RealA1ExecutorTests(unittest.TestCase):
         phases = (("setup", "started"), ("setup", "completed"), ("load", "started"), ("load", "completed"), ("probe", "started"), ("probe", "completed"))
         return [{"delay_ms": delay, "raw": executor._channel_bytes_for_tests(index, phase, transition, payload if index == 6 else {})} for index, ((phase, transition), delay) in enumerate(zip(phases, delays), 1)]
 
-    def run_script(self, script, survive_terminate=False):
-        return executor._run_scripted_executor_for_tests(self.plan, self.controls, script, survive_terminate)
+    def run_script(self, script, survive_terminate=False, utc_values=None, root_bindings=None):
+        return executor._run_scripted_executor_for_tests(
+            self.plan,
+            self.controls,
+            script,
+            survive_terminate,
+            utc_values=utc_values,
+            root_bindings=root_bindings,
+        )
 
     def test_public_api_is_typed_not_root_exported_and_has_no_overrides(self):
         self.assertFalse(hasattr(runtime_package, "execute_real_a1"))
         self.assertNotIn("execute_real_a1", runtime_package.__all__)
         self.assertEqual(tuple(inspect.signature(executor.execute_real_a1).parameters), ("plan_path", "controls_path", "package_root", "model_root", "evidence_root", "execute_real_a1"))
-        for artifact_type in (executor.A1ProductionPhaseEvent, executor.A1ProductionObservation, executor.A1ExecutionReceipt):
+        for artifact_type in (executor.A1ProductionPhaseEvent, executor.A1ProductionObservation, executor.A1ExecutionReceipt, executor.A1EvidenceCommitMarker):
             for name in ("from_dict", "from_bytes", "validate", "to_dict", "canonical_bytes", "sha256"):
                 self.assertFalse(any(parameter.startswith("_") for parameter in inspect.signature(getattr(artifact_type, name)).parameters))
         with self.assertRaises(TypeError):
             executor.execute_real_a1("p", "c", "package", "model", "evidence", True, callback=lambda: None)
+        with self.assertRaises(TypeError):
+            executor.execute_real_a1("p", "c", "package", "model", "evidence", True, clock=lambda: None)
         self.rejected(lambda: executor.execute_real_a1("p", "c", "package", "model", "evidence", False), "explicit_execute_real_a1_required")
 
     def test_scripted_success_only_awaits_independent_gate_and_logs_no_raw_text(self):
@@ -79,7 +88,46 @@ class RealA1ExecutorTests(unittest.TestCase):
         self.assertNotIn(executor.FIXED_PROMPT, encoded)
         self.assertNotIn(executor.EXPECTED_SUFFIX, encoded)
         self.assertEqual(meta, {"terminate": 0, "kill": 0, "elapsed_ms": 6})
+        self.assertEqual(observation.data["execution_started_utc"], "2026-07-25T00:00:00Z")
+        self.assertEqual(observation.data["execution_completed_utc"], "2026-07-25T00:00:01Z")
         self.assertEqual([(event["phase"], event["transition"]) for event in observation.data["phase_events"]], [("setup", "started"), ("setup", "completed"), ("load", "started"), ("load", "completed"), ("probe", "started"), ("probe", "completed")])
+
+    def test_execution_authorization_window_fails_closed_without_clock_override(self):
+        cases = (
+            (
+                "not_yet_valid",
+                ("2026-07-24T23:59:58Z", "2026-07-24T23:59:59Z"),
+                1,
+            ),
+            (
+                "expired_start",
+                ("2026-08-01T00:00:01Z", "2026-08-01T00:00:02Z"),
+                1,
+            ),
+            (
+                "crosses_expiry",
+                ("2026-07-31T23:59:59Z", "2026-08-01T00:00:01Z"),
+                0,
+            ),
+        )
+        for name, utc_values, expected_terminate in cases:
+            with self.subTest(name=name):
+                observation, receipt, meta = self.run_script(
+                    self.success_script(),
+                    utc_values=utc_values,
+                )
+                self.assertEqual(observation.data["decision"], "fail")
+                self.assertEqual(
+                    observation.data["failure_codes"],
+                    ["authorization_window_invalid"],
+                )
+                self.assertEqual(
+                    receipt.data["status"],
+                    "a1_failed_cleanup_required",
+                )
+                self.assertFalse(receipt.data["a2_unlocked"])
+                self.assertFalse(receipt.data["manager_a1_passed"])
+                self.assertEqual(meta["terminate"], expected_terminate)
 
     def test_wrong_runtime_gpu_device_model_and_processor_fail_closed(self):
         mutations = (
@@ -181,11 +229,29 @@ class RealA1ExecutorTests(unittest.TestCase):
         self.assertEqual(executor.A1ProductionObservation.from_bytes(observation.canonical_bytes()).to_dict(), observation.data)
         self.assertEqual(executor.A1ExecutionReceipt.from_bytes(receipt.canonical_bytes()).to_dict(), receipt.data)
 
+        payloads = {
+            executor.PHASE_EVENT_FILENAME: canonical(observation.data["phase_events"]),
+            executor.OBSERVATION_FILENAME: observation.canonical_bytes(),
+            executor.RECEIPT_FILENAME: receipt.canonical_bytes(),
+        }
+        marker = executor.A1EvidenceCommitMarker(executor._build_evidence_commit_marker(observation, receipt, payloads))
+        marker.validate_against(observation, receipt, payloads[executor.PHASE_EVENT_FILENAME], payloads[executor.OBSERVATION_FILENAME], payloads[executor.RECEIPT_FILENAME])
+        self.assertEqual(executor.A1EvidenceCommitMarker.from_bytes(marker.canonical_bytes()).to_dict(), marker.data)
+        forged_marker = deepcopy(marker.data)
+        forged_marker["files"][0]["sha256"] = "0" * 64
+        forged_marker["tree_sha256"] = hashlib.sha256(canonical(forged_marker["files"])).hexdigest()
+        identify("real-a1-evidence-commit-", forged_marker, "commit_id")
+        parsed_forged_marker = executor.A1EvidenceCommitMarker.from_bytes(canonical(forged_marker))
+        self.rejected(lambda: parsed_forged_marker.validate_against(observation, receipt, payloads[executor.PHASE_EVENT_FILENAME], payloads[executor.OBSERVATION_FILENAME], payloads[executor.RECEIPT_FILENAME]), "evidence_commit_replay_invalid")
+        self.rejected(lambda: executor.A1EvidenceCommitMarker(forged_marker).validate_against(observation, receipt, payloads[executor.PHASE_EVENT_FILENAME], payloads[executor.OBSERVATION_FILENAME], payloads[executor.RECEIPT_FILENAME]), "evidence_commit_replay_invalid")
+
     def test_definition_time_rebinding_does_not_change_saved_authorities(self):
         observation, receipt, _ = self.run_script(self.success_script())
-        saved_types = (executor.A1ProductionPhaseEvent, executor.A1ProductionObservation, executor.A1ExecutionReceipt)
+        payloads = {executor.PHASE_EVENT_FILENAME: canonical(observation.data["phase_events"]), executor.OBSERVATION_FILENAME: observation.canonical_bytes(), executor.RECEIPT_FILENAME: receipt.canonical_bytes()}
+        marker = executor.A1EvidenceCommitMarker(executor._build_evidence_commit_marker(observation, receipt, payloads))
+        saved_types = (executor.A1ProductionPhaseEvent, executor.A1ProductionObservation, executor.A1ExecutionReceipt, executor.A1EvidenceCommitMarker)
         saved_run = executor._run_scripted_executor_for_tests
-        snapshots = (observation.canonical_bytes(), receipt.canonical_bytes())
+        snapshots = (observation.canonical_bytes(), receipt.canonical_bytes(), marker.canonical_bytes())
         calls = []
 
         def rebound(*args, **kwargs):
@@ -213,9 +279,11 @@ class RealA1ExecutorTests(unittest.TestCase):
             A1ProductionPhaseEvent=ReboundType,
             A1ProductionObservation=ReboundType,
             A1ExecutionReceipt=ReboundType,
+            A1EvidenceCommitMarker=ReboundType,
             PHASE_EVENT_SCHEMA="rebound",
             PRODUCTION_OBSERVATION_SCHEMA="rebound",
             EXECUTION_RECEIPT_SCHEMA="rebound",
+            EVIDENCE_COMMIT_SCHEMA="rebound",
             CHANNEL_SCHEMA="rebound",
             WORKER_AUTHORITY="rebound",
             WORKER_VERSION="rebound",
@@ -224,15 +292,21 @@ class RealA1ExecutorTests(unittest.TestCase):
             _PHASE_KEYS=("rebound",),
             _OBSERVATION_KEYS=("rebound",),
             _RECEIPT_KEYS=("rebound",),
+            _COMMIT_KEYS=("rebound",),
+            _COMMIT_ROW_KEYS=("rebound",),
             _CHANNEL_KEYS=("rebound",),
             _PHASE_ORDER=(("rebound", "rebound"),),
             _FAILURE_CODES=("rebound",),
             json=rebound,
             hashlib=rebound,
             Mapping=rebound,
+            datetime=rebound,
+            timezone=rebound,
+            _ROOT_INVARIANT_KEYS=("rebound",),
         ):
             self.assertEqual(saved_types[1].from_bytes(snapshots[0]).canonical_bytes(), snapshots[0])
             self.assertEqual(saved_types[2].from_bytes(snapshots[1]).canonical_bytes(), snapshots[1])
+            self.assertEqual(saved_types[3].from_bytes(snapshots[2]).canonical_bytes(), snapshots[2])
             again, again_receipt, _ = saved_run(self.plan, self.controls, scripted_channel)
             self.assertEqual(again.data["decision"], "pass")
             self.assertEqual(again_receipt.data["status"], "a1_passed_awaiting_independent_gate")
@@ -296,7 +370,7 @@ class RealA1ExecutorTests(unittest.TestCase):
         self.assertTrue(staging.is_dir())
         observation, receipt, _ = self.run_script(self.success_script())
         executor._write_executor_artifacts(staging, observation, receipt)
-        self.assertEqual(tuple(sorted(item.name for item in staging.iterdir())), tuple(sorted((executor.PHASE_EVENT_FILENAME, executor.OBSERVATION_FILENAME, executor.RECEIPT_FILENAME))))
+        self.assertEqual(tuple(sorted(item.name for item in staging.iterdir())), tuple(sorted((executor.PHASE_EVENT_FILENAME, executor.OBSERVATION_FILENAME, executor.RECEIPT_FILENAME, executor.EVIDENCE_COMMIT_FILENAME))))
         self.rejected(lambda: executor._write_executor_artifacts(staging, observation, receipt), "executor_evidence_extra_or_existing")
         nonempty = self.root / "nonempty"
         nonempty.mkdir()
@@ -308,8 +382,8 @@ class RealA1ExecutorTests(unittest.TestCase):
 
     def test_publish_failure_returns_no_in_memory_artifacts_and_keeps_partial_files(self):
         observation, receipt, _ = self.run_script(self.success_script())
-        ordered_names = (executor.PHASE_EVENT_FILENAME, executor.OBSERVATION_FILENAME, executor.RECEIPT_FILENAME)
-        for failure_index in (2, 3):
+        ordered_names = (executor.PHASE_EVENT_FILENAME, executor.OBSERVATION_FILENAME, executor.RECEIPT_FILENAME, executor.EVIDENCE_COMMIT_FILENAME)
+        for failure_index in (2, 3, 4):
             with self.subTest(failure_index=failure_index):
                 staging = executor._prepare_evidence_staging_root(self.root / f"publish-failure-{failure_index}")
                 writes = 0
@@ -343,7 +417,11 @@ class RealA1ExecutorTests(unittest.TestCase):
                 self.assertTrue(result.cleanup_required)
                 self.assertEqual(tuple(attempted_names), ordered_names[:failure_index])
                 self.assertEqual({item.name for item in staging.iterdir()}, set(ordered_names[: failure_index - 1]))
-                self.assertFalse((staging / executor.RECEIPT_FILENAME).exists())
+                self.assertFalse((staging / executor.EVIDENCE_COMMIT_FILENAME).exists())
+                if failure_index < 4:
+                    self.assertFalse((staging / executor.RECEIPT_FILENAME).exists())
+                else:
+                    self.assertTrue((staging / executor.RECEIPT_FILENAME).exists())
 
         success_staging = executor._prepare_evidence_staging_root(self.root / "publish-success")
         success = executor._publish_executor_result(success_staging, observation, receipt)
@@ -368,13 +446,15 @@ class RealA1ExecutorTests(unittest.TestCase):
         self.assertIn("_MAX_CHANNEL_EVENT_LINE_BYTES", parent)
         self.assertIn("_MAX_CHANNEL_BUFFER_BYTES", parent)
         self.assertIn("return _result_type(None, None, 4, True", parent)
+        self.assertIn('EVIDENCE_COMMIT_FILENAME = "evidence_commit.json"', parent)
+        self.assertIn("commit_marker.canonical_bytes()", parent)
         self.assertIn("--execute-real-a1", cli)
         self.assertNotIn("--prompt", cli)
         self.assertNotIn("--backend", cli)
         self.assertNotIn("--command", cli)
         for forbidden in ("--expected", "--executable", "--module", "--platform", "--observer", "--callback"):
             self.assertNotIn(forbidden, cli)
-        for required in ("executor_core_candidate_accepted", "review status: `accepted`", "real-A1 execution status: `not_run`", "`real_A1_executor_ready`: `false`", "manager-consumable `A1_passed`", "No real run occurred", "not a three-file atomic transaction", "observation=None", "A commit marker is not implemented"):
+        for required in ("executor_core_candidate_accepted", "review status: `accepted`", "real-A1 execution status: `not_run`", "`real_A1_executor_ready`: `false`", "manager-consumable `A1_passed`", "No real run occurred", "not a four-file atomic transaction", "observation=None", "completion marker is a commit boundary"):
             self.assertIn(required, doc)
 
 
