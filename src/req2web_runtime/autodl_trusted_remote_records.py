@@ -54,7 +54,7 @@ NO_ACTION_FLAGS = (
 )
 _HEX40 = re.compile(r"^[0-9a-f]{40}$")
 _HEX64 = re.compile(r"^[0-9a-f]{64}$")
-_POSIX_PATH = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._/-]*$")
+_POSIX_PATH = re.compile(r"^[A-Za-z0-9.][A-Za-z0-9._/-]*$")
 _ARCHIVE_MANIFEST_TYPE = _archive_module.RepositoryArchiveManifest
 _ARCHIVE_FROM_BYTES = _ARCHIVE_MANIFEST_TYPE.from_bytes
 _ARCHIVE_CANONICAL_BYTES = _ARCHIVE_MANIFEST_TYPE.canonical_bytes

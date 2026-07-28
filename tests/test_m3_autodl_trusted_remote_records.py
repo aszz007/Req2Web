@@ -29,7 +29,7 @@ class TrustedRemoteRecordsTests(unittest.TestCase):
                 {"case_id": "path3-commerce-checkout", "d17_path": "path_3", "metadata_state": "recorded_not_verified_no_action", "provider_input": {"input_id": "commerce-input", "sha256": "1" * 64, "byte_length": 301}, "frozen_g0": {"package_id": "commerce-g0", "sha256": "2" * 64}},
                 {"case_id": "path3-media-analysis", "d17_path": "path_3", "metadata_state": "recorded_not_verified_no_action", "provider_input": {"input_id": "media-input", "sha256": "3" * 64, "byte_length": 302}, "frozen_g0": {"package_id": "media-g0", "sha256": "4" * 64}},
             ],
-            "model": {"exact_revision": "f" * 40, "files": [{"relative_path": "config.json", "byte_length": 20, "sha256": "5" * 64}, {"relative_path": "model.safetensors", "byte_length": 30, "sha256": "6" * 64}]},
+            "model": {"exact_revision": "f" * 40, "files": [{"relative_path": ".gitattributes", "byte_length": 10, "sha256": "4" * 64}, {"relative_path": "config.json", "byte_length": 20, "sha256": "5" * 64}, {"relative_path": "model.safetensors", "byte_length": 30, "sha256": "6" * 64}]},
             "runtime": {"runtime_id": "recorded-runtime", "image_id": "recorded-image", "artifacts": [{"relative_path": "packages/torch.whl", "byte_length": 40, "sha256": "7" * 64}]},
             "action_time": {"issued_at_utc": "2026-07-26T00:00:00Z", "expires_at_utc": "2026-08-01T00:00:00Z", "single_use_state": "recorded_single_use_not_verified_no_action"},
             "target_instance": {"provider": "AutoDL", "instance_id": "recorded-instance", "instance_class": "autodl-gpu", "state": "recorded_not_verified_no_action"},
@@ -50,7 +50,7 @@ class TrustedRemoteRecordsTests(unittest.TestCase):
         operational = plan["operational"]
         self.assertEqual(plan["archive_manifest"]["manifest_id"], self.archive_manifest.to_dict()["manifest_id"])
         self.assertEqual(plan["policy"]["implementation_commit_sha"], self.archive_manifest.to_dict()["commit_sha"])
-        self.assertEqual(plan["model_inventory"]["file_count"], 2)
+        self.assertEqual(plan["model_inventory"]["file_count"], 3)
         self.assertEqual(plan["runtime_inventory"]["artifact_count"], 1)
         self.assertEqual(operational["gpu"]["uuid_state"], "platform_uuid_absent")
         self.assertEqual(operational["result_return"]["allowed_paths"], list(records.RESULT_RETURN_PATHS))
