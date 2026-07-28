@@ -281,7 +281,7 @@ def _inventory_binding(value, kind):
     rows = []
     for row in value[rows_key]:
         row = _keys(row, ("relative_path", "byte_length", "sha256"), f"{kind}_inventory_row")
-        rows.append({"relative_path": _relative_path(row["relative_path"], f"{kind}_inventory_relative_path"), "byte_length": _integer(row["byte_length"], f"{kind}_inventory_byte_length", minimum=1), "sha256": _hex(row["sha256"], f"{kind}_inventory_sha256")})
+        rows.append({"relative_path": _relative_path(row["relative_path"], f"{kind}_inventory_relative_path"), "byte_length": _integer(row["byte_length"], f"{kind}_inventory_byte_length"), "sha256": _hex(row["sha256"], f"{kind}_inventory_sha256")})
     if rows != sorted(rows, key=lambda row: row["relative_path"]) or len({row["relative_path"] for row in rows}) != len(rows):
         raise TrustedRemoteExecutorError(f"{kind}_inventory_order_invalid")
     if value[count_key] != len(rows) or value["total_bytes"] != sum(row["byte_length"] for row in rows):

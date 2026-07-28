@@ -81,6 +81,7 @@ class TrustedRemoteExecutorV2Tests(unittest.TestCase):
         self.model_files = {"config.json": b'{"model_type":"qwen3_5"}', "model.safetensors": b"model-bytes"}
         self.runtime_files = {
             "bin/python": b"pinned-python",
+            "lib/python3.11/site-packages/example/py.typed": b"",
             "lib/python3.11/site-packages/torch/__init__.py": b"torch-module",
             "lib/python3.11/site-packages/transformers/__init__.py": b"transformers-module",
         }
@@ -196,6 +197,28 @@ class TrustedRemoteExecutorV2Tests(unittest.TestCase):
         with patch.object(executor, "_utc_now_text", return_value="2026-07-30T00:00:00Z"):
             with self.assertRaisesRegex(executor.TrustedRemoteExecutorError, "expired"):
                 executor.verify_trusted_remote_pre_run_authorization_receipt_v2(self.pre_receipt, self.plan, self.package, self.instance, self.signer)
+
+    def test_package_accepts_empty_inventory_files_and_rejects_invalid_lengths(self):
+        runtime_rows = self.package.to_dict()["runtime_inventory"]["artifacts"]
+        self.assertIn(
+            {
+                "relative_path": "lib/python3.11/site-packages/example/py.typed",
+                "byte_length": 0,
+                "sha256": hashlib.sha256(b"").hexdigest(),
+            },
+            runtime_rows,
+        )
+        for invalid_length in (-1, 1.5, True, "0"):
+            invalid = self.package.to_dict()
+            invalid["runtime_inventory"]["artifacts"][0][
+                "byte_length"
+            ] = invalid_length
+            with self.subTest(invalid_length=invalid_length):
+                with self.assertRaisesRegex(
+                    executor.TrustedRemoteExecutorError,
+                    "runtime_inventory_byte_length_invalid",
+                ):
+                    executor.TrustedRemoteExecutionPackageV2.from_dict(invalid)
 
     def test_direct_worker_rejects_bad_authority_before_attempt_or_model_import(self):
         repository_root, package_root, model_root, runtime_root = self._materialize_roots()
