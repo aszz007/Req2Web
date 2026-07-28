@@ -1094,7 +1094,7 @@ def _actual_runtime_facts(torch, transformers, expected, package, runtime_root):
     torch.cuda.set_device(index)
     properties = torch.cuda.get_device_properties(index)
     observed = _nvidia_smi_device(index)
-    property_uuid = str(getattr(properties, "uuid", ""))
+    property_uuid = _normalized_torch_gpu_uuid(getattr(properties, "uuid", ""))
     if properties.name != expected["gpu_model"] or observed["gpu_model"] != expected["gpu_model"] or observed["gpu_uuid"] != expected["gpu_uuid"] or (property_uuid and property_uuid != expected["gpu_uuid"]):
         raise TrustedRemoteExecutorError("actual_device_identity_invalid")
     return {**versions, "executable_path": executable_relative, "torch_module_path": torch_relative, "transformers_module_path": transformers_relative, "device": f"cuda:{index}", "gpu_index": index, "gpu_uuid": expected["gpu_uuid"], "gpu_model": expected["gpu_model"], "dtype": "bf16", "quantization": "none", "model_repository": package_data["model_inventory"]["repository"], "model_revision": package_data["model_inventory"]["exact_revision"], "model_inventory_sha256": package_data["model_inventory"]["inventory_sha256"], "runtime_inventory_sha256": package_data["runtime_inventory"]["inventory_sha256"], "model_loaded": True}
@@ -1114,6 +1114,13 @@ def _validated_text_only_processor_inputs(inputs):
     if any(not hasattr(inputs[key], "to") for key in keys):
         raise TrustedRemoteExecutorError("processor_tensor_invalid")
     return tuple(sorted(keys))
+
+
+def _normalized_torch_gpu_uuid(value):
+    text = str(value)
+    if re.fullmatch(r"[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}", text):
+        return "GPU-" + text
+    return text
 
 
 def _write_raw_first(result_root, case_id, raw, cap):

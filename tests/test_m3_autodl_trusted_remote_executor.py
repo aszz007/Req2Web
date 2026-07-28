@@ -335,6 +335,21 @@ class TrustedRemoteExecutorV2Tests(unittest.TestCase):
         with self.assertRaisesRegex(executor.TrustedRemoteExecutorError, "multimedia"):
             executor._validated_text_only_processor_inputs({**approved, "image_grid_thw": Tensor()})
 
+    def test_torch_cuda_uuid_normalizes_only_the_missing_gpu_prefix(self):
+        raw_uuid = "2e3197cf-8465-8bdb-0bd8-4b033e7ef4c2"
+        self.assertEqual(
+            executor._normalized_torch_gpu_uuid(raw_uuid),
+            "GPU-" + raw_uuid,
+        )
+        self.assertEqual(
+            executor._normalized_torch_gpu_uuid("GPU-" + raw_uuid),
+            "GPU-" + raw_uuid,
+        )
+        self.assertEqual(
+            executor._normalized_torch_gpu_uuid("not-a-cuda-uuid"),
+            "not-a-cuda-uuid",
+        )
+
     def test_raw_response_is_persisted_before_terminal_safe_live_report(self):
         result_root = self.work / "live-report-result"
         result_root.mkdir()
