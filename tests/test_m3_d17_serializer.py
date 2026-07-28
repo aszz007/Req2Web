@@ -113,8 +113,33 @@ class D17SerializerTests(unittest.TestCase):
         _, _, request = build_request()
         prompt = request.prompt_artifact.to_dict()
         self.assertEqual(prompt["semantic_candidate_schema_version"], "req2web.provider.semantic_candidate.v1")
-        self.assertIn("not rerun requirement understanding", prompt["prompt_text"])
-        self.assertIn("Do not claim retrieval or evidence use", prompt["prompt_text"])
+        prompt_text = prompt["prompt_text"]
+        self.assertIn("not rerun requirement understanding", prompt_text)
+        self.assertIn("Do not claim retrieval or evidence use", prompt_text)
+        self.assertIn("The root object itself must conform", prompt_text)
+        self.assertIn('output "constraints": []', prompt_text)
+        self.assertIn('output "claimed_attribution_edges": []', prompt_text)
+        self.assertIn("use_case_mappings and use no other use-case ID", prompt_text)
+        self.assertIn("Stable IDs must match ^[a-z][a-z0-9-]{0,95}$", prompt_text)
+        for required_key in (
+            "schema_version", "title", "layout", "sections", "components",
+            "states", "interactions", "constraints", "acceptance_checks",
+            "use_case_mappings", "claimed_attribution_edges",
+        ):
+            with self.subTest(required_key=required_key):
+                self.assertIn(f'"{required_key}"', prompt_text)
+        for exact_shape in (
+            'layout: "pattern", "section_stable_ids"',
+            'each sections item: "stable_id", "title", "purpose", "component_stable_ids", "use_case_ids"',
+            'each components item: "stable_id", "section_stable_id", "component_type", "label", "purpose"',
+            'each states item: "stable_id", "name", "description", "visible_component_stable_ids"',
+            'each interactions item: "stable_id", "trigger_component_stable_id", "source_state_stable_id", "action", "target_state_stable_id", "user_feedback", "use_case_ids"',
+            'each acceptance_checks item: "stable_id", "description", "use_case_ids", "state_stable_id"',
+            'each use_case_mappings item: "use_case_id", "section_stable_ids", "component_stable_ids", "interaction_stable_ids"',
+        ):
+            with self.subTest(exact_shape=exact_shape):
+                self.assertIn(exact_shape, prompt_text)
+        self.assertLess(len(prompt_text.encode("utf-8")), 10000)
         config = request.config_artifact.to_dict()
         self.assertEqual(set(config["tier_b_runtime_status"]), {"runtime_model_revision", "precision_or_quantization", "context_decode_seed", "timeout_retry_network", "gpu_budget"})
         self.assertEqual(set(config["tier_b_runtime_status"].values()), {"tier_b_unapproved"})

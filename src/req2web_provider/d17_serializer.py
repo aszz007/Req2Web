@@ -23,13 +23,28 @@ SEMANTIC_CANDIDATE_SCHEMA_VERSION = 'req2web.provider.semantic_candidate.v1'
 _AUTHORIZATION = 'tier_a_local_implementation_only'
 _PATH_3 = 'path_3'
 _TIER_B_UNAPPROVED = 'tier_b_unapproved'
-_PROMPT_TEXT = (
-    'Return one strict JSON object conforming exactly to '
-    'req2web.provider.semantic_candidate.v1. Use only the supplied input view '
-    'to propose page semantics. Do not rerun requirement understanding or '
-    'retrieval. Do not claim retrieval or evidence use, provenance, source '
-    'locations, or authority beyond the supplied input view.'
-)
+_PROMPT_TEXT = """Return exactly one UTF-8 JSON object and nothing else. Do not emit Markdown, code fences, prose, or a wrapper such as semantic_candidate. The root object itself must conform to req2web.provider.semantic_candidate.v1.
+
+The root object must contain exactly these keys and no others:
+"schema_version", "title", "layout", "sections", "components", "states", "interactions", "constraints", "acceptance_checks", "use_case_mappings", "claimed_attribution_edges".
+Set "schema_version" to "req2web.provider.semantic_candidate.v1".
+
+Every nested object must also use its exact key set:
+- layout: "pattern", "section_stable_ids"
+- each sections item: "stable_id", "title", "purpose", "component_stable_ids", "use_case_ids"
+- each components item: "stable_id", "section_stable_id", "component_type", "label", "purpose"
+- each states item: "stable_id", "name", "description", "visible_component_stable_ids"
+- each interactions item: "stable_id", "trigger_component_stable_id", "source_state_stable_id", "action", "target_state_stable_id", "user_feedback", "use_case_ids"
+- each constraints item: "stable_id", "description"
+- each acceptance_checks item: "stable_id", "description", "use_case_ids", "state_stable_id"
+- each use_case_mappings item: "use_case_id", "section_stable_ids", "component_stable_ids", "interaction_stable_ids"
+- each claimed_attribution_edges item: "candidate_entity_stable_id", "source_kind", "source_id"
+
+For this Path 3 run, output "constraints": [] because supplied canonical constraints are added locally, and output "claimed_attribution_edges": [] because evidence or provenance claims are prohibited. Use every supplied use_case_id exactly once in use_case_mappings and use no other use-case ID; there must be 2 to 4 mappings. sections, components, states, interactions, and acceptance_checks must be non-empty. Stable IDs must match ^[a-z][a-z0-9-]{0,95}$ and be globally unique.
+
+All references must be complete and consistent: layout.section_stable_ids must equal all section IDs; each section must own exactly its listed components; each section and interaction must reference supplied use cases; every interaction must reference existing component and state IDs; each use-case mapping must list exactly the sections carrying that use case, all components owned by those sections, and all interactions carrying that use case; acceptance_checks must collectively cover every supplied use case, and each description must contain at least 8 characters.
+
+Do not output authoritative PageSpec or local-only fields including page_id, summary, target_device, page_type, use_cases, traceability, evidence, evidence_inventory, source_context_schema_version, agent_context, retrieval_guidance, retrieval_influence, or result_package. Use only the supplied input view to propose page semantics. Do not rerun requirement understanding or retrieval. Do not claim retrieval or evidence use, provenance, source locations, or authority beyond the supplied input view."""
 _CONFIG_CONTRACT = {
     'semantic_candidate_schema_version': SEMANTIC_CANDIDATE_SCHEMA_VERSION,
     'response_format': 'strict_json_object_only',
