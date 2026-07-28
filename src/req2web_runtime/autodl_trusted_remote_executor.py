@@ -153,6 +153,39 @@ def _utc_now_text():
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
 
 
+def _write_stderr_text(value):
+    raw = value.encode("utf-8")
+    try:
+        stream = getattr(sys.stderr, "buffer", None)
+        if stream is not None:
+            stream.write(raw)
+            stream.flush()
+            return
+        sys.stderr.write(value)
+        sys.stderr.flush()
+    except (OSError, ValueError):
+        # Live console observability is best-effort and must never alter the
+        # fixed experiment outcome or consume an attempt solely due to a
+        # detached/closed stderr stream.
+        return
+
+
+def _emit_progress(event, **fields):
+    payload = {"event": event, "utc": _utc_now_text(), **fields}
+    _write_stderr_text("REQ2WEB_PROGRESS " + _dumps(payload).decode("utf-8") + "\n")
+
+
+def _terminal_safe_text(raw):
+    text = raw.decode("utf-8")
+    return "".join(
+        character
+        if character in ("\n", "\t")
+        or (ord(character) >= 0x20 and not 0x7F <= ord(character) < 0xA0)
+        else f"\\u{ord(character):04x}"
+        for character in text
+    )
+
+
 def _relative_path(value, label, expected_prefix=None):
     value = _text(value, label)
     path = PurePosixPath(value)
@@ -1089,6 +1122,23 @@ def _write_raw_first(result_root, case_id, raw, cap):
         handle.write(raw); handle.flush(); os.fsync(handle.fileno())
 
 
+def _write_raw_first_and_report(result_root, case_id, raw, cap):
+    _write_raw_first(result_root, case_id, raw, cap)
+    digest = _sha(raw)
+    _emit_progress(
+        "raw_response_persisted",
+        case_id=case_id,
+        byte_length=len(raw),
+        sha256=digest,
+    )
+    report = f"REQ2WEB_RAW_RESPONSE_BEGIN case_id={case_id}\n"
+    report += _terminal_safe_text(raw)
+    if not raw.endswith(b"\n"):
+        report += "\n"
+    report += f"REQ2WEB_RAW_RESPONSE_END case_id={case_id}\n"
+    _write_stderr_text(report)
+
+
 def _pre_payload_from_receipt(receipt):
     receipt = _replay_pre_receipt(receipt)
     return _validate_pre_payload(_loads(_unb64(receipt.to_dict()["signed_payload_base64"], "signed_payload_base64")))
@@ -1156,23 +1206,47 @@ def execute_worker_v2(package, action_time_plan, pre_run_receipt, expected_signe
     expected = package_data["expected_instance"]
     started_text = _utc_now_text()
     monotonic_started = time.monotonic()
+    _emit_progress(
+        "worker_preflight_complete",
+        profile=package_data["quality_profile"]["profile"],
+        case_count=len(package_data["cases"]),
+    )
     # Lazy imports occur only after exact authority, attempt, runtime, inventory,
     # input, and output-root checks have passed.
+    _emit_progress("runtime_import_started")
     import torch
     import transformers
     from transformers import AutoModelForMultimodalLM, AutoProcessor
     actual = _actual_runtime_facts(torch, transformers, expected, package, runtime_root)
     device = f"cuda:{expected['gpu_index']}"
+    _emit_progress(
+        "runtime_validated",
+        device=device,
+        gpu_model=actual["gpu_model"],
+        gpu_uuid=actual["gpu_uuid"],
+        dtype=actual["dtype"],
+        quantization=actual["quantization"],
+    )
+    _emit_progress("processor_load_started", model_repository=actual["model_repository"])
     processor = AutoProcessor.from_pretrained(str(model_root), local_files_only=True, trust_remote_code=False)
+    _emit_progress("processor_load_complete")
+    _emit_progress("model_load_started", device=device, dtype="bf16", quantization="none")
     model = AutoModelForMultimodalLM.from_pretrained(str(model_root), local_files_only=True, trust_remote_code=False, dtype=torch.bfloat16, device_map=None)
     model = model.to(device)
     model.eval()
     first_parameter = next(model.parameters())
     if str(first_parameter.device) != device or first_parameter.dtype != torch.bfloat16:
         raise TrustedRemoteExecutorError("loaded_model_device_or_dtype_invalid")
+    _emit_progress("model_load_complete", device=device, dtype="bf16", quantization="none")
     raw_outputs = {}
     remaining_cap = package_data["result_policy"]["max_total_bytes"]
     for row in package_data["cases"]:
+        _emit_progress(
+            "generation_started",
+            case_id=row["case_id"],
+            provider_call_index=1,
+            retry_count=0,
+        )
         model_text = _compose_exact_model_text(package_root, row)
         messages = [{"role": "user", "content": [{"type": "text", "text": model_text}]}]
         rendered = processor.apply_chat_template(messages, tokenize=False, add_generation_prompt=True, enable_thinking=False)
@@ -1187,7 +1261,7 @@ def execute_worker_v2(package, action_time_plan, pre_run_receipt, expected_signe
         raw = text.encode("utf-8")
         if not raw:
             raise TrustedRemoteExecutorError("empty_raw_response")
-        _write_raw_first(result_root, row["case_id"], raw, remaining_cap)
+        _write_raw_first_and_report(result_root, row["case_id"], raw, remaining_cap)
         remaining_cap -= len(raw)
         raw_outputs[row["case_id"]] = raw
     completed_text = _utc_now_text()
@@ -1197,6 +1271,13 @@ def execute_worker_v2(package, action_time_plan, pre_run_receipt, expected_signe
     record_path.write_bytes(result.canonical_bytes())
     validate_trusted_remote_result_root_v2(result, result_root, package)
     _verify_execution_start_in_authority_window(result, authorized)
+    _emit_progress(
+        "execution_result_persisted",
+        result_id=result.to_dict()["result_id"],
+        sha256=result.sha256(),
+        provider_call_count=len(REQUIRED_CASE_IDS),
+        retry_count=0,
+    )
     return result
 
 
@@ -1273,7 +1354,7 @@ def run_trusted_remote_executor_v2(execution_package, action_time_plan, pre_run_
         env = {**os.environ, "HF_HUB_OFFLINE": "1", "TRANSFORMERS_OFFLINE": "1", "HF_HUB_DISABLE_TELEMETRY": "1", "DO_NOT_TRACK": "1", "PYTHONNOUSERSITE": "1"}
         for key in ("CUDA_VISIBLE_DEVICES", "PYTHONPATH", "PYTHONHOME", "PYTHONUSERBASE"):
             env.pop(key, None)
-        process = subprocess.Popen(command, cwd=str(repository_root), env=env, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE, start_new_session=True)
+        process = subprocess.Popen(command, cwd=str(repository_root), env=env, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=None, start_new_session=True)
         stdout, stderr = _wait_for_fixed_worker(process, plan["operational"]["caps"]["time_cap_seconds"], cancel_request_path)
         if process.returncode != 0:
             raise TrustedRemoteExecutorError("fixed_worker_failed")

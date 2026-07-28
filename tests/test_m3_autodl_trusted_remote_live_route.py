@@ -7,6 +7,7 @@ import sys
 import unittest
 from copy import deepcopy
 from pathlib import Path
+from unittest.mock import patch
 from uuid import uuid4
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -80,7 +81,8 @@ class TrustedRemoteLiveRouteTests(unittest.TestCase):
 
     def test_verified_execution_routes_a07a_and_a07b_then_returns_and_closes_out(self):
         handle = self._verified_handle()
-        bundle = live_route.route_verified_trusted_remote_two_case_v2(handle, self._case_inputs())
+        with patch.object(executor, "_emit_progress") as progress:
+            bundle = live_route.route_verified_trusted_remote_two_case_v2(handle, self._case_inputs())
         data = bundle.to_dict()
         self.assertEqual(data["state"], "live_route_completed_for_return")
         by_case = {row["case_id"]: row for row in data["cases"]}
@@ -88,6 +90,16 @@ class TrustedRemoteLiveRouteTests(unittest.TestCase):
         self.assertEqual(by_case["path3-media-analysis"]["a07_semantics"], "A-07b")
         self.assertEqual(by_case["path3-commerce-checkout"]["status"], "first_pass_success")
         self.assertEqual(by_case["path3-media-analysis"]["status"], "recovered_success")
+        progress_events = [call.args[0] for call in progress.call_args_list]
+        self.assertEqual(
+            progress_events,
+            [
+                "route_case_started",
+                "route_case_complete",
+                "route_case_started",
+                "route_case_complete",
+            ],
+        )
         for artifacts in bundle.to_return_artifacts().values():
             self.assertNotIn(b"scripted_fixture_assembled", artifacts["model_route_outcome"])
             self.assertNotIn(b"scripted_fixture_assembled", artifacts["gate_delivery_outcome"])

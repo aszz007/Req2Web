@@ -3,6 +3,7 @@ from __future__ import annotations
 import copy
 import hashlib
 import inspect
+import io
 import json
 import os
 import shutil
@@ -284,6 +285,56 @@ class TrustedRemoteExecutorV2Tests(unittest.TestCase):
         with self.assertRaisesRegex(executor.TrustedRemoteExecutorError, "multimedia"):
             executor._validated_text_only_processor_inputs({**approved, "image_grid_thw": Tensor()})
 
+    def test_raw_response_is_persisted_before_terminal_safe_live_report(self):
+        result_root = self.work / "live-report-result"
+        result_root.mkdir()
+        raw = b'{"page_id":"main"}\n\x1b[31mnot-terminal-control\x1b[0m'
+        stream = io.StringIO()
+        with patch.object(executor.sys, "stderr", stream):
+            executor._write_raw_first_and_report(
+                result_root,
+                "path3-commerce-checkout",
+                raw,
+                4096,
+            )
+        saved = result_root / "cases" / "path3-commerce-checkout" / "raw_response.bin"
+        self.assertEqual(saved.read_bytes(), raw)
+        output = stream.getvalue()
+        self.assertIn('"event":"raw_response_persisted"', output)
+        self.assertIn(f'"sha256":"{hashlib.sha256(raw).hexdigest()}"', output)
+        self.assertIn("REQ2WEB_RAW_RESPONSE_BEGIN case_id=path3-commerce-checkout", output)
+        self.assertIn("\\u001b[31mnot-terminal-control\\u001b[0m", output)
+        self.assertNotIn("\x1b", output)
+        self.assertLess(
+            output.index("raw_response_persisted"),
+            output.index("REQ2WEB_RAW_RESPONSE_BEGIN"),
+        )
+
+    def test_closed_binary_stderr_cannot_change_raw_first_execution(self):
+        class ClosedBinaryStream:
+            def write(self, _raw):
+                raise BrokenPipeError("simulated closed stderr")
+
+            def flush(self):
+                raise AssertionError("flush must not follow failed write")
+
+        class ClosedStderr:
+            buffer = ClosedBinaryStream()
+
+        result_root = self.work / "closed-stderr-result"
+        result_root.mkdir()
+        raw = b'{"page_id":"main"}'
+        with patch.object(executor.sys, "stderr", ClosedStderr()):
+            executor._emit_progress("preflight_complete")
+            executor._write_raw_first_and_report(
+                result_root,
+                "path3-commerce-checkout",
+                raw,
+                4096,
+            )
+        saved = result_root / "cases" / "path3-commerce-checkout" / "raw_response.bin"
+        self.assertEqual(saved.read_bytes(), raw)
+
     def test_manual_result_bytes_and_root_never_create_verified_execution(self):
         result = self._manual_result(test_only=False)
         with self.assertRaisesRegex(executor.TrustedRemoteExecutorError, "fixed_parent_worker"):
@@ -325,6 +376,8 @@ class TrustedRemoteExecutorV2Tests(unittest.TestCase):
         self.assertEqual(fake.command[1:4], ["-I", "-s", "-E"])
         self.assertEqual(Path(fake.command[4]).resolve(), (repository_root / "scripts" / "stage3_trusted_remote_qwen_worker.py").resolve())
         self.assertTrue(fake.kwargs["start_new_session"])
+        self.assertIsNone(fake.kwargs["stderr"])
+        self.assertIs(fake.kwargs["stdout"], subprocess.PIPE)
         for key in ("PYTHONPATH", "PYTHONHOME", "PYTHONUSERBASE", "CUDA_VISIBLE_DEVICES"):
             self.assertNotIn(key, fake.kwargs["env"])
         self.assertEqual(killpg.call_count, 2)

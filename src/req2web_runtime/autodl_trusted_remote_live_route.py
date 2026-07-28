@@ -276,6 +276,7 @@ def route_verified_trusted_remote_two_case_v2(verified_execution, case_inputs):
     return_artifacts = {}
     by_case = {row["case_id"]: row for row in result["cases"]}
     for case_id in REQUIRED_CASE_IDS:
+        _executor._emit_progress("route_case_started", case_id=case_id)
         inputs = _route_inputs(case_inputs[case_id], case_id)
         package_case = next(item for item in handle._package.to_dict()["cases"] if item["case_id"] == case_id)
         try:
@@ -320,6 +321,13 @@ def route_verified_trusted_remote_two_case_v2(verified_execution, case_inputs):
         error = None if outcome.status in ("first_pass_success", "recovered_success", "fallback_delivery") else _dumps({"code": "live_route_failed_closed", "status": outcome.status})
         return_artifacts[case_id] = {"model_route_outcome": live_raw, "gate_delivery_outcome": gate_raw, "result_package_manifest": manifest_raw, "error": error}
         cases.append({"case_id": case_id, "live_model_route_sha256": _sha(live_raw), "gate_delivery_sha256": _sha(gate_raw), "result_package_manifest_sha256": _sha(manifest_raw), "status": outcome.status, "delivery_source": outcome.delivery_source, "a07_semantics": variant})
+        _executor._emit_progress(
+            "route_case_complete",
+            case_id=case_id,
+            a07_semantics=variant,
+            status=outcome.status,
+            delivery_source=outcome.delivery_source,
+        )
     data = {"schema_version": LIVE_ROUTE_BUNDLE_SCHEMA, "bundle_id": "trusted-remote-live-route-bundle-v2-" + "0" * 64, "state": "live_route_completed_for_return", "execution_result": {"result_id": result["result_id"], "sha256": handle._result.sha256()}, "cases": cases, "claims": {"two_cases_only": True, "one_model_call_per_case": True, "retry_count": 0, "slice2_final_gate_activated": False, "h1": False, "browser_quality": False, "formal_quality": False}}
     data = _identified(data, "bundle_id", "trusted-remote-live-route-bundle-v2-")
     return TrustedRemoteLiveRouteBundleV2(data, return_artifacts)
@@ -341,9 +349,25 @@ class TrustedRemoteLiveSliceRunV2:
 
 
 def run_trusted_remote_two_case_live_slice_v2(*, execution_package, action_time_plan, pre_run_receipt, expected_signer, expected_instance_facts, repository_root, package_root, model_root, runtime_root, result_root, case_inputs, return_root, project_temp_root, cancel_request_path=None):
+    _executor._emit_progress("trusted_remote_live_slice_started")
     verified = _executor.run_trusted_remote_executor_v2(execution_package, action_time_plan, pre_run_receipt, expected_signer, expected_instance_facts, repository_root, package_root, model_root, runtime_root, result_root, cancel_request_path)
+    _executor._emit_progress(
+        "verified_execution_complete",
+        execution_result_sha256=verified._result.sha256(),
+    )
+    _executor._emit_progress("route_gate_package_started")
     route_bundle = route_verified_trusted_remote_two_case_v2(verified, case_inputs)
+    _executor._emit_progress(
+        "route_gate_package_complete",
+        route_bundle_sha256=route_bundle.sha256(),
+    )
+    _executor._emit_progress("return_bundle_started")
     return_manifest = _executor.write_trusted_remote_return_bundle_v2(verified, route_bundle.to_return_artifacts(), return_root, project_temp_root)
+    _executor._emit_progress(
+        "return_bundle_complete",
+        state=return_manifest["state"],
+        manifest_sha256=_sha(_dumps(return_manifest)),
+    )
     return TrustedRemoteLiveSliceRunV2(verified, route_bundle, return_manifest, return_root)
 
 
