@@ -246,7 +246,7 @@ def _rows(value, label, _keys_fn=_keys, _path_fn=_path, _int_fn=_integer, _hex_f
     result = []
     for row in value:
         row = _keys_fn(row, ("relative_path", "byte_length", "sha256"), label + "_row")
-        result.append({"relative_path": _path_fn(row["relative_path"], label + "_path"), "byte_length": _int_fn(row["byte_length"], label + "_byte_length", True), "sha256": _hex_fn(row["sha256"], label + "_sha256", _hex64)})
+        result.append({"relative_path": _path_fn(row["relative_path"], label + "_path"), "byte_length": _int_fn(row["byte_length"], label + "_byte_length", False), "sha256": _hex_fn(row["sha256"], label + "_sha256", _hex64)})
     paths = [row["relative_path"] for row in result]
     if paths != sorted(paths) or len(paths) != len(set(paths)):
         raise _error(f"{label}_rows_order_or_duplicate_invalid")

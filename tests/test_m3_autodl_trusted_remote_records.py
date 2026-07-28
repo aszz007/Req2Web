@@ -163,7 +163,7 @@ class TrustedRemoteRecordsTests(unittest.TestCase):
         mapping["runtime"]["artifacts"] = [
             {
                 "relative_path": path,
-                "byte_length": index + 1,
+                "byte_length": index,
                 "sha256": f"{index + 1:x}" * 64,
             }
             for index, path in enumerate(accepted_paths)
@@ -194,6 +194,16 @@ class TrustedRemoteRecordsTests(unittest.TestCase):
                 with self.assertRaisesRegex(
                     records.TrustedRemoteRecordsError,
                     "runtime_artifact_path_not_canonical_posix_path",
+                ):
+                    records.create_local_r0_record_bundle(**invalid)
+
+        for invalid_length in (-1, 1.5, True, "0"):
+            invalid = self._kwargs(self.archive_manifest)
+            invalid["runtime"]["artifacts"][0]["byte_length"] = invalid_length
+            with self.subTest(invalid_length=invalid_length):
+                with self.assertRaisesRegex(
+                    records.TrustedRemoteRecordsError,
+                    "runtime_artifact_byte_length_not_nonnegative_integer",
                 ):
                     records.create_local_r0_record_bundle(**invalid)
 
