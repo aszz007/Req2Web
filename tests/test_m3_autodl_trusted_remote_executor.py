@@ -416,6 +416,14 @@ class TrustedRemoteExecutorV2Tests(unittest.TestCase):
         self.assertIn("run_trusted_remote_two_case_live_slice_v2", script)
         self.assertIn("load_fixed_trusted_remote_case_inputs_v2", script)
         self.assertIn("--return-root", script)
+        worker_script = (
+            ROOT / "scripts" / "stage3_trusted_remote_qwen_worker.py"
+        ).read_text(encoding="utf-8")
+        for source in (script, worker_script):
+            self.assertLess(
+                source.index("sys.dont_write_bytecode = True"),
+                source.index("from req2web_runtime"),
+            )
         finalizer = (ROOT / "scripts" / "finalize_stage3_trusted_remote_closeout.py").read_text(encoding="utf-8")
         self.assertIn("finalize_downloaded_trusted_remote_closeout_v2", finalizer)
 
