@@ -118,8 +118,9 @@ class TrustedRemoteExecutorV2Tests(unittest.TestCase):
     def _rows(self, values):
         return [{"relative_path": name, "byte_length": len(raw), "sha256": hashlib.sha256(raw).hexdigest()} for name, raw in sorted(values.items())]
 
-    def _make_plan(self, *, instance_id="recorded-instance"):
-        worker_raw = (ROOT / "scripts" / "stage3_trusted_remote_qwen_worker.py").read_bytes()
+    def _make_plan(self, *, instance_id="recorded-instance", worker_raw=None):
+        if worker_raw is None:
+            worker_raw = (ROOT / "scripts" / "stage3_trusted_remote_qwen_worker.py").read_bytes()
         included = [{"path": "scripts/stage3_trusted_remote_qwen_worker.py", "git_mode": "100644", "blob_sha": "1" * 40, "byte_length": len(worker_raw), "sha256": hashlib.sha256(worker_raw).hexdigest()}]
         body = archive._manifest_body("f" * 40, "e" * 40, included, [], b"", authority=archive._AUTHORITY)
         manifest = archive.RepositoryArchiveManifest.from_dict(body)
@@ -220,6 +221,55 @@ class TrustedRemoteExecutorV2Tests(unittest.TestCase):
                     "runtime_inventory_byte_length_invalid",
                 ):
                     executor.TrustedRemoteExecutionPackageV2.from_dict(invalid)
+
+    def test_worker_identity_uses_archive_bytes_not_checkout_line_endings(self):
+        archive_worker_raw = b"#!/usr/bin/env python3\n# canonical archive worker\n"
+        self.assertNotEqual(
+            archive_worker_raw,
+            (ROOT / "scripts" / "stage3_trusted_remote_qwen_worker.py").read_bytes(),
+        )
+        plan = self._make_plan(worker_raw=archive_worker_raw)
+        package = executor.prepare_trusted_remote_execution_package_v2(
+            plan,
+            self.payloads,
+            self.instance,
+            self.runtime_execution,
+        )
+        self.assertEqual(
+            package.to_dict()["worker"],
+            {
+                "relative_path": executor.WORKER_RELATIVE_PATH,
+                "sha256": hashlib.sha256(archive_worker_raw).hexdigest(),
+                "byte_length": len(archive_worker_raw),
+                "entrypoint": executor.WORKER_ENTRYPOINT,
+                "command_prefix": list(executor.WORKER_COMMAND_PREFIX),
+            },
+        )
+        repository_root = self.work / "archive-worker-repository"
+        target = repository_root / executor.WORKER_RELATIVE_PATH
+        target.parent.mkdir(parents=True)
+        target.write_bytes(archive_worker_raw)
+        self.assertEqual(
+            executor._worker_script_at_repository_root(repository_root, package),
+            target.resolve(),
+        )
+
+        forged = package.to_dict()
+        forged["worker"]["sha256"] = "0" * 64
+        forged["package_id"] = "trusted-remote-execution-package-v2-" + "0" * 64
+        forged = executor._identified(
+            forged,
+            "package_id",
+            "trusted-remote-execution-package-v2-",
+        )
+        with self.assertRaisesRegex(
+            executor.TrustedRemoteExecutorError,
+            "package_worker_plan_binding_invalid",
+        ):
+            executor._validate_package_against_plan(
+                executor.TrustedRemoteExecutionPackageV2.from_dict(forged),
+                plan,
+            )
 
     def test_direct_worker_rejects_bad_authority_before_attempt_or_model_import(self):
         repository_root, package_root, model_root, runtime_root = self._materialize_roots()

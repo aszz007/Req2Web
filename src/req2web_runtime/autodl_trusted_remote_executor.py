@@ -53,10 +53,6 @@ _PROCESS_CONSUMED_PRE_RUN_NONCES = set()
 _PROCESS_NONCE_LOCK = threading.Lock()
 _HEX64 = re.compile(r"^[0-9a-f]{64}$")
 _HEX40 = re.compile(r"^[0-9a-f]{40}$")
-_PROJECT_ROOT = Path(__file__).resolve().parents[2]
-_WORKER_SCRIPT = _PROJECT_ROOT / WORKER_RELATIVE_PATH
-
-
 class TrustedRemoteExecutorError(ValueError):
     pass
 
@@ -322,19 +318,6 @@ def _inventory_binding(value, kind):
     return copy.deepcopy(dict(value))
 
 
-def _worker_identity():
-    if not _WORKER_SCRIPT.is_file() or _WORKER_SCRIPT.is_symlink():
-        raise TrustedRemoteExecutorError("fixed_worker_script_unavailable")
-    raw = _WORKER_SCRIPT.read_bytes()
-    return {
-        "relative_path": WORKER_RELATIVE_PATH,
-        "sha256": _sha(raw),
-        "byte_length": len(raw),
-        "entrypoint": WORKER_ENTRYPOINT,
-        "command_prefix": list(WORKER_COMMAND_PREFIX),
-    }
-
-
 def _validate_worker_identity(value):
     value = _keys(value, ("relative_path", "sha256", "byte_length", "entrypoint", "command_prefix"), "worker_identity")
     normalized = {
@@ -347,6 +330,23 @@ def _validate_worker_identity(value):
     if normalized["relative_path"] != WORKER_RELATIVE_PATH or normalized["entrypoint"] != WORKER_ENTRYPOINT or normalized["command_prefix"] != list(WORKER_COMMAND_PREFIX):
         raise TrustedRemoteExecutorError("worker_identity_invalid")
     return normalized
+
+
+def _worker_identity_from_plan(plan):
+    rows = plan["archive_manifest"]["files"]
+    matches = [row for row in rows if row["path"] == WORKER_RELATIVE_PATH]
+    if len(matches) != 1:
+        raise TrustedRemoteExecutorError("fixed_worker_archive_binding_unavailable")
+    row = matches[0]
+    return _validate_worker_identity(
+        {
+            "relative_path": WORKER_RELATIVE_PATH,
+            "sha256": row["sha256"],
+            "byte_length": row["byte_length"],
+            "entrypoint": WORKER_ENTRYPOINT,
+            "command_prefix": list(WORKER_COMMAND_PREFIX),
+        }
+    )
 
 
 class _CanonicalRecord:
@@ -483,7 +483,7 @@ def prepare_trusted_remote_execution_package_v2(action_time_plan, case_payloads,
         "expected_instance": expected_instance,
         "cases": cases,
         "generation": {"enable_thinking": False, "do_sample": False, "max_new_tokens": 4096, "provider_call_limit_per_case": 1, "retry_allowed": False, "text_only": True},
-        "worker": _worker_identity(),
+        "worker": _worker_identity_from_plan(plan),
         "result_policy": {"dedicated_root_required": True, "allowed_relative_paths": [f"cases/{case_id}/raw_response.bin" for case_id in REQUIRED_CASE_IDS] + [_RESULT_RELATIVE_PATH], "max_file_count": caps["max_file_count"], "max_total_bytes": caps["max_total_bytes"], "raw_saved_before_parse": True},
         "claims": {"maximum_state": "remote_execution_result_unattested", "verified_real_provider": False, "real_provider_assembled": False, "g1_g2_delivery_quality": False},
     }
@@ -528,6 +528,8 @@ def _validate_package_against_plan(package, action_time_plan):
         raise TrustedRemoteExecutorError("package_plan_cross_binding_invalid")
     if data["quality_profile"] != {"profile": plan["profile_selection"]["selected_profile"], "dtype": plan["precision"]["selected_dtype"], "quantization": plan["precision"]["selected_quantization"]}:
         raise TrustedRemoteExecutorError("package_profile_plan_binding_invalid")
+    if data["worker"] != _worker_identity_from_plan(plan):
+        raise TrustedRemoteExecutorError("package_worker_plan_binding_invalid")
     if data["expected_instance"]["provider"] != plan["operational"]["target_instance"]["provider"] or data["expected_instance"]["instance_id"] != plan["operational"]["target_instance"]["instance_id"]:
         raise TrustedRemoteExecutorError("package_instance_plan_binding_invalid")
     if data["expected_instance"]["gpu_model"] != plan["operational"]["gpu"]["model"] or data["expected_instance"]["gpu_index"] != plan["operational"]["gpu"]["selected_index"]:
@@ -1330,8 +1332,6 @@ def run_trusted_remote_executor_v2(execution_package, action_time_plan, pre_run_
     package_data = package.to_dict()
     repository_root = _validate_repository_root(repository_root, plan)
     worker_script = _worker_script_at_repository_root(repository_root, package)
-    if package_data["worker"] != _worker_identity():
-        raise TrustedRemoteExecutorError("fixed_worker_identity_drift")
     validate_execution_package_files_v2(package, package_root)
     _validate_inventory_root(model_root, package_data["model_inventory"], "model")
     _validate_inventory_root(runtime_root, package_data["runtime_inventory"], "runtime")
