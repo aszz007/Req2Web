@@ -54,7 +54,7 @@ NO_ACTION_FLAGS = (
 )
 _HEX40 = re.compile(r"^[0-9a-f]{40}$")
 _HEX64 = re.compile(r"^[0-9a-f]{64}$")
-_POSIX_PATH = re.compile(r"^[A-Za-z0-9.][A-Za-z0-9._/-]*$")
+_POSIX_PATH = re.compile(r"^[A-Za-z0-9.][A-Za-z0-9._+() /-]*$")
 _ARCHIVE_MANIFEST_TYPE = _archive_module.RepositoryArchiveManifest
 _ARCHIVE_FROM_BYTES = _ARCHIVE_MANIFEST_TYPE.from_bytes
 _ARCHIVE_CANONICAL_BYTES = _ARCHIVE_MANIFEST_TYPE.canonical_bytes
@@ -135,7 +135,8 @@ def _hex(value, label, pattern, _text_fn=_text, _error=TrustedRemoteRecordsError
 
 def _path(value, label, _text_fn=_text, _pattern=_POSIX_PATH, _error=TrustedRemoteRecordsError):
     value = _text_fn(value, label)
-    if not _pattern.fullmatch(value) or value.startswith("/") or "\\" in value or "//" in value or any(part in {"", ".", ".."} for part in value.split("/")):
+    parts = value.split("/")
+    if not _pattern.fullmatch(value) or value.startswith("/") or "\\" in value or "//" in value or any(part in {"", ".", ".."} or part != part.strip() for part in parts):
         raise _error(f"{label}_not_canonical_posix_path")
     return value
 

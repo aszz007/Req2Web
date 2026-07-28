@@ -152,6 +152,51 @@ class TrustedRemoteRecordsTests(unittest.TestCase):
         with self.assertRaisesRegex(records.TrustedRemoteRecordsError, "count_or_total_drift"):
             records.TrustedRemoteActionTimePlan.from_dict(runtime)
 
+    def test_runtime_inventory_accepts_real_conda_names_and_rejects_noncanonical_edges(self):
+        mapping = self._kwargs(self.archive_manifest)
+        accepted_paths = (
+            "lib/libstdc++.so.6",
+            "lib/python3.11/site-packages/setuptools/launcher manifest.xml",
+            "lib/python3.11/site-packages/setuptools/script (dev).tmpl",
+            "lib/python3.11/site-packages/torch-2.7.1+cu128.dist-info/METADATA",
+        )
+        mapping["runtime"]["artifacts"] = [
+            {
+                "relative_path": path,
+                "byte_length": index + 1,
+                "sha256": f"{index + 1:x}" * 64,
+            }
+            for index, path in enumerate(accepted_paths)
+        ]
+        plan = records.create_local_r0_record_bundle(**mapping)[0]
+        self.assertEqual(
+            tuple(
+                row["relative_path"]
+                for row in plan.to_dict()["runtime_inventory"]["artifacts"]
+            ),
+            accepted_paths,
+        )
+
+        for invalid_path in (
+            "/absolute",
+            "../traversal",
+            "runtime//file",
+            "runtime/./file",
+            "runtime/../file",
+            "runtime/ leading-space",
+            "runtime/trailing-space ",
+            "runtime/tab\tname",
+            "runtime/back\\slash",
+        ):
+            invalid = self._kwargs(self.archive_manifest)
+            invalid["runtime"]["artifacts"][0]["relative_path"] = invalid_path
+            with self.subTest(invalid_path=invalid_path):
+                with self.assertRaisesRegex(
+                    records.TrustedRemoteRecordsError,
+                    "runtime_artifact_path_not_canonical_posix_path",
+                ):
+                    records.create_local_r0_record_bundle(**invalid)
+
     def test_action_time_instance_gpu_ssh_price_result_and_cleanup_fields_fail_closed(self):
         overdue = self.plan.to_dict()
         overdue["operational"]["action_time"]["expires_at_utc"] = "2026-08-03T00:00:00Z"
