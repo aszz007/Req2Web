@@ -121,6 +121,8 @@ class D17SerializerTests(unittest.TestCase):
         self.assertIn('output "claimed_attribution_edges": []', prompt_text)
         self.assertIn("use_case_mappings and use no other use-case ID", prompt_text)
         self.assertIn("Stable IDs must match ^[a-z][a-z0-9-]{0,95}$", prompt_text)
+        self.assertIn("source_state_stable_id and target_state_stable_id must be different", prompt_text)
+        self.assertIn("self-loop interactions are invalid", prompt_text)
         for required_key in (
             "schema_version", "title", "layout", "sections", "components",
             "states", "interactions", "constraints", "acceptance_checks",
