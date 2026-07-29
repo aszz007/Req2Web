@@ -348,9 +348,22 @@ class TrustedRemoteLiveSliceRunV2:
         return _executor.finalize_trusted_remote_closeout_v2(self.verified_execution, self.return_root, instance_release_evidence, temporary_access_revocation_evidence)
 
 
-def run_trusted_remote_two_case_live_slice_v2(*, execution_package, action_time_plan, pre_run_receipt, expected_signer, expected_instance_facts, repository_root, package_root, model_root, runtime_root, result_root, case_inputs, return_root, project_temp_root, cancel_request_path=None):
+def run_trusted_remote_two_case_live_slice_v2(*, execution_package, action_time_plan, pre_run_receipt, expected_signer, expected_instance_facts, repository_root, package_root, model_root, runtime_root, result_root, case_inputs, return_root, project_temp_root, cancel_request_path=None, stream_output=_executor.TRUSTED_REMOTE_STREAM_OUTPUT_MODE):
     _executor._emit_progress("trusted_remote_live_slice_started")
-    verified = _executor.run_trusted_remote_executor_v2(execution_package, action_time_plan, pre_run_receipt, expected_signer, expected_instance_facts, repository_root, package_root, model_root, runtime_root, result_root, cancel_request_path)
+    verified = _executor.run_trusted_remote_executor_v2(
+        execution_package,
+        action_time_plan,
+        pre_run_receipt,
+        expected_signer,
+        expected_instance_facts,
+        repository_root,
+        package_root,
+        model_root,
+        runtime_root,
+        result_root,
+        cancel_request_path,
+        stream_output=stream_output,
+    )
     _executor._emit_progress(
         "verified_execution_complete",
         execution_result_sha256=verified._result.sha256(),

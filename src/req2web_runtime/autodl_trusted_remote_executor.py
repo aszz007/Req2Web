@@ -28,6 +28,7 @@ from pathlib import Path, PurePosixPath
 
 from . import autodl_repository_archive as _archive
 from . import autodl_trusted_remote_records as _records
+from .model_text_stream import MODEL_TEXT_STREAM_MODES, ModelTextStreamSession, create_model_text_stream_sink
 
 EXECUTION_PACKAGE_SCHEMA = "req2web.runtime.trusted_remote_execution_package.v2"
 PRE_RUN_PAYLOAD_SCHEMA = "req2web.runtime.trusted_remote_pre_run_authorization_payload.v2"
@@ -45,6 +46,7 @@ MODEL_ID = _records.MODEL_ID
 WORKER_RELATIVE_PATH = "scripts/stage3_trusted_remote_qwen_worker.py"
 WORKER_ENTRYPOINT = "req2web_runtime.autodl_trusted_remote_executor._worker_main_v2"
 WORKER_COMMAND_PREFIX = ("python3", WORKER_RELATIVE_PATH)
+TRUSTED_REMOTE_STREAM_OUTPUT_MODE = "off"
 MAX_AUTHORIZATION_WINDOW = timedelta(days=7)
 _RESULT_RELATIVE_PATH = "execution_result.json"
 _ATTEMPT_MARKER_RELATIVE_PATH = ".req2web_attempt_consumed.json"
@@ -150,20 +152,82 @@ def _utc_now_text():
 
 
 def _write_stderr_text(value):
-    raw = value.encode("utf-8")
     try:
-        stream = getattr(sys.stderr, "buffer", None)
+        raw = value.encode("utf-8")
+        stderr = sys.stderr
+        if stderr is None:
+            return
+        stream = getattr(stderr, "buffer", None)
         if stream is not None:
             stream.write(raw)
             stream.flush()
             return
-        sys.stderr.write(value)
-        sys.stderr.flush()
+        stderr.write(value)
+        stderr.flush()
     except (OSError, ValueError):
         # Live console observability is best-effort and must never alter the
         # fixed experiment outcome or consume an attempt solely due to a
         # detached/closed stderr stream.
         return
+
+
+class _BestEffortStderrTextIO:
+    def write(self, value):
+        if type(value) is not str:
+            raise TrustedRemoteExecutorError("stream_text_invalid")
+        _write_stderr_text(value)
+        return len(value)
+
+    def flush(self):
+        return None
+
+
+def _generate_model_text_with_stream(model, inputs, processor, max_new_tokens, case_id, stream_output, torch_module, text_streamer_type):
+    if stream_output not in MODEL_TEXT_STREAM_MODES:
+        raise TrustedRemoteExecutorError("stream_output_mode_invalid")
+    if stream_output == "off":
+        with torch_module.inference_mode():
+            output = model.generate(**inputs, do_sample=False, max_new_tokens=max_new_tokens, num_return_sequences=1)
+        return output, {"mode": "off", "event_count": 0, "text": ""}
+
+    session = ModelTextStreamSession(
+        case_id,
+        create_model_text_stream_sink(stream_output, stream=_BestEffortStderrTextIO()),
+    )
+
+    class _SessionTextStreamer(text_streamer_type):
+        def on_finalized_text(self, text, stream_end=False):
+            if text:
+                session.text_delta(text)
+            if stream_end and not session.terminal:
+                session.end()
+
+    streamer = _SessionTextStreamer(
+        processor.tokenizer,
+        skip_prompt=True,
+        skip_special_tokens=True,
+    )
+    session.start()
+    try:
+        with torch_module.inference_mode():
+            output = model.generate(
+                **inputs,
+                do_sample=False,
+                max_new_tokens=max_new_tokens,
+                num_return_sequences=1,
+                streamer=streamer,
+            )
+    except Exception as exc:
+        if not session.terminal:
+            session.error(f"{type(exc).__name__}:{exc}")
+        raise
+    if not session.terminal:
+        session.end()
+    return output, {
+        "mode": stream_output,
+        "event_count": session.event_count,
+        "text": session.text,
+    }
 
 
 def _emit_progress(event, **fields):
@@ -1196,7 +1260,9 @@ def _verify_execution_start_in_authority_window(result, pre_receipt):
         raise TrustedRemoteExecutorError("execution_start_outside_authority_window")
 
 
-def execute_worker_v2(package, action_time_plan, pre_run_receipt, expected_signer, repository_root, package_root, model_root, runtime_root, result_root):
+def execute_worker_v2(package, action_time_plan, pre_run_receipt, expected_signer, repository_root, package_root, model_root, runtime_root, result_root, stream_output=TRUSTED_REMOTE_STREAM_OUTPUT_MODE):
+    if stream_output not in MODEL_TEXT_STREAM_MODES:
+        raise TrustedRemoteExecutorError("stream_output_mode_invalid")
     package, plan, _ = _validate_package_against_plan(package, action_time_plan)
     package_data = package.to_dict()
     _validate_repository_root(repository_root, plan)
@@ -1225,7 +1291,7 @@ def execute_worker_v2(package, action_time_plan, pre_run_receipt, expected_signe
     _emit_progress("runtime_import_started")
     import torch
     import transformers
-    from transformers import AutoModelForMultimodalLM, AutoProcessor
+    from transformers import AutoModelForMultimodalLM, AutoProcessor, TextStreamer
     actual = _actual_runtime_facts(torch, transformers, expected, package, runtime_root)
     device = f"cuda:{expected['gpu_index']}"
     _emit_progress(
@@ -1263,10 +1329,26 @@ def execute_worker_v2(package, action_time_plan, pre_run_receipt, expected_signe
         processor_keys = _validated_text_only_processor_inputs(inputs)
         inputs = {key: inputs[key].to(device) for key in processor_keys}
         input_length = inputs["input_ids"].shape[1]
-        with torch.inference_mode():
-            output = model.generate(**inputs, do_sample=False, max_new_tokens=package_data["generation"]["max_new_tokens"], num_return_sequences=1)
+        output, stream_record = _generate_model_text_with_stream(
+            model,
+            inputs,
+            processor,
+            package_data["generation"]["max_new_tokens"],
+            row["case_id"],
+            stream_output,
+            torch,
+            TextStreamer,
+        )
         generated = output[:, input_length:]
         text = processor.batch_decode(generated, skip_special_tokens=True)[0]
+        stream_matches_final_raw = None if stream_output == "off" else stream_record["text"] == text
+        _emit_progress(
+            "generation_stream_completed",
+            case_id=row["case_id"],
+            stream_output=stream_output,
+            stream_event_count=stream_record["event_count"],
+            stream_matches_final_raw=stream_matches_final_raw,
+        )
         raw = text.encode("utf-8")
         if not raw:
             raise TrustedRemoteExecutorError("empty_raw_response")
@@ -1331,7 +1413,23 @@ def _wait_for_fixed_worker(process, timeout_seconds, cancel_request_path):
             continue
 
 
-def run_trusted_remote_executor_v2(execution_package, action_time_plan, pre_run_receipt, expected_signer, expected_instance_facts, repository_root, package_root, model_root, runtime_root, result_root, cancel_request_path=None):
+def run_trusted_remote_executor_v2(
+    execution_package,
+    action_time_plan,
+    pre_run_receipt,
+    expected_signer,
+    expected_instance_facts,
+    repository_root,
+    package_root,
+    model_root,
+    runtime_root,
+    result_root,
+    cancel_request_path=None,
+    *,
+    stream_output=TRUSTED_REMOTE_STREAM_OUTPUT_MODE,
+):
+    if stream_output not in MODEL_TEXT_STREAM_MODES:
+        raise TrustedRemoteExecutorError("stream_output_mode_invalid")
     if sys.platform != "linux":
         raise TrustedRemoteExecutorError("linux_parent_runner_required")
     package, plan, _ = _validate_package_against_plan(execution_package, action_time_plan)
@@ -1357,7 +1455,7 @@ def run_trusted_remote_executor_v2(execution_package, action_time_plan, pre_run_
         package_path = control_root / "execution_package.json"; package_path.write_bytes(package.canonical_bytes())
         receipt_path = control_root / "pre_run_receipt.json"; receipt_path.write_bytes(authorized.canonical_bytes())
         signer_path = control_root / "expected_pre_run_signer.pub"; signer_path.write_text(_normalize_public_key(expected_signer.public_key, "expected_pre_run_signer_public_key") + "\n", encoding="utf-8", newline="\n")
-        command = [str(interpreter), *package_data["runtime_execution"]["isolated_flags"], str(worker_script), "--package", str(package_path), "--action-time-plan", str(plan_path), "--pre-run-receipt", str(receipt_path), "--pre-run-signer-public-key", str(signer_path), "--repository-root", str(repository_root), "--package-root", str(package_root), "--model-root", str(model_root), "--runtime-root", str(runtime_root), "--result-root", str(result_root)]
+        command = [str(interpreter), *package_data["runtime_execution"]["isolated_flags"], str(worker_script), "--package", str(package_path), "--action-time-plan", str(plan_path), "--pre-run-receipt", str(receipt_path), "--pre-run-signer-public-key", str(signer_path), "--repository-root", str(repository_root), "--package-root", str(package_root), "--model-root", str(model_root), "--runtime-root", str(runtime_root), "--result-root", str(result_root), "--stream-output", stream_output]
         env = {**os.environ, "HF_HUB_OFFLINE": "1", "TRANSFORMERS_OFFLINE": "1", "HF_HUB_DISABLE_TELEMETRY": "1", "DO_NOT_TRACK": "1", "PYTHONNOUSERSITE": "1"}
         for key in ("CUDA_VISIBLE_DEVICES", "PYTHONPATH", "PYTHONHOME", "PYTHONUSERBASE"):
             env.pop(key, None)
@@ -1381,9 +1479,10 @@ def _worker_main_v2(argv=None):
     parser = argparse.ArgumentParser(description="Run the fixed Req2Web trusted-remote Qwen two-case worker.")
     parser.add_argument("--package", required=True); parser.add_argument("--action-time-plan", required=True); parser.add_argument("--pre-run-receipt", required=True); parser.add_argument("--pre-run-signer-public-key", required=True)
     parser.add_argument("--repository-root", required=True); parser.add_argument("--package-root", required=True); parser.add_argument("--model-root", required=True); parser.add_argument("--runtime-root", required=True); parser.add_argument("--result-root", required=True)
+    parser.add_argument("--stream-output", choices=MODEL_TEXT_STREAM_MODES, default=TRUSTED_REMOTE_STREAM_OUTPUT_MODE)
     args = parser.parse_args(argv)
     signer = ExpectedPreRunSigner(Path(args.pre_run_signer_public_key).read_text(encoding="utf-8").strip())
-    result = execute_worker_v2(TrustedRemoteExecutionPackageV2.from_bytes(Path(args.package).read_bytes()), _records.TrustedRemoteActionTimePlan.from_bytes(Path(args.action_time_plan).read_bytes()), TrustedRemotePreRunAuthorizationReceiptV2.from_bytes(Path(args.pre_run_receipt).read_bytes()), signer, Path(args.repository_root), Path(args.package_root), Path(args.model_root), Path(args.runtime_root), Path(args.result_root))
+    result = execute_worker_v2(TrustedRemoteExecutionPackageV2.from_bytes(Path(args.package).read_bytes()), _records.TrustedRemoteActionTimePlan.from_bytes(Path(args.action_time_plan).read_bytes()), TrustedRemotePreRunAuthorizationReceiptV2.from_bytes(Path(args.pre_run_receipt).read_bytes()), signer, Path(args.repository_root), Path(args.package_root), Path(args.model_root), Path(args.runtime_root), Path(args.result_root), stream_output=args.stream_output)
     sys.stdout.buffer.write(result.canonical_bytes() + b"\n")
     return 0
 

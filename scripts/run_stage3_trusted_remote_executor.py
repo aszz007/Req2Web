@@ -17,7 +17,9 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "src"))
 
 from req2web_runtime.autodl_trusted_remote_executor import (
+    MODEL_TEXT_STREAM_MODES,
     ExpectedPreRunSigner,
+    TRUSTED_REMOTE_STREAM_OUTPUT_MODE,
     TrustedRemoteExecutionPackageV2,
     TrustedRemotePreRunAuthorizationReceiptV2,
     create_trusted_remote_project_temp_root_v2,
@@ -42,6 +44,12 @@ def main(argv=None):
     parser.add_argument("--return-root", required=True)
     parser.add_argument("--project-temp-root", required=True)
     parser.add_argument("--cancel-request-path")
+    parser.add_argument(
+        "--stream-output",
+        choices=MODEL_TEXT_STREAM_MODES,
+        default=TRUSTED_REMOTE_STREAM_OUTPUT_MODE,
+        help="Optional non-authoritative model text observation on stderr.",
+    )
     args = parser.parse_args(argv)
 
     import json
@@ -67,6 +75,7 @@ def main(argv=None):
         return_root=Path(args.return_root),
         project_temp_root=project_temp_root,
         cancel_request_path=Path(args.cancel_request_path) if args.cancel_request_path else None,
+        stream_output=args.stream_output,
     )
     summary = {"state": run.return_manifest["state"], "route_bundle_id": run.route_bundle.to_dict()["bundle_id"], "route_bundle_sha256": run.route_bundle.sha256(), "return_manifest": run.return_manifest}
     sys.stdout.buffer.write(json.dumps(summary, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8") + b"\n")

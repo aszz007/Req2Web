@@ -58,6 +58,44 @@ class _TimeoutProcess:
         self.returncode = -9
 
 
+class _FakeInferenceMode:
+    def __enter__(self):
+        return self
+
+    def __exit__(self, _type, _value, _traceback):
+        return False
+
+
+class _FakeTorch:
+    @staticmethod
+    def inference_mode():
+        return _FakeInferenceMode()
+
+
+class _FakeTextStreamer:
+    def __init__(self, tokenizer, **kwargs):
+        self.tokenizer = tokenizer
+        self.kwargs = kwargs
+
+
+class _FakeStreamingModel:
+    def __init__(self):
+        self.calls = []
+        self.output = object()
+
+    def generate(self, **kwargs):
+        self.calls.append(kwargs)
+        streamer = kwargs.get("streamer")
+        if streamer is not None:
+            streamer.on_finalized_text('{"status":', stream_end=False)
+            streamer.on_finalized_text('"stream_ok"}', stream_end=True)
+        return self.output
+
+
+class _FakeProcessor:
+    tokenizer = object()
+
+
 class TrustedRemoteExecutorV2Tests(unittest.TestCase):
     def setUp(self):
         self.work = TEST_ROOT / uuid4().hex
@@ -350,6 +388,60 @@ class TrustedRemoteExecutorV2Tests(unittest.TestCase):
             "not-a-cuda-uuid",
         )
 
+    def test_model_text_stream_console_and_off_preserve_one_generate_call(self):
+        model = _FakeStreamingModel()
+        captured = []
+        with patch.object(executor, "_write_stderr_text", side_effect=captured.append):
+            output, stream = executor._generate_model_text_with_stream(
+                model,
+                {"input_ids": object()},
+                _FakeProcessor(),
+                128,
+                "path3-commerce-checkout",
+                "console",
+                _FakeTorch,
+                _FakeTextStreamer,
+            )
+        self.assertIs(output, model.output)
+        self.assertEqual(len(model.calls), 1)
+        self.assertEqual(model.calls[0]["do_sample"], False)
+        self.assertEqual(model.calls[0]["max_new_tokens"], 128)
+        self.assertEqual(model.calls[0]["num_return_sequences"], 1)
+        self.assertIn("streamer", model.calls[0])
+        self.assertEqual(stream["text"], '{"status":"stream_ok"}')
+        self.assertEqual(stream["mode"], "console")
+        rendered = "".join(captured)
+        self.assertIn("MODEL OUTPUT BEGIN", rendered)
+        self.assertIn('{"status":"stream_ok"}', rendered)
+        self.assertIn("MODEL OUTPUT END", rendered)
+
+        off_model = _FakeStreamingModel()
+        off_output, off_stream = executor._generate_model_text_with_stream(
+            off_model,
+            {"input_ids": object()},
+            _FakeProcessor(),
+            128,
+            "path3-commerce-checkout",
+            "off",
+            _FakeTorch,
+            _FakeTextStreamer,
+        )
+        self.assertIs(off_output, off_model.output)
+        self.assertEqual(len(off_model.calls), 1)
+        self.assertNotIn("streamer", off_model.calls[0])
+        self.assertEqual(off_stream, {"mode": "off", "event_count": 0, "text": ""})
+        with self.assertRaisesRegex(executor.TrustedRemoteExecutorError, "stream_output_mode"):
+            executor._generate_model_text_with_stream(
+                off_model,
+                {},
+                _FakeProcessor(),
+                1,
+                "path3-commerce-checkout",
+                "websocket",
+                _FakeTorch,
+                _FakeTextStreamer,
+            )
+
     def test_raw_response_is_persisted_before_terminal_safe_live_report(self):
         result_root = self.work / "live-report-result"
         result_root.mkdir()
@@ -400,6 +492,35 @@ class TrustedRemoteExecutorV2Tests(unittest.TestCase):
         saved = result_root / "cases" / "path3-commerce-checkout" / "raw_response.bin"
         self.assertEqual(saved.read_bytes(), raw)
 
+    def test_none_stderr_cannot_change_stream_or_raw_first_execution(self):
+        result_root = self.work / "none-stderr-result"
+        result_root.mkdir()
+        raw = b'{"page_id":"main"}'
+        model = _FakeStreamingModel()
+        with patch.object(executor.sys, "stderr", None):
+            executor._emit_progress("preflight_complete")
+            output, stream = executor._generate_model_text_with_stream(
+                model,
+                {"input_ids": object()},
+                _FakeProcessor(),
+                128,
+                "path3-commerce-checkout",
+                "console",
+                _FakeTorch,
+                _FakeTextStreamer,
+            )
+            executor._write_raw_first_and_report(
+                result_root,
+                "path3-commerce-checkout",
+                raw,
+                4096,
+            )
+        self.assertIs(output, model.output)
+        self.assertEqual(len(model.calls), 1)
+        self.assertEqual(stream["text"], '{"status":"stream_ok"}')
+        saved = result_root / "cases" / "path3-commerce-checkout" / "raw_response.bin"
+        self.assertEqual(saved.read_bytes(), raw)
+
     def test_manual_result_bytes_and_root_never_create_verified_execution(self):
         result = self._manual_result(test_only=False)
         with self.assertRaisesRegex(executor.TrustedRemoteExecutorError, "fixed_parent_worker"):
@@ -440,12 +561,47 @@ class TrustedRemoteExecutorV2Tests(unittest.TestCase):
         self.assertEqual(Path(fake.command[0]).resolve(), (runtime_root / "bin" / "python").resolve())
         self.assertEqual(fake.command[1:4], ["-I", "-s", "-E"])
         self.assertEqual(Path(fake.command[4]).resolve(), (repository_root / "scripts" / "stage3_trusted_remote_qwen_worker.py").resolve())
+        self.assertEqual(executor.TRUSTED_REMOTE_STREAM_OUTPUT_MODE, "off")
+        self.assertEqual(fake.command[-2:], ["--stream-output", "off"])
         self.assertTrue(fake.kwargs["start_new_session"])
         self.assertIsNone(fake.kwargs["stderr"])
         self.assertIs(fake.kwargs["stdout"], subprocess.PIPE)
         for key in ("PYTHONPATH", "PYTHONHOME", "PYTHONUSERBASE", "CUDA_VISIBLE_DEVICES"):
             self.assertNotIn(key, fake.kwargs["env"])
         self.assertEqual(killpg.call_count, 2)
+
+        fake = None
+        with patch.object(executor.sys, "platform", "linux"), patch.object(executor, "verify_trusted_remote_pre_run_authorization_receipt_v2", return_value=self.pre_receipt), patch.object(executor.signal, "SIGTERM", 15, create=True), patch.object(executor.signal, "SIGKILL", 9, create=True), patch.object(executor.time, "monotonic", side_effect=[0.0, 7201.0]), patch.object(executor.subprocess, "Popen", side_effect=make_process), patch.object(executor.os, "killpg", create=True):
+            with self.assertRaisesRegex(executor.TrustedRemoteExecutorError, "total_timeout"):
+                executor.run_trusted_remote_executor_v2(
+                    self.package,
+                    self.plan,
+                    self.pre_receipt,
+                    self.signer,
+                    self.instance,
+                    repository_root,
+                    package_root,
+                    model_root,
+                    runtime_root,
+                    result_root,
+                    stream_output="console",
+                )
+        self.assertEqual(fake.command[-2:], ["--stream-output", "console"])
+
+        with self.assertRaisesRegex(executor.TrustedRemoteExecutorError, "stream_output_mode"):
+            executor.run_trusted_remote_executor_v2(
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                stream_output="websocket",
+            )
 
         cancel_path = self.work / "cancel.request"; cancel_path.write_text("cancel", encoding="utf-8")
         fake = None
@@ -534,6 +690,7 @@ class TrustedRemoteExecutorV2Tests(unittest.TestCase):
         self.assertIn("run_trusted_remote_two_case_live_slice_v2", script)
         self.assertIn("load_fixed_trusted_remote_case_inputs_v2", script)
         self.assertIn("--return-root", script)
+        self.assertIn("--stream-output", script)
         worker_script = (
             ROOT / "scripts" / "stage3_trusted_remote_qwen_worker.py"
         ).read_text(encoding="utf-8")
