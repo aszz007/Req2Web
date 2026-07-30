@@ -11,7 +11,7 @@ import copy
 import hashlib
 import json
 import os
-from pathlib import Path
+from pathlib import Path, PurePosixPath, PureWindowsPath
 import re
 import stat
 import subprocess
@@ -814,7 +814,11 @@ def _runtime_inventory(raw: bytes) -> dict[str, Any]:
     ) != ("3.11.15", "2.7.1+cu128", "5.14.1", "12.8"):
         raise Qwen27BPredeployError("runtime_inventory_version_invalid")
     runtime_root = _text(value["runtime_root"], "runtime_root")
-    if not Path(runtime_root).is_absolute():
+    if not (
+        Path(runtime_root).is_absolute()
+        or PurePosixPath(runtime_root).is_absolute()
+        or PureWindowsPath(runtime_root).is_absolute()
+    ):
         raise Qwen27BPredeployError("runtime_root_not_absolute")
     if _hex(value["runtime_root_sha256"], "runtime_root_sha256") != _sha(
         runtime_root.encode("utf-8")

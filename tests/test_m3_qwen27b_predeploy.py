@@ -247,6 +247,18 @@ class Qwen27BPredeployTests(unittest.TestCase):
                 )
                 target.write_bytes(original)
 
+    def test_runtime_inventory_replay_accepts_posix_absolute_root(self) -> None:
+        replay = copy.deepcopy(self.runtime)
+        replay["runtime_root"] = "/root/autodl-tmp/req2web-qwen35-27b/runtime"
+        replay["runtime_root_sha256"] = predeploy._sha(
+            replay["runtime_root"].encode("utf-8")
+        )
+        replay = predeploy._identified(replay, "inventory_id")
+        self.assertEqual(
+            predeploy._runtime_inventory(predeploy._dump(replay)),
+            replay,
+        )
+
     def test_runtime_inventory_detects_new_regular_file(self) -> None:
         added = self.runtime_root / (
             "lib/python3.11/site-packages/transformers/new_executable.py"
