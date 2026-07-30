@@ -384,13 +384,27 @@ def _path_root(path_value: str | os.PathLike[str]) -> Path:
 
 def _file_row(path: Path, relative: str) -> dict[str, Any]:
     try:
-        mode = os.lstat(path).st_mode
+        file_stat = os.lstat(path)
     except OSError as exc:
         raise Qwen27BPredeployError("artifact_file_unavailable") from exc
-    if stat.S_ISLNK(mode) or not stat.S_ISREG(mode):
+    if stat.S_ISLNK(file_stat.st_mode) or not stat.S_ISREG(file_stat.st_mode):
         raise Qwen27BPredeployError("artifact_file_not_regular")
-    raw = path.read_bytes()
-    return {"relative_path": relative, "bytes": len(raw), "sha256": _sha(raw)}
+    digest = hashlib.sha256()
+    observed_bytes = 0
+    try:
+        with path.open("rb") as handle:
+            while chunk := handle.read(_HASH_CHUNK_BYTES):
+                digest.update(chunk)
+                observed_bytes += len(chunk)
+    except OSError as exc:
+        raise Qwen27BPredeployError("artifact_file_unavailable") from exc
+    if observed_bytes != file_stat.st_size:
+        raise Qwen27BPredeployError("artifact_file_changed_during_inventory")
+    return {
+        "relative_path": relative,
+        "bytes": file_stat.st_size,
+        "sha256": digest.hexdigest(),
+    }
 
 
 def collect_model_root_inventory(model_root: str | os.PathLike[str]) -> "Qwen27BPredeployInventory":

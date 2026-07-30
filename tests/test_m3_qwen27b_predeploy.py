@@ -133,6 +133,36 @@ class Qwen27BPredeployTests(unittest.TestCase):
             ),
         )
 
+    def test_model_inventory_hashes_in_bounded_chunks(self) -> None:
+        rows = []
+        for name in predeploy._MODEL_FILES:
+            raw = (self.model / name).read_bytes()
+            rows.append(
+                {
+                    "relative_path": name,
+                    "bytes": len(raw),
+                    "sha256": predeploy._sha(raw),
+                }
+            )
+        expected = predeploy._inventory_data(
+            "model_root",
+            sorted(rows, key=lambda row: row["relative_path"]),
+        )
+        with (
+            mock.patch.object(
+                predeploy,
+                "_official_model_inventory_authority",
+                return_value={"inventory": expected},
+            ),
+            mock.patch.object(
+                Path,
+                "read_bytes",
+                side_effect=AssertionError("model inventory must stream files"),
+            ),
+        ):
+            inventory = predeploy.collect_model_root_inventory(self.model)
+            self.assertEqual(inventory.to_dict(), expected)
+
     def test_arbitrary_fixture_bytes_cannot_claim_official_revision(self) -> None:
         self.rejected(
             lambda: predeploy.collect_model_root_inventory(self.model),
