@@ -31,12 +31,19 @@ from .qwen27b_recovery_runner import (
     RUN_MANIFEST_FILENAME,
     validate_qwen27b_recovery_return_against,
 )
+from .qwen27b_semantic_closure import (
+    Qwen27bSemanticClosureResult,
+    apply_qwen27b_deterministic_semantic_closure,
+)
 from .qwen27b_semantic_gate import (
     evaluate_qwen27b_semantic_coverage_after_route,
 )
 
-FINAL_ROUTE_SCHEMA = "req2web.runtime.qwen35_27b_final_route.v1"
-FINAL_ROUTE_CASE_SCHEMA = "req2web.runtime.qwen35_27b_final_route_case.v1"
+FINAL_ROUTE_SCHEMA = "req2web.runtime.qwen35_27b_final_route.v2"
+FINAL_ROUTE_CASE_SCHEMA = "req2web.runtime.qwen35_27b_final_route_case.v2"
+FINAL_ROUTE_CLOSURE_GATE_SCHEMA = (
+    "req2web.runtime.qwen35_27b_semantic_closure_gate.v1"
+)
 
 
 class Qwen27BFinalRouteError(ValueError):
@@ -196,6 +203,175 @@ def _raw_by_case(run_root: Path, run: Mapping[str, Any]) -> dict[str, bytes]:
     return raw_by_case
 
 
+def _build_semantic_closure_model_outcome(
+    *,
+    model_route: object,
+    original_raw: ProviderRawResponse,
+    closure: Qwen27bSemanticClosureResult,
+    context: object,
+    guidance: object,
+    case_id: str,
+    execution_result_sha256: str,
+    frozen_g0_reference: object,
+) -> tuple[object, object | None, ProviderRawResponse]:
+    """Build the private A-07 compatibility object from a repaired candidate.
+
+    Original Provider bytes remain the source identity. The canonical repaired
+    candidate is an internal deterministic replay input bound by the closure
+    receipt; it is never represented as the original Provider response.
+    """
+
+    closure.validate()
+    source = {
+        "kind": "trusted_remote_verified_execution_with_semantic_closure",
+        "case_id": case_id,
+        "execution_result_sha256": execution_result_sha256,
+        "original_raw_response_sha256": original_raw.sha256,
+        "original_raw_response_byte_length": len(original_raw.raw_bytes),
+        "semantic_closure_report_sha256": closure.report.sha256(),
+        "semantic_closure_decision": closure.report.decision,
+        "original_candidate_sha256": closure.report.original_candidate_sha256,
+        "repaired_candidate_sha256": closure.report.repaired_candidate_sha256,
+    }
+    if closure.report.decision == "fail_closed":
+        body = {"source": source, "failure_code": closure.report.failure_code}
+        outcome_id = "trusted-remote-live-model-outcome-" + _sha(_canonical(body))
+        outcome = _live_route._LiveModelOutcome(
+            outcome_id=outcome_id,
+            disposition="fail_closed",
+            failure=_live_route._LiveFailure(
+                closure.report.failure_code
+                or "semantic_closure_failed_closed"
+            ),
+            artifacts={
+                key: None
+                for key in (
+                    "raw_response_sha256",
+                    "raw_response_byte_length",
+                    "model_semantic_candidate_sha256",
+                    "assembled_page_id",
+                    "assembly_report_id",
+                    "assembly_report_sha256",
+                    "assembled_page_spec_sha256",
+                )
+            },
+            source_binding=source,
+            frozen_g0_reference=frozen_g0_reference,
+            token=_live_route._LIVE_TOKEN,
+        )
+        return outcome, None, original_raw
+
+    repaired_candidate = closure.candidate
+    if repaired_candidate is None:
+        raise Qwen27BFinalRouteError(
+            "final_route_semantic_closure_candidate_missing"
+        )
+    replay_raw = ProviderRawResponse.from_bytes(
+        repaired_candidate.canonical_json_bytes()
+    )
+    try:
+        assembled = model_route._FIXED_CANONICAL_ASSEMBLY_AUTHORITY(
+            replay_raw,
+            context,
+            guidance,
+        )
+    except Exception as exc:
+        raise Qwen27BFinalRouteError(
+            "final_route_semantic_closure_assembly_failed"
+        ) from exc
+    report = assembled.report
+    artifacts = {
+        "raw_response_sha256": replay_raw.sha256,
+        "raw_response_byte_length": len(replay_raw.raw_bytes),
+        "model_semantic_candidate_sha256": assembled.candidate.sha256(),
+        "assembled_page_id": assembled.page_spec.page_id,
+        "assembly_report_id": report.report_id,
+        "assembly_report_sha256": report.sha256(),
+        "assembled_page_spec_sha256": report.assembled_page_spec_sha256,
+    }
+    source["closure_replay_sha256"] = replay_raw.sha256
+    source["closure_replay_byte_length"] = len(replay_raw.raw_bytes)
+    outcome_id = "trusted-remote-live-model-outcome-" + _sha(
+        _canonical({"source": source, "artifacts": artifacts})
+    )
+    outcome = _live_route._LiveModelOutcome(
+        outcome_id=outcome_id,
+        disposition="scripted_fixture_assembled",
+        failure=None,
+        artifacts=artifacts,
+        source_binding=source,
+        frozen_g0_reference=frozen_g0_reference,
+        token=_live_route._LIVE_TOKEN,
+    )
+    return outcome, assembled, replay_raw
+
+
+def _effective_route_state(
+    *,
+    outcome: object,
+    closure: Qwen27bSemanticClosureResult | None,
+) -> dict[str, object]:
+    repaired = closure is not None and closure.report.decision == "repaired"
+    model_success = (outcome.status, outcome.delivery_source) in {
+        ("first_pass_success", "model_first_pass_v1"),
+        ("recovered_success", "model_repaired_v1"),
+    }
+    if repaired and model_success:
+        return {
+            "status": "recovered_success",
+            "delivery_source": "model_repaired_v1",
+            "g2_action": "model_repair",
+            "repair_attempted": 1,
+            "repair_kind": "deterministic_semantic_closure_v1",
+        }
+    return {
+        "status": outcome.status,
+        "delivery_source": outcome.delivery_source,
+        "g2_action": outcome.g2_action,
+        "repair_attempted": (
+            1 if repaired else getattr(outcome, "repair_attempted", 0)
+        ),
+        "repair_kind": (
+            "deterministic_semantic_closure_v1" if repaired else None
+        ),
+    }
+
+
+def _closure_gate_record(
+    *,
+    case_id: str,
+    variant: str,
+    outcome: object,
+    effective: Mapping[str, object],
+    closure: Qwen27bSemanticClosureResult | None,
+    execution_result_sha256: str,
+) -> bytes:
+    if closure is None or closure.report.decision != "repaired":
+        return _live_route._gate_record(
+            case_id,
+            variant,
+            outcome,
+            execution_result_sha256,
+        )
+    return _canonical(
+        {
+            "schema_version": FINAL_ROUTE_CLOSURE_GATE_SCHEMA,
+            "case_id": case_id,
+            "source_kind": "trusted_remote_verified_execution",
+            "execution_result_sha256": execution_result_sha256,
+            "underlying_a07_semantics": variant,
+            "underlying_a07_status": outcome.status,
+            "underlying_a07_delivery_source": outcome.delivery_source,
+            "underlying_a07_outcome_sha256": _sha(outcome.canonical_bytes()),
+            "semantic_closure_report_sha256": closure.report.sha256(),
+            "status": effective["status"],
+            "delivery_source": effective["delivery_source"],
+            "g2_action": effective["g2_action"],
+            "repair_attempted": effective["repair_attempted"],
+            "repair_kind": effective["repair_kind"],
+            "retry_performed": False,
+        }
+    )
 def _route_case(
     *,
     case_id: str,
@@ -220,20 +396,55 @@ def _route_case(
         }
 
     route_inputs = _live_route._route_inputs(inputs, case_id)
+    closure = None
+    routed_candidate = candidate
+    route_provider_raw = provider_raw
+    if candidate is None:
+        model_outcome, assembled = _live_route._build_live_model_outcome(
+            model_route,
+            provider_raw,
+            route_inputs["context"],
+            route_inputs["guidance"],
+            case_id,
+            execution_result_sha256,
+            route_inputs["frozen_g0_reference"],
+        )
+    else:
+        closure = apply_qwen27b_deterministic_semantic_closure(
+            case_id=case_id,
+            candidate=candidate,
+        )
+        if closure.report.decision == "unchanged":
+            model_outcome, assembled = _live_route._build_live_model_outcome(
+                model_route,
+                provider_raw,
+                route_inputs["context"],
+                route_inputs["guidance"],
+                case_id,
+                execution_result_sha256,
+                route_inputs["frozen_g0_reference"],
+            )
+        else:
+            routed_candidate = closure.candidate
+            (
+                model_outcome,
+                assembled,
+                route_provider_raw,
+            ) = _build_semantic_closure_model_outcome(
+                model_route=model_route,
+                original_raw=provider_raw,
+                closure=closure,
+                context=route_inputs["context"],
+                guidance=route_inputs["guidance"],
+                case_id=case_id,
+                execution_result_sha256=execution_result_sha256,
+                frozen_g0_reference=route_inputs["frozen_g0_reference"],
+            )
     fixture = _live_route._LiveRawFixture(
-        provider_raw,
+        route_provider_raw,
         case_id,
         execution_result_sha256,
         _live_route._LIVE_TOKEN,
-    )
-    model_outcome, assembled = _live_route._build_live_model_outcome(
-        model_route,
-        provider_raw,
-        route_inputs["context"],
-        route_inputs["guidance"],
-        case_id,
-        execution_result_sha256,
-        route_inputs["frozen_g0_reference"],
     )
     common = {
         **route_inputs,
@@ -245,7 +456,13 @@ def _route_case(
     variant = "A-07a"
     field_report = (
         None
-        if assembled is None
+        if (
+            assembled is None
+            or (
+                closure is not None
+                and closure.report.repair_attempted == 1
+            )
+        )
         else model_route.create_tier_a_07b_field_gate_report(
             case_id=case_id,
             page_spec=assembled.page_spec,
@@ -280,23 +497,24 @@ def _route_case(
 
     assembler_status = "passed" if assembled is not None else "failed"
     semantic = None
-    if candidate is not None and assembled is not None:
-        if candidate.sha256() != assembled.candidate.sha256():
+    if routed_candidate is not None and assembled is not None:
+        if routed_candidate.sha256() != assembled.candidate.sha256():
             raise Qwen27BFinalRouteError(
                 "final_route_candidate_assembly_cross_binding_invalid"
             )
         semantic = evaluate_qwen27b_semantic_coverage_after_route(
             case_id=case_id,
-            candidate=candidate,
+            candidate=routed_candidate,
             route_outcome=outcome,
         ).to_dict()
+    effective = _effective_route_state(outcome=outcome, closure=closure)
     model_route_pass = (
-        (outcome.status, outcome.delivery_source)
-        in {
-            ("first_pass_success", "model_first_pass_v1"),
-            ("recovered_success", "model_repaired_v1"),
-        }
-    )
+        effective["status"],
+        effective["delivery_source"],
+    ) in {
+        ("first_pass_success", "model_first_pass_v1"),
+        ("recovered_success", "model_repaired_v1"),
+    }
     decision = (
         "recovery_pass"
         if model_route_pass
@@ -304,11 +522,13 @@ def _route_case(
         and semantic["decision"] == "pass"
         else "fail_closed"
     )
-    gate_raw = _live_route._gate_record(
-        case_id,
-        variant,
-        outcome,
-        execution_result_sha256,
+    gate_raw = _closure_gate_record(
+        case_id=case_id,
+        variant=variant,
+        outcome=outcome,
+        effective=effective,
+        closure=closure,
+        execution_result_sha256=execution_result_sha256,
     )
     package_manifest_raw = _live_route._manifest_bytes(
         model_route,
@@ -324,6 +544,8 @@ def _route_case(
         failures.append("generic_route_model_success_not_reached")
     if semantic is not None:
         failures.extend(semantic["failure_codes"])
+    if closure is not None and closure.report.failure_code is not None:
+        failures.append(closure.report.failure_code)
     route_failure_code = getattr(outcome, "failure_code", None)
     if route_failure_code is None:
         failure = getattr(outcome, "failure", None)
@@ -338,6 +560,12 @@ def _route_case(
         "parser_status": parser_status,
         "assembler_status": assembler_status,
         "candidate_sha256": None if candidate is None else candidate.sha256(),
+        "routed_candidate_sha256": (
+            None if routed_candidate is None else routed_candidate.sha256()
+        ),
+        "semantic_closure": (
+            None if closure is None else closure.report.to_dict()
+        ),
         "assembled_page_spec_sha256": (
             None
             if assembled is None
@@ -345,11 +573,14 @@ def _route_case(
         ),
         "generic_route": {
             "a07_semantics": variant,
-            "status": outcome.status,
-            "delivery_source": outcome.delivery_source,
+            "underlying_status": outcome.status,
+            "underlying_delivery_source": outcome.delivery_source,
+            "status": effective["status"],
+            "delivery_source": effective["delivery_source"],
             "g1_package_purpose": outcome.g1_package_purpose,
-            "g2_action": outcome.g2_action,
-            "repair_attempted": getattr(outcome, "repair_attempted", 0),
+            "g2_action": effective["g2_action"],
+            "repair_attempted": effective["repair_attempted"],
+            "repair_kind": effective["repair_kind"],
             "retry_performed": getattr(outcome, "retry_performed", False),
             "gate_status": getattr(
                 outcome,
@@ -376,6 +607,10 @@ def _route_case(
             "h1": False,
             "browser_quality": False,
             "evidence_use": False,
+            "original_model_raw_preserved": True,
+            "semantic_closure_is_system_owned": (
+                closure is not None and closure.report.decision == "repaired"
+            ),
         },
     }
     return record
@@ -433,7 +668,7 @@ def evaluate_qwen27b_final_route(
     ]
     body = {
         "schema_version": FINAL_ROUTE_SCHEMA,
-        "record_id": "qwen35-27b-final-route-v1-" + "0" * 64,
+        "record_id": "qwen35-27b-final-route-v2-" + "0" * 64,
         "source_run": {
             "run_id": run["run_id"],
             "run_manifest_relative_path": RUN_MANIFEST_FILENAME,
@@ -459,7 +694,7 @@ def evaluate_qwen27b_final_route(
     }
     identified = dict(body)
     identified["record_id"] = (
-        "qwen35-27b-final-route-v1-" + _sha(_canonical(body))
+        "qwen35-27b-final-route-v2-" + _sha(_canonical(body))
     )
     return identified
 

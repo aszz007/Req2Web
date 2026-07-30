@@ -6,6 +6,7 @@ import re
 import shutil
 import sys
 import unittest
+from copy import deepcopy
 from dataclasses import replace
 from pathlib import Path
 from typing import Any, Callable, Iterable
@@ -149,6 +150,85 @@ class ConsistencyCheckerTest(unittest.TestCase):
             if "可恢复" in item.description or "恢复提示" in item.description
         )
 
+    def _richer_recovery_spec(self):
+        spec = deepcopy(self.ecommerce_recovery_spec)
+        state_id_map = {
+            "state-initial": "checkout-ready",
+            "state-error": "validation-error",
+            "state-success": "order-complete",
+        }
+        for state in spec.states:
+            state.state_id = state_id_map.get(state.state_id, state.state_id)
+            if state.state_id == "checkout-ready":
+                state.name = "checkout_ready"
+                state.description = "Checkout is ready for customer input."
+            elif state.state_id == "validation-error":
+                state.name = "validation-error"
+                state.description = "Checkout validation failed and can be retried."
+            elif state.state_id == "order-complete":
+                state.name = "order_complete"
+                state.description = "Checkout completed successfully."
+
+        for interaction in spec.interactions:
+            interaction.source_state_id = state_id_map.get(
+                interaction.source_state_id, interaction.source_state_id
+            )
+            interaction.target_state_id = state_id_map.get(
+                interaction.target_state_id, interaction.target_state_id
+            )
+            if interaction.target_state_id == "validation-error":
+                interaction.user_feedback = (
+                    "Checkout validation failed. Correct the input and retry."
+                )
+            elif interaction.source_state_id == "validation-error":
+                interaction.user_feedback = (
+                    "Checkout is ready after correcting the invalid input."
+                )
+
+        for acceptance in spec.acceptance_checks:
+            acceptance.state_id = state_id_map.get(
+                acceptance.state_id, acceptance.state_id
+            )
+            if acceptance.state_id == "validation-error":
+                acceptance.description = (
+                    "The validation error is visible and identifies the failed input."
+                )
+            elif acceptance.state_id == "checkout-ready":
+                acceptance.description = (
+                    "Checkout returns to the ready state for another attempt."
+                )
+
+        status_component_ids = {
+            item.component_id
+            for item in spec.components
+            if item.component_type == "status_panel"
+        }
+        spec.components = [
+            item
+            for item in spec.components
+            if item.component_id not in status_component_ids
+        ]
+        for section in spec.sections:
+            section.component_ids = [
+                item
+                for item in section.component_ids
+                if item not in status_component_ids
+            ]
+        for state in spec.states:
+            state.visible_component_ids = [
+                item
+                for item in state.visible_component_ids
+                if item not in status_component_ids
+            ]
+        for trace in spec.traceability.use_cases:
+            trace.component_ids = [
+                item
+                for item in trace.component_ids
+                if item not in status_component_ids
+            ]
+        spec.validate()
+        return spec
+
     def _mutate_page_data(
         self,
         result,
@@ -246,6 +326,116 @@ class ConsistencyCheckerTest(unittest.TestCase):
         self.assertFalse(report.passed)
         self.assertEqual(
             self._status(report, f"error-recovery.return:{constraint_id}"),
+            "fail",
+        )
+
+    def test_error_recovery_role_resolution_v2_supports_richer_graph(self) -> None:
+        spec = self._richer_recovery_spec()
+        result = self._render(spec, "richer-recovery")
+        markup = result.index_html.read_text(encoding="utf-8")
+        self.assertIn('id="page-state"', markup)
+        self.assertIn('class="state-message"', markup)
+        self.assertNotIn('data-component-type="status_panel"', markup)
+
+        report = self._check(spec, result)
+        constraint_id = self._recovery_constraint_id(spec)
+        self.assertTrue(report.passed)
+        for suffix in ("entry", "feedback", "return", "acceptance"):
+            self.assertEqual(
+                self._status(report, f"error-recovery.{suffix}:{constraint_id}"),
+                "pass",
+            )
+        feedback_check = next(
+            item
+            for item in report.checks
+            if item.check_id == f"error-recovery.feedback:{constraint_id}"
+        )
+        self.assertIn("global page-state message", feedback_check.message)
+        self.assertNotIn("inline", feedback_check.message.casefold())
+
+    def test_richer_recovery_graph_without_recovery_fails_return_and_acceptance(
+        self,
+    ) -> None:
+        spec = self._richer_recovery_spec()
+        removed_ids = {
+            item.interaction_id
+            for item in spec.interactions
+            if item.source_state_id == "validation-error"
+        }
+        spec.interactions = [
+            item for item in spec.interactions if item.interaction_id not in removed_ids
+        ]
+        for trace in spec.traceability.use_cases:
+            trace.interaction_ids = [
+                item for item in trace.interaction_ids if item not in removed_ids
+            ]
+
+        report = self._check(spec, self._render(spec, "richer-missing-recovery"))
+        constraint_id = self._recovery_constraint_id(spec)
+        self.assertEqual(
+            self._status(report, f"error-recovery.return:{constraint_id}"),
+            "fail",
+        )
+        self.assertEqual(
+            self._status(report, f"error-recovery.acceptance:{constraint_id}"),
+            "fail",
+        )
+
+    def test_richer_recovery_graph_with_multiple_entries_fails_closed(self) -> None:
+        spec = self._richer_recovery_spec()
+        entry = next(
+            item
+            for item in spec.interactions
+            if item.target_state_id == "validation-error"
+        )
+        duplicate = replace(entry, interaction_id="interaction-uc-01-error-second")
+        spec.interactions.append(duplicate)
+        next(
+            item
+            for item in spec.traceability.use_cases
+            if item.use_case_id == "UC-01"
+        ).interaction_ids.append(duplicate.interaction_id)
+
+        report = self._check(spec, self._render(spec, "richer-multiple-entry"))
+        constraint_id = self._recovery_constraint_id(spec)
+        self.assertFalse(report.passed)
+        self.assertEqual(
+            self._status(report, f"error-recovery.entry:{constraint_id}"),
+            "fail",
+        )
+        self.assertEqual(
+            self._status(report, f"error-recovery.acceptance:{constraint_id}"),
+            "fail",
+        )
+
+    def test_richer_recovery_graph_with_multiple_recoveries_fails_closed(
+        self,
+    ) -> None:
+        spec = self._richer_recovery_spec()
+        recovery = next(
+            item
+            for item in spec.interactions
+            if item.source_state_id == "validation-error"
+        )
+        duplicate = replace(
+            recovery, interaction_id="interaction-uc-01-recovery-second"
+        )
+        spec.interactions.append(duplicate)
+        next(
+            item
+            for item in spec.traceability.use_cases
+            if item.use_case_id == "UC-01"
+        ).interaction_ids.append(duplicate.interaction_id)
+
+        report = self._check(spec, self._render(spec, "richer-multiple-recovery"))
+        constraint_id = self._recovery_constraint_id(spec)
+        self.assertFalse(report.passed)
+        self.assertEqual(
+            self._status(report, f"error-recovery.return:{constraint_id}"),
+            "fail",
+        )
+        self.assertEqual(
+            self._status(report, f"error-recovery.acceptance:{constraint_id}"),
             "fail",
         )
 

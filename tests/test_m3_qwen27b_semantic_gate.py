@@ -99,6 +99,46 @@ class Qwen27bSemanticGateTests(unittest.TestCase):
             self.assertEqual(report.to_dict()["decision"], "pending")
             self.assertEqual(Qwen27bSemanticCoverageReport.from_bytes(report.canonical_bytes()).sha256(), report.sha256())
 
+    def test_shared_terminal_bridge_uses_other_independent_semantics(self):
+        data = payload("path3-media-analysis")
+        terminal = next(
+            item for item in data["interactions"] if item["stable_id"] == "int-media-2"
+        )
+        terminal["use_case_ids"] = ["UC-01", "UC-02"]
+        uc01_mapping = next(
+            item for item in data["use_case_mappings"] if item["use_case_id"] == "UC-01"
+        )
+        uc01_mapping["interaction_stable_ids"].append("int-media-2")
+
+        report = self.gate("path3-media-analysis", data)
+        self.assertEqual(report.to_dict()["decision"], "pending")
+        uc02 = report.to_dict()["use_case_coverage"][1]
+        self.assertEqual(uc02["exclusive_interaction_ids"], [])
+        self.assertIn("component", uc02["independent_contribution_kinds"])
+        self.assertIn("acceptance_check", uc02["independent_contribution_kinds"])
+        self.assertNotIn(
+            "independent_semantic_contribution_missing",
+            uc02["failure_codes"],
+        )
+
+    def test_identical_interaction_sets_are_allowed_with_other_independent_semantics(self):
+        data = payload("path3-media-analysis")
+        shared_ids = [item["stable_id"] for item in data["interactions"]]
+        for interaction in data["interactions"]:
+            interaction["use_case_ids"] = ["UC-01", "UC-02"]
+        for mapping in data["use_case_mappings"]:
+            mapping["interaction_stable_ids"] = list(shared_ids)
+
+        report = self.gate("path3-media-analysis", data)
+        self.assertEqual(report.to_dict()["decision"], "pending")
+        for row in report.to_dict()["use_case_coverage"]:
+            self.assertEqual(row["exclusive_interaction_ids"], [])
+            self.assertTrue(row["independent_contribution_kinds"])
+            self.assertNotIn(
+                "independent_semantic_contribution_missing",
+                row["failure_codes"],
+            )
+
     def test_collapsed_visibility_free_commerce_is_rejected(self):
         # This remains a strict candidate but reproduces the failed local-spike
         # shape: every commerce UC is mapped to one search interaction and no
@@ -111,9 +151,7 @@ class Qwen27bSemanticGateTests(unittest.TestCase):
             "interactions": [{"stable_id": "int-search", "trigger_component_stable_id": "cmp-search", "source_state_stable_id": "st-search", "action": "search query", "target_state_stable_id": "st-results", "user_feedback": "search results", "use_case_ids": ["UC-01", "UC-02", "UC-03"]}],
             "constraints": [],
             "acceptance_checks": [
-                {"stable_id": "acc-search-1", "description": "The search results are visible.", "use_case_ids": ["UC-01"], "state_stable_id": "st-results"},
-                {"stable_id": "acc-search-2", "description": "The search results are visible.", "use_case_ids": ["UC-02"], "state_stable_id": "st-results"},
-                {"stable_id": "acc-search-3", "description": "The search results are visible.", "use_case_ids": ["UC-03"], "state_stable_id": "st-results"},
+                {"stable_id": "acc-search-shared", "description": "The shared search results are visible.", "use_case_ids": ["UC-01", "UC-02", "UC-03"], "state_stable_id": "st-results"},
             ],
             "use_case_mappings": [{"use_case_id": uc, "section_stable_ids": ["sec-search"], "component_stable_ids": ["cmp-search"], "interaction_stable_ids": ["int-search"]} for uc in ("UC-01", "UC-02", "UC-03")],
             "claimed_attribution_edges": [],
@@ -121,7 +159,13 @@ class Qwen27bSemanticGateTests(unittest.TestCase):
         report = self.gate("path3-commerce-checkout", data)
         failures = report.to_dict()["failure_codes"]
         self.assertEqual(report.to_dict()["decision"], "fail_closed")
-        self.assertIn("use_case_mapping_signatures_identical", failures)
+        self.assertTrue(
+            all(
+                f"{use_case_id.lower().replace('-', '_')}_independent_semantic_contribution_missing"
+                in failures
+                for use_case_id in ("UC-01", "UC-02", "UC-03")
+            )
+        )
         self.assertTrue(any("trigger_not_visible" in code or "acceptance_state_visibility" in code for code in failures))
 
     def test_pending_generic_gate_never_claims_pass(self):

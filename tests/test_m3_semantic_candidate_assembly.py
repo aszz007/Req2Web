@@ -238,6 +238,22 @@ class M3SemanticCandidateAssemblyTest(unittest.TestCase):
                 self.assertEqual(assembled.report.claimed_attribution_edges, assembled.candidate.claimed_attribution_edges)
                 self.assertEqual(assembled.report.claimed_attribution_edges[0].source_id, f"unverified-{source_kind}-identity")
 
+    def test_same_state_interaction_is_valid_but_unknown_states_fail_closed(self) -> None:
+        same_state = deepcopy(self.payload)
+        interaction = same_state["interactions"][0]
+        interaction["target_state_stable_id"] = interaction["source_state_stable_id"]
+        candidate = self.parse(same_state)
+        self.assertEqual(
+            candidate.interactions[0].source_state_stable_id,
+            candidate.interactions[0].target_state_stable_id,
+        )
+
+        unknown = deepcopy(same_state)
+        unknown["interactions"][0]["target_state_stable_id"] = "state-absent"
+        with self.assertRaises(ProviderProtocolError) as raised:
+            self.parse(unknown)
+        self.assertEqual(raised.exception.code, "unknown_candidate_reference")
+
     def test_stable_id_reference_conflict_and_report_integrity_fail_closed(self) -> None:
         conflict = deepcopy(self.payload)
         conflict["components"][0]["section_stable_id"] = "section-absent"

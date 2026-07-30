@@ -179,6 +179,177 @@ class AcceptanceBindingTest(unittest.TestCase):
         )
         result.validate_against(self.view, self.plan, self.spec, render)
 
+    def test_noncanonical_state_names_follow_renderer_first_state_fallback(self) -> None:
+        spec = copy.deepcopy(self.spec)
+        for index, state in enumerate(spec.states):
+            state.name = f"Workflow state {index + 1}"
+        spec.validate()
+        render = self.render(spec)
+
+        result = compile_acceptance_binding(self.view, self.plan, spec, render)
+
+        result.validate_against(self.view, self.plan, spec, render)
+        self.assertEqual(len(result.bindings), len(self.plan.criteria))
+
+    def test_use_case_two_can_reuse_prior_use_case_prefix_when_final_edge_is_current(self) -> None:
+        spec = copy.deepcopy(self.spec)
+        retry_interaction = next(
+            item for item in spec.interactions
+            if item.interaction_id == "interaction-use-case-retry-primary"
+        )
+        retry_interaction.source_state_id = "state-success"
+        retry_interaction.target_state_id = "state-empty"
+        retry_check = next(item for item in spec.acceptance_checks if item.check_id == "check-02")
+        retry_check.state_id = "state-empty"
+        spec.validate()
+
+        result = compile_acceptance_binding(self.view, self.plan, spec, self.render(spec))
+
+        binding = self.binding_for(result, "use_case", "use-case-retry")
+        self.assertEqual(binding.disposition, "bound")
+        refs = dict(binding.target_refs)
+        self.assertEqual(refs["acceptance_check_id"], "check-02")
+        self.assertEqual(
+            [value for key, value in binding.target_refs if key.startswith("interaction_id:")],
+            ["interaction-use-case-search-primary", "interaction-use-case-retry-primary"],
+        )
+
+    def test_same_acceptance_target_with_alternate_path_uses_canonical_first_path(self) -> None:
+        spec = copy.deepcopy(self.spec)
+        recovery_interaction = next(
+            item for item in spec.interactions
+            if item.interaction_id == "interaction-use-case-search-recovery-input"
+        )
+        recovery_interaction.target_state_id = "state-success"
+        spec.validate()
+
+        result = compile_acceptance_binding(self.view, self.plan, spec, self.render(spec))
+
+        binding = self.binding_for(result, "use_case", "use-case-search")
+        self.assertEqual(binding.disposition, "bound")
+        self.assertEqual(
+            [value for key, value in binding.target_refs if key.startswith("interaction_id:")],
+            ["interaction-use-case-search-primary"],
+        )
+
+    def test_current_use_case_self_loop_can_be_final_edge_after_prefix_bridge(self) -> None:
+        spec = copy.deepcopy(self.spec)
+        retry_interaction = next(
+            item for item in spec.interactions
+            if item.interaction_id == "interaction-use-case-retry-primary"
+        )
+        retry_interaction.source_state_id = "state-success"
+        retry_interaction.target_state_id = "state-success"
+        spec.validate()
+
+        result = compile_acceptance_binding(self.view, self.plan, spec, self.render(spec))
+
+        binding = self.binding_for(result, "use_case", "use-case-retry")
+        self.assertEqual(binding.disposition, "bound")
+        self.assertEqual(
+            [value for key, value in binding.target_refs if key.startswith("interaction_id:")],
+            ["interaction-use-case-search-primary", "interaction-use-case-retry-primary"],
+        )
+
+    def test_use_case_cannot_borrow_future_use_case_interaction(self) -> None:
+        spec = copy.deepcopy(self.spec)
+        search_interaction = next(
+            item for item in spec.interactions
+            if item.interaction_id == "interaction-use-case-search-primary"
+        )
+        retry_interaction = next(
+            item for item in spec.interactions
+            if item.interaction_id == "interaction-use-case-retry-primary"
+        )
+        search_interaction.target_state_id = "state-loading"
+        retry_interaction.source_state_id = "state-loading"
+        retry_interaction.target_state_id = "state-empty"
+        search_check = next(item for item in spec.acceptance_checks if item.check_id == "check-01")
+        search_check.state_id = "state-empty"
+        spec.validate()
+
+        result = compile_acceptance_binding(self.view, self.plan, spec, self.render(spec))
+
+        binding = self.binding_for(result, "use_case", "use-case-search")
+        self.assertEqual(binding.disposition, "terminal")
+        self.assertEqual(binding.terminal_status, "fail")
+        self.assertEqual(binding.terminal_stage, "page_spec_binding")
+        self.assertIn("unreachable_use_case_acceptance_target", binding.reason_code)
+
+    def test_multiple_reachable_normal_acceptance_targets_are_ambiguous(self) -> None:
+        spec = copy.deepcopy(self.spec)
+        search_check = next(item for item in spec.acceptance_checks if item.check_id == "check-01")
+        spec.acceptance_checks.append(
+            replace(
+                search_check,
+                check_id="check-99",
+                description="Alternate normal success acceptance.",
+            )
+        )
+        spec.validate()
+
+        result = compile_acceptance_binding(self.view, self.plan, spec, self.render(spec))
+
+        binding = self.binding_for(result, "use_case", "use-case-search")
+        self.assertEqual(binding.disposition, "terminal")
+        self.assertEqual(binding.terminal_status, "fail")
+        self.assertEqual(binding.terminal_stage, "page_spec_binding")
+        self.assertIn("ambiguous_use_case_acceptance_target", binding.reason_code)
+
+    def test_use_case_with_no_reachable_normal_acceptance_target_fails_closed(self) -> None:
+        spec = copy.deepcopy(self.spec)
+        search_check = next(item for item in spec.acceptance_checks if item.check_id == "check-01")
+        search_check.state_id = "state-empty"
+        spec.validate()
+
+        result = compile_acceptance_binding(self.view, self.plan, spec, self.render(spec))
+
+        binding = self.binding_for(result, "use_case", "use-case-search")
+        self.assertEqual(binding.disposition, "terminal")
+        self.assertEqual(binding.terminal_status, "fail")
+        self.assertEqual(binding.terminal_stage, "page_spec_binding")
+        self.assertIn("unreachable_use_case_acceptance_target", binding.reason_code)
+
+    def test_use_case_without_local_status_panel_binds_global_state_message_feedback(self) -> None:
+        spec = copy.deepcopy(self.spec)
+        removed_component_id = "component-use-case-search-output"
+        spec.components = [
+            item for item in spec.components
+            if item.component_id != removed_component_id
+        ]
+        for section in spec.sections:
+            section.component_ids = [
+                item for item in section.component_ids
+                if item != removed_component_id
+            ]
+        for state in spec.states:
+            state.visible_component_ids = [
+                item for item in state.visible_component_ids
+                if item != removed_component_id
+            ]
+        trace = next(item for item in spec.traceability.use_cases if item.use_case_id == "use-case-search")
+        trace.component_ids = [
+            item for item in trace.component_ids
+            if item != removed_component_id
+        ]
+        spec.validate()
+
+        result = compile_acceptance_binding(self.view, self.plan, spec, self.render(spec))
+
+        criterion = next(item for item in self.plan.criteria if item.source_id == "use-case-search")
+        feedback_steps = [
+            item for item in result.steps
+            if item.criterion_id == criterion.criterion_id
+            and item.action_kind == "assert_feedback"
+        ]
+        self.assertEqual(len(feedback_steps), 1)
+        self.assertEqual(feedback_steps[0].target_id, "page-state")
+        self.assertEqual(feedback_steps[0].selector, "#page-state .state-message")
+        self.assertEqual(
+            dict(feedback_steps[0].expected_payload),
+            {"feedback": "a result list is shown"},
+        )
+
     def test_unsupported_requirement_constraint_and_device_are_retained(self) -> None:
         result = compile_acceptance_binding(self.view, self.plan, self.spec, self.render())
 
@@ -200,7 +371,7 @@ class AcceptanceBindingTest(unittest.TestCase):
         self.assertEqual(binding.disposition, "terminal")
         self.assertEqual(binding.terminal_status, "fail")
         self.assertEqual(binding.terminal_stage, "page_spec_binding")
-        self.assertIn("incomplete_use_case_target", binding.reason_code)
+        self.assertIn("unreachable_use_case_acceptance_target", binding.reason_code)
 
     def test_dom_stable_id_missing_is_render_binding_failure(self) -> None:
         render = self.render()
@@ -240,7 +411,7 @@ class AcceptanceBindingTest(unittest.TestCase):
                 self.assertEqual(binding.terminal_status, "fail")
                 self.assertEqual(binding.terminal_stage, "render_binding")
 
-    def test_use_case_outcome_mismatch_is_pagespec_binding_failure(self) -> None:
+    def test_use_case_feedback_step_uses_canonical_expected_payload_even_when_candidate_feedback_differs(self) -> None:
         spec = copy.deepcopy(self.spec)
         interaction = next(
             item for item in spec.interactions
@@ -252,9 +423,22 @@ class AcceptanceBindingTest(unittest.TestCase):
         result = compile_acceptance_binding(self.view, self.plan, spec, self.render(spec))
 
         binding = self.binding_for(result, "use_case", "use-case-search")
-        self.assertEqual(binding.terminal_status, "fail")
-        self.assertEqual(binding.terminal_stage, "page_spec_binding")
-        self.assertIn("use_case_expected_outcome_mismatch", binding.reason_code)
+        self.assertEqual(binding.disposition, "bound")
+        criterion = next(item for item in self.plan.criteria if item.source_id == "use-case-search")
+        feedback_steps = [
+            item for item in result.steps
+            if item.criterion_id == criterion.criterion_id
+            and item.action_kind == "assert_feedback"
+        ]
+        self.assertEqual(len(feedback_steps), 1)
+        self.assertEqual(
+            dict(feedback_steps[0].expected_payload),
+            {"feedback": "a result list is shown"},
+        )
+        self.assertEqual(
+            feedback_steps[0].source,
+            "acceptance_plan.criteria.expected_payload.expected_outcome",
+        )
 
     def test_recovery_criteria_bind_distinct_stable_scenario_fixtures(self) -> None:
         bundle = make_bundle(

@@ -1117,11 +1117,11 @@ class MinimalConsistencyChecker:
                 ],
             )
 
-        states_by_name = {item.name: item for item in page_spec.states}
-        components_by_id = {
-            item.component_id: item for item in page_spec.components
-        }
-        sections_by_id = {item.section_id: item for item in page_spec.sections}
+        states_by_id = {item.state_id: item for item in page_spec.states}
+        runtime_initial_state_id = next(
+            (item.state_id for item in page_spec.states if item.name == "initial"),
+            page_spec.states[0].state_id,
+        )
 
         def runtime_has_interaction(interaction) -> bool:
             expected = {
@@ -1136,6 +1136,73 @@ class MinimalConsistencyChecker:
                 expected
             ]
 
+        rendered_interactions = [
+            item for item in page_spec.interactions if runtime_has_interaction(item)
+        ]
+        runtime_reachable_state_ids: set[str] = set()
+        if (
+            runtime is not None
+            and runtime.get("initial_state_id") == runtime_initial_state_id
+            and runtime_initial_state_id in runtime_state_ids
+        ):
+            runtime_reachable_state_ids.add(runtime_initial_state_id)
+            pending_state_ids = deque((runtime_initial_state_id,))
+            while pending_state_ids:
+                source_state_id = pending_state_ids.popleft()
+                for interaction in rendered_interactions:
+                    if interaction.source_state_id != source_state_id:
+                        continue
+                    if interaction.target_state_id in runtime_reachable_state_ids:
+                        continue
+                    runtime_reachable_state_ids.add(interaction.target_state_id)
+                    pending_state_ids.append(interaction.target_state_id)
+
+        error_role_markers = (
+            "error",
+            "invalid",
+            "validation",
+            "failure",
+            "failed",
+            "denied",
+            "reject",
+            "exception",
+            "blocked",
+            "unavailable",
+            "\u9519\u8bef",
+            "\u65e0\u6548",
+            "\u6821\u9a8c",
+            "\u9a8c\u8bc1\u5931\u8d25",
+            "\u5931\u8d25",
+            "\u62d2\u7edd",
+            "\u5f02\u5e38",
+            "\u65e0\u6cd5",
+        )
+        scenario_error_markers = {
+            "input": (
+                "invalid",
+                "validation",
+                "\u65e0\u6548",
+                "\u8f93\u5165",
+                "\u6821\u9a8c",
+            ),
+            "permission": (
+                "permission",
+                "denied",
+                "camera",
+                "\u6743\u9650",
+                "\u62d2\u7edd",
+                "\u76f8\u673a",
+            ),
+            "generic": error_role_markers,
+        }
+
+        def has_role_marker(markers: tuple[str, ...], *values: str) -> bool:
+            normalized = " ".join(values).casefold()
+            return any(marker in normalized for marker in markers)
+
+        def has_error_role_marker(*values: str) -> bool:
+            return has_role_marker(error_role_markers, *values)
+
         for constraint in page_spec.constraints:
             if constraint.source != "agent_context":
                 continue
@@ -1143,149 +1210,178 @@ class MinimalConsistencyChecker:
             if scenario is None:
                 continue
 
-            target_component = None
-            for component_type in scenario.preferred_component_types:
-                target_component = next(
-                    (
-                        item
-                        for item in page_spec.components
-                        if item.component_type == component_type
-                    ),
-                    None,
+            entry_candidates: list[tuple[Any, list[Any], set[str]]] = []
+            for interaction in page_spec.interactions:
+                source_state = states_by_id.get(interaction.source_state_id)
+                target_state = states_by_id.get(interaction.target_state_id)
+                if source_state is None or target_state is None:
+                    continue
+                if interaction.source_state_id not in runtime_reachable_state_ids:
+                    continue
+                if interaction.trigger_component_id not in set(
+                    source_state.visible_component_ids
+                ):
+                    continue
+                if not runtime_has_interaction(interaction):
+                    continue
+                if interaction.target_state_id not in runtime_state_ids:
+                    continue
+                if not has_error_role_marker(target_state.name, target_state.description):
+                    continue
+                error_acceptances = [
+                    item
+                    for item in page_spec.acceptance_checks
+                    if item.state_id == target_state.state_id
+                    and bool(
+                        set(item.use_case_ids).intersection(interaction.use_case_ids)
+                    )
+                    and has_error_role_marker(item.description)
+                ]
+                scenario_markers = scenario_error_markers.get(
+                    scenario.kind, error_role_markers
                 )
-                if target_component is not None:
-                    break
-            if target_component is None:
-                target_component = next(
-                    (
-                        item
-                        for item in page_spec.components
-                        if item.component_type != "status_panel"
-                    ),
-                    None,
+                if not has_role_marker(
+                    scenario_markers,
+                    target_state.name,
+                    target_state.description,
+                    interaction.action,
+                    interaction.user_feedback,
+                    *(item.description for item in error_acceptances),
+                ):
+                    continue
+                accepted_use_case_ids = set().union(
+                    *(set(item.use_case_ids) for item in error_acceptances)
+                )
+                relevant_use_case_ids = set(interaction.use_case_ids).intersection(
+                    accepted_use_case_ids
+                )
+                if not relevant_use_case_ids:
+                    continue
+                entry_candidates.append(
+                    (interaction, error_acceptances, relevant_use_case_ids)
                 )
 
-            relevant_use_case_ids: set[str] = set()
-            if target_component is not None:
-                target_section = sections_by_id.get(target_component.section_id)
-                if target_section is not None:
-                    relevant_use_case_ids.update(target_section.use_case_ids)
-
-            initial_state = states_by_name.get("initial")
-            error_state = states_by_name.get("error")
-            success_state = states_by_name.get("success")
-            initial_visible = (
-                set(initial_state.visible_component_ids) if initial_state else set()
-            )
-            error_visible = (
-                set(error_state.visible_component_ids) if error_state else set()
-            )
-
-            entry_interactions = [
-                item
-                for item in page_spec.interactions
-                if initial_state is not None
-                and error_state is not None
-                and item.source_state_id == initial_state.state_id
-                and item.target_state_id == error_state.state_id
-                and bool(set(item.use_case_ids).intersection(relevant_use_case_ids))
-                and item.trigger_component_id in initial_visible
-                and runtime_has_interaction(item)
-            ]
-            entry_ok = bool(entry_interactions)
+            entry_ok = len(entry_candidates) == 1
+            entry_interaction = entry_candidates[0][0] if entry_ok else None
+            entry_acceptances = entry_candidates[0][1] if entry_ok else []
+            relevant_use_case_ids = entry_candidates[0][2] if entry_ok else set()
             add(
                 f"error-recovery.entry:{constraint.constraint_id}",
                 "acceptance_coverage",
                 "pass" if entry_ok else "fail",
                 (
-                    f"Constraint {constraint.constraint_id} has a rendered initial-to-error interaction."
+                    f"Constraint {constraint.constraint_id} has one rendered reachable error-entry interaction."
                     if entry_ok
-                    else f"Constraint {constraint.constraint_id} lacks a rendered initial-to-error interaction."
+                    else f"Constraint {constraint.constraint_id} does not have exactly one rendered reachable error-entry interaction."
                 ),
                 [
                     constraint.constraint_id,
-                    *(item.interaction_id for item in entry_interactions),
+                    *(item[0].interaction_id for item in entry_candidates),
                 ],
             )
 
-            feedback_interactions = []
-            if error_state is not None:
-                for interaction in entry_interactions:
-                    trigger = components_by_id.get(interaction.trigger_component_id)
-                    if trigger is None:
-                        continue
-                    visible_status = any(
-                        component_id in error_visible
-                        and components_by_id[component_id].component_type
-                        == "status_panel"
-                        and components_by_id[component_id].section_id
-                        == trigger.section_id
-                        for component_id in components_by_id
-                    )
-                    if interaction.user_feedback.strip() and visible_status:
-                        feedback_interactions.append(interaction)
-            feedback_ok = bool(feedback_interactions)
+            index_markup = file_text.get("index.html", "")
+            global_page_state_feedback = (
+                'id="page-state"' in index_markup
+                and 'class="state-message"' in index_markup
+            )
+            feedback_ok = bool(
+                entry_interaction is not None
+                and entry_interaction.target_state_id in runtime_state_ids
+                and entry_interaction.user_feedback.strip()
+                and runtime_has_interaction(entry_interaction)
+                and global_page_state_feedback
+            )
             add(
                 f"error-recovery.feedback:{constraint.constraint_id}",
                 "acceptance_coverage",
                 "pass" if feedback_ok else "fail",
                 (
-                    f"Constraint {constraint.constraint_id} exposes error feedback in a visible status panel."
+                    f"Constraint {constraint.constraint_id} exposes non-empty error feedback through the rendered global page-state message."
                     if feedback_ok
                     else f"Constraint {constraint.constraint_id} lacks reachable visible error feedback."
                 ),
                 [
                     constraint.constraint_id,
-                    *(item.interaction_id for item in feedback_interactions),
+                    *(
+                        (entry_interaction.interaction_id,)
+                        if feedback_ok and entry_interaction is not None
+                        else ()
+                    ),
                 ],
             )
 
-            recovery_target_ids = {
-                state.state_id
-                for state in (initial_state, success_state)
-                if state is not None
-            }
-            recovery_interactions = [
-                item
-                for item in page_spec.interactions
-                if error_state is not None
-                and item.source_state_id == error_state.state_id
-                and item.target_state_id in recovery_target_ids
-                and bool(set(item.use_case_ids).intersection(relevant_use_case_ids))
-                and item.trigger_component_id in error_visible
-                and item.user_feedback.strip()
-                and runtime_has_interaction(item)
-            ]
-            recovery_ok = bool(recovery_interactions)
+            recovery_candidates = []
+            if entry_interaction is not None:
+                error_state = states_by_id[entry_interaction.target_state_id]
+                non_error_acceptance_state_ids = {
+                    item.state_id
+                    for item in page_spec.acceptance_checks
+                    if bool(
+                        set(item.use_case_ids).intersection(relevant_use_case_ids)
+                    )
+                    and item.state_id in states_by_id
+                    and not has_error_role_marker(
+                        states_by_id[item.state_id].name,
+                        states_by_id[item.state_id].description,
+                    )
+                }
+                alternative_target_ids = non_error_acceptance_state_ids - {
+                    entry_interaction.source_state_id
+                }
+                unique_alternative_target_id = (
+                    next(iter(alternative_target_ids))
+                    if len(alternative_target_ids) == 1
+                    else None
+                )
+                for interaction in page_spec.interactions:
+                    target_allowed = (
+                        interaction.target_state_id
+                        == entry_interaction.source_state_id
+                        or (
+                            unique_alternative_target_id is not None
+                            and interaction.target_state_id
+                            == unique_alternative_target_id
+                        )
+                    )
+                    if (
+                        interaction.source_state_id == error_state.state_id
+                        and target_allowed
+                        and interaction.target_state_id in runtime_state_ids
+                        and bool(
+                            set(interaction.use_case_ids).intersection(
+                                relevant_use_case_ids
+                            )
+                        )
+                        and interaction.trigger_component_id
+                        in set(error_state.visible_component_ids)
+                        and interaction.user_feedback.strip()
+                        and runtime_has_interaction(interaction)
+                    ):
+                        recovery_candidates.append(interaction)
+
+            recovery_ok = len(recovery_candidates) == 1
+            recovery_interaction = recovery_candidates[0] if recovery_ok else None
             add(
                 f"error-recovery.return:{constraint.constraint_id}",
                 "acceptance_coverage",
                 "pass" if recovery_ok else "fail",
                 (
-                    f"Constraint {constraint.constraint_id} has a rendered recovery path from error."
+                    f"Constraint {constraint.constraint_id} has one rendered recovery path from the resolved error state."
                     if recovery_ok
-                    else f"Constraint {constraint.constraint_id} lacks a rendered recovery path from error."
+                    else f"Constraint {constraint.constraint_id} does not have exactly one rendered recovery path from the resolved error state."
                 ),
                 [
                     constraint.constraint_id,
-                    *(item.interaction_id for item in recovery_interactions),
+                    *(item.interaction_id for item in recovery_candidates),
                 ],
             )
 
-            entry_acceptances = [
-                item
-                for item in page_spec.acceptance_checks
-                if error_state is not None
-                and item.state_id == error_state.state_id
-                and bool(set(item.use_case_ids).intersection(relevant_use_case_ids))
-            ]
-            recovery_state_ids = {
-                item.target_state_id for item in recovery_interactions
-            }
             recovery_acceptances = [
                 item
                 for item in page_spec.acceptance_checks
-                if item.state_id in recovery_state_ids
+                if recovery_interaction is not None
+                and item.state_id == recovery_interaction.target_state_id
                 and bool(set(item.use_case_ids).intersection(relevant_use_case_ids))
             ]
             acceptance_ok = (

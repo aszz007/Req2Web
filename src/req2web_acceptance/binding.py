@@ -371,6 +371,18 @@ class _DOMComponent:
     renderer_kind: str | None
 
 
+@dataclass(frozen=True)
+class _FeedbackTarget:
+    target_id: str
+    selector: str
+    target_ref_key: str
+    target_ref_value: str
+
+    @property
+    def component_id(self) -> str:
+        return self.target_id
+
+
 class _RenderedHTMLParser(HTMLParser):
     def __init__(self) -> None:
         super().__init__(convert_charrefs=True)
@@ -381,8 +393,11 @@ class _RenderedHTMLParser(HTMLParser):
         self.interaction_trigger_values: set[str] = set()
         self.interaction_form_values: set[str] = set()
         self.feedback_component_ids: set[str] = set()
+        self.page_state_region_count = 0
+        self.page_state_message_count = 0
         self._section_stack: list[tuple[str, str]] = []
         self._component_stack: list[tuple[str, str]] = []
+        self._page_state_stack: list[str] = []
 
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
         values = {key: value for key, value in attrs if value is not None}
@@ -390,6 +405,11 @@ class _RenderedHTMLParser(HTMLParser):
             self.html_schema_values.append(values.get("data-page-spec-schema"))
         if tag == "body":
             self.body_attributes.append(values)
+        if values.get("id") == "page-state":
+            self.page_state_region_count += 1
+            self._page_state_stack.append(tag)
+        if "state-message" in values.get("class", "").split() and self._page_state_stack:
+            self.page_state_message_count += 1
         section_id = values.get("data-section-id")
         if section_id is not None:
             self.sections.append(_DOMSection(section_id, tag, tuple(item for item in values.get("data-use-case-ids", "").split(" ") if item)))
@@ -417,6 +437,8 @@ class _RenderedHTMLParser(HTMLParser):
             self._component_stack.pop()
         if self._section_stack and self._section_stack[-1][0] == tag:
             self._section_stack.pop()
+        if self._page_state_stack and self._page_state_stack[-1] == tag:
+            self._page_state_stack.pop()
 
 
 @dataclass(frozen=True)
@@ -569,7 +591,14 @@ def _inspect_render(page_spec: PageSpec, render_result: RenderResult) -> _Render
             errors.append(runtime_error)
     if runtime is not None:
         expected_sections = {item.component_id: item.section_id for item in page_spec.components}
-        expected_initial = next(item.state_id for item in page_spec.states if item.name == "initial")
+        expected_initial = next(
+            (
+                item.state_id
+                for item in page_spec.states
+                if item.name == "initial"
+            ),
+            page_spec.states[0].state_id,
+        )
         expected_states = [{"description": item.description, "name": item.name, "state_id": item.state_id, "visible_component_ids": item.visible_component_ids} for item in page_spec.states]
         expected_interactions = [{"action": item.action, "interaction_id": item.interaction_id, "source_state_id": item.source_state_id, "target_state_id": item.target_state_id, "trigger_component_id": item.trigger_component_id, "user_feedback": item.user_feedback} for item in page_spec.interactions]
         if runtime.get("page_id") != page_spec.page_id:
@@ -692,8 +721,8 @@ def _feedback_target_for_trigger(
     trigger_component_id: str,
     components_by_id: Mapping[str, Any],
     inspection: _RenderInspection,
-) -> Any:
-    """Resolve the exact feedback element selected by Renderer.updateFeedback."""
+) -> _FeedbackTarget:
+    """Resolve the feedback assertion target without claiming inline validation."""
 
     if inspection.dom is None:
         raise _RenderBindingError("render_dom_unavailable")
@@ -711,35 +740,81 @@ def _feedback_target_for_trigger(
         if item.section_id == trigger_section_id
         and item.component_id in inspection.dom.feedback_component_ids
     ]
-    all_targets = [
-        item for item in inspection.dom.components
-        if item.component_id in inspection.dom.feedback_component_ids
-    ]
-    chosen = local_targets[0] if local_targets else (all_targets[0] if all_targets else None)
-    if chosen is None:
-        raise _RenderBindingError("dom_feedback_target_missing")
-    component = components_by_id.get(chosen.component_id)
-    if component is None or component.component_type != "status_panel":
+    if len(local_targets) > 1:
         raise _RenderBindingError(
-            f"dom_feedback_target_contract_mismatch:{chosen.component_id}"
+            f"dom_feedback_target_ambiguous:{trigger_component_id}"
         )
-    if error := _component_dom_error(component, inspection):
-        raise _RenderBindingError(error)
-    return component
+    if local_targets:
+        chosen = local_targets[0]
+        component = components_by_id.get(chosen.component_id)
+        if component is None or component.component_type != "status_panel":
+            raise _RenderBindingError(
+                f"dom_feedback_target_contract_mismatch:{chosen.component_id}"
+            )
+        if error := _component_dom_error(component, inspection):
+            raise _RenderBindingError(error)
+        return _FeedbackTarget(
+            target_id=component.component_id,
+            selector=_attribute_selector("data-component-id", component.component_id)
+            + " .component-feedback",
+            target_ref_key="feedback_component_id",
+            target_ref_value=component.component_id,
+        )
+    if (
+        inspection.dom.page_state_region_count != 1
+        or inspection.dom.page_state_message_count != 1
+    ):
+        raise _RenderBindingError("dom_global_feedback_target_missing")
+    return _FeedbackTarget(
+        target_id="page-state",
+        selector="#page-state .state-message",
+        target_ref_key="feedback_target_id",
+        target_ref_value="page-state.state-message",
+    )
 
 
-def _find_path(initial_state_id: str, target_state_id: str, interactions: list[Any]) -> list[Any] | None:
-    queue: list[tuple[str, list[Any]]] = [(initial_state_id, [])]
-    visited = {initial_state_id}
+def _find_deterministic_path(
+    initial_state_id: str,
+    target_state_id: str,
+    interactions: list[Any],
+    *,
+    final_interaction_ids: set[str],
+) -> list[Any] | None:
+    queue: list[tuple[str, list[Any], frozenset[str]]] = [
+        (initial_state_id, [], frozenset())
+    ]
     while queue:
-        state_id, path = queue.pop(0)
-        if state_id == target_state_id:
-            return path
-        for interaction in sorted(interactions, key=lambda item: item.interaction_id):
-            if interaction.source_state_id == state_id and interaction.target_state_id not in visited:
-                visited.add(interaction.target_state_id)
-                queue.append((interaction.target_state_id, [*path, interaction]))
+        state_id, path, used_interaction_ids = queue.pop(0)
+        for interaction in interactions:
+            if interaction.source_state_id != state_id:
+                continue
+            if interaction.interaction_id in used_interaction_ids:
+                continue
+            next_path = [*path, interaction]
+            if (
+                interaction.target_state_id == target_state_id
+                and interaction.interaction_id in final_interaction_ids
+            ):
+                return next_path
+            queue.append(
+                (
+                    interaction.target_state_id,
+                    next_path,
+                    frozenset({*used_interaction_ids, interaction.interaction_id}),
+                )
+            )
     return None
+
+
+def _is_error_or_recovery_acceptance(check: Any, states_by_id: Mapping[str, Any]) -> bool:
+    state = states_by_id.get(check.state_id)
+    state_name = state.name.casefold() if state is not None else ""
+    check_id = check.check_id.casefold()
+    return (
+        state_name == "error"
+        or "error" in check_id
+        or "recovery" in check_id
+    )
 
 
 def _blueprint(action: str, target: str, selector: str, expected: Mapping[str, str], source: str) -> tuple[str, str, str, tuple[tuple[str, str], ...], str]:
@@ -754,32 +829,57 @@ def _use_case_binding(criterion: AcceptanceCriterion, page_spec: PageSpec, inspe
     trace = trace_by_id.get(use_case_id)
     if trace is None:
         raise _PageSpecBindingError(f"missing_use_case_trace:{use_case_id}")
-    checks = sorted(
-        (item for item in page_spec.acceptance_checks if use_case_id in item.use_case_ids),
-        key=lambda item: item.check_id,
-    )
-    if not checks or checks[0].state_id not in states_by_id:
+    use_case_order = [item.use_case_id for item in page_spec.use_cases]
+    if use_case_id not in use_case_order:
+        raise _PageSpecBindingError(f"missing_use_case_order:{use_case_id}")
+    current_index = use_case_order.index(use_case_id)
+    allowed_interaction_ids: list[str] = []
+    for ordered_use_case_id in use_case_order[: current_index + 1]:
+        ordered_trace = trace_by_id.get(ordered_use_case_id)
+        if ordered_trace is None:
+            raise _PageSpecBindingError(f"missing_use_case_trace:{ordered_use_case_id}")
+        for interaction_id in ordered_trace.interaction_ids:
+            if interaction_id not in interactions_by_id:
+                raise _PageSpecBindingError(
+                    f"missing_or_unrelated_trace_interaction:{interaction_id}"
+                )
+            if interaction_id not in allowed_interaction_ids:
+                allowed_interaction_ids.append(interaction_id)
+    current_trace_interaction_ids = set(trace.interaction_ids)
+    allowed_interactions = [
+        interactions_by_id[interaction_id]
+        for interaction_id in allowed_interaction_ids
+    ]
+    checks = [
+        item for item in page_spec.acceptance_checks
+        if use_case_id in item.use_case_ids
+        and item.state_id in states_by_id
+        and not _is_error_or_recovery_acceptance(item, states_by_id)
+    ]
+    if not checks:
         raise _PageSpecBindingError(f"missing_use_case_acceptance_target:{use_case_id}")
-    initial_state = next((item for item in page_spec.states if item.name == "initial"), None)
-    if initial_state is None:
-        raise _PageSpecBindingError("missing_initial_state")
-    acceptance = checks[0]
-    traced_interactions: list[Any] = []
-    for interaction_id in trace.interaction_ids:
-        interaction = interactions_by_id.get(interaction_id)
-        if interaction is None or use_case_id not in interaction.use_case_ids:
-            raise _PageSpecBindingError(
-                f"missing_or_unrelated_trace_interaction:{interaction_id}"
-            )
-        traced_interactions.append(interaction)
-    path = _find_path(initial_state.state_id, acceptance.state_id, traced_interactions)
+    initial_state = next(
+        (item for item in page_spec.states if item.name == "initial"),
+        page_spec.states[0],
+    )
+    candidates: list[tuple[Any, list[Any]]] = []
+    for check in checks:
+        path = _find_deterministic_path(
+            initial_state.state_id,
+            check.state_id,
+            allowed_interactions,
+            final_interaction_ids=current_trace_interaction_ids,
+        )
+        if path is not None:
+            candidates.append((check, path))
+    if not candidates:
+        raise _PageSpecBindingError(f"unreachable_use_case_acceptance_target:{use_case_id}")
+    if len(candidates) > 1:
+        raise _PageSpecBindingError(f"ambiguous_use_case_acceptance_target:{use_case_id}")
+    acceptance, path = candidates[0]
     if not path or not trace.section_ids or not trace.component_ids:
         raise _PageSpecBindingError(f"incomplete_use_case_target:{use_case_id}")
     final_interaction = path[-1]
-    if final_interaction.user_feedback != expected_outcome:
-        raise _PageSpecBindingError(
-            f"use_case_expected_outcome_mismatch:{use_case_id}"
-        )
     for section_id in trace.section_ids:
         if error := _section_dom_error(section_id, use_case_id, inspection):
             raise _RenderBindingError(error)
@@ -789,7 +889,7 @@ def _use_case_binding(criterion: AcceptanceCriterion, page_spec: PageSpec, inspe
             raise _PageSpecBindingError(f"missing_trace_component:{component_id}")
         if error := _component_dom_error(component, inspection):
             raise _RenderBindingError(error)
-    feedback_component = _feedback_target_for_trigger(
+    feedback_target = _feedback_target_for_trigger(
         final_interaction.trigger_component_id,
         components_by_id,
         inspection,
@@ -808,7 +908,7 @@ def _use_case_binding(criterion: AcceptanceCriterion, page_spec: PageSpec, inspe
     refs: dict[str, str] = {
         "acceptance_check_id": acceptance.check_id,
         "acceptance_state_id": acceptance.state_id,
-        "feedback_component_id": feedback_component.component_id,
+        feedback_target.target_ref_key: feedback_target.target_ref_value,
         "use_case_id": use_case_id,
     }
     refs.update({f"section_id:{index}": value for index, value in enumerate(sorted(trace.section_ids))})
@@ -863,9 +963,8 @@ def _use_case_binding(criterion: AcceptanceCriterion, page_spec: PageSpec, inspe
         )
     blueprints.append(
         _blueprint(
-            "assert_feedback", feedback_component.component_id,
-            _attribute_selector("data-component-id", feedback_component.component_id)
-            + " .component-feedback",
+            "assert_feedback", feedback_target.target_id,
+            feedback_target.selector,
             {"feedback": expected_outcome},
             "acceptance_plan.criteria.expected_payload.expected_outcome",
         )
@@ -955,24 +1054,18 @@ def _recovery_binding(criterion: AcceptanceCriterion, page_spec: PageSpec, inspe
         "recovery_target_state_id": target_state.state_id,
         "validation_signal_id": criterion.source_id,
     }
-    entry_feedback_selector = (
-        _attribute_selector("data-component-id", entry_feedback.component_id)
-        + " .component-feedback"
-    )
-    recovery_feedback_selector = (
-        _attribute_selector("data-component-id", recovery_feedback.component_id)
-        + " .component-feedback"
-    )
+    entry_feedback_selector = entry_feedback.selector
+    recovery_feedback_selector = recovery_feedback.selector
     blueprints = [
         _blueprint("load_page", page_spec.page_id, "body" + _attribute_selector("data-page-id", page_spec.page_id), {"page_id": page_spec.page_id}, "renderer.index_html.body"),
         _blueprint("assert_element_exists", error_trigger.component_id, _attribute_selector("data-component-id", error_trigger.component_id), {"stable_id": error_trigger.component_id}, "page_spec.interactions.error_entry.trigger_component_id"),
         _blueprint("trigger_interaction", entry.interaction_id, _interaction_selector(entry, inspection), {"action": entry.action, "source_state_id": entry.source_state_id, "target_state_id": entry.target_state_id}, "page_spec.interactions.error_entry"),
         _blueprint("assert_state", error_state.state_id, "#page-state" + _attribute_selector("data-state-id", error_state.state_id), {"state_id": error_state.state_id}, "page_spec.states.error"),
-        _blueprint("assert_feedback", entry_feedback.component_id, entry_feedback_selector, {"feedback": entry.user_feedback}, "page_spec.interactions.error_entry.user_feedback"),
+        _blueprint("assert_feedback", entry_feedback.target_id, entry_feedback_selector, {"feedback": entry.user_feedback}, "page_spec.interactions.error_entry.user_feedback"),
         _blueprint("assert_element_exists", recovery_trigger.component_id, _attribute_selector("data-component-id", recovery_trigger.component_id), {"stable_id": recovery_trigger.component_id}, "page_spec.interactions.recovery.trigger_component_id"),
         _blueprint("trigger_interaction", recovery.interaction_id, _interaction_selector(recovery, inspection), {"action": recovery.action, "source_state_id": recovery.source_state_id, "target_state_id": recovery.target_state_id}, "page_spec.interactions.recovery"),
         _blueprint("assert_state", target_state.state_id, "#page-state" + _attribute_selector("data-state-id", target_state.state_id), {"state_id": target_state.state_id}, "page_spec.states.recovery_target"),
-        _blueprint("assert_feedback", recovery_feedback.component_id, recovery_feedback_selector, {"feedback": recovery.user_feedback}, "page_spec.interactions.recovery.user_feedback"),
+        _blueprint("assert_feedback", recovery_feedback.target_id, recovery_feedback_selector, {"feedback": recovery.user_feedback}, "page_spec.interactions.recovery.user_feedback"),
     ]
     return refs, blueprints
 

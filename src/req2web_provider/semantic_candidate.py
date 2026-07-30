@@ -308,7 +308,11 @@ class ModelSemanticCandidate:
             _require_references(state.visible_component_stable_ids, set(component_ids), required=False)
         for interaction in self.interactions:
             _require_references((interaction.trigger_component_stable_id,), set(component_ids))
-            _require_references((interaction.source_state_stable_id, interaction.target_state_stable_id), set(state_ids))
+            # Source and target are independent role references.  A same-state
+            # transition is valid for actions such as filtering or refreshing;
+            # duplicate-identity checks still apply to actual identity lists.
+            _require_references((interaction.source_state_stable_id,), set(state_ids))
+            _require_references((interaction.target_state_stable_id,), set(state_ids))
             _require_text(interaction.action); _require_text(interaction.user_feedback)
             _require_references(interaction.use_case_ids, set(mapping_by_uc))
         constraint_descriptions = [_require_text(constraint.description) for constraint in self.constraints]

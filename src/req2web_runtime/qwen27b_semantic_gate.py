@@ -14,7 +14,7 @@ from typing import Any, Mapping
 from req2web_provider.semantic_candidate import ModelSemanticCandidate
 
 
-QWEN27B_SEMANTIC_GATE_SCHEMA = "req2web.runtime.qwen27b_semantic_coverage_gate.v1"
+QWEN27B_SEMANTIC_GATE_SCHEMA = "req2web.runtime.qwen27b_semantic_coverage_gate.v2"
 _CASE_IDS = ("path3-commerce-checkout", "path3-media-analysis")
 _REQUIRED_UCS = {
     "path3-commerce-checkout": ("UC-01", "UC-02", "UC-03"),
@@ -31,6 +31,7 @@ _COVERAGE_KEYS = {
     "acceptance_check_ids",
     "concept_groups",
     "exclusive_interaction_ids",
+    "independent_contribution_kinds",
     "trigger_visibility",
     "acceptance_visibility",
     "failure_codes",
@@ -137,6 +138,7 @@ class Qwen27bSemanticCoverageReport:
                 "mapped_interaction_ids",
                 "acceptance_check_ids",
                 "exclusive_interaction_ids",
+                "independent_contribution_kinds",
                 "failure_codes",
             ):
                 values = row[key]
@@ -159,6 +161,23 @@ class Qwen27bSemanticCoverageReport:
                     or type(group["covered"]) is not bool
                 ):
                     raise Qwen27bSemanticGateError("semantic_gate_report_coverage_invalid")
+            contribution_kinds = row["independent_contribution_kinds"]
+            if (
+                contribution_kinds != sorted(contribution_kinds)
+                or any(
+                    value not in {
+                        "section",
+                        "component",
+                        "interaction",
+                        "acceptance_check",
+                        "acceptance_state",
+                    }
+                    for value in contribution_kinds
+                )
+            ):
+                raise Qwen27bSemanticGateError(
+                    "semantic_gate_report_coverage_invalid"
+                )
             if row["trigger_visibility"] not in {"passed", "failed"}:
                 raise Qwen27bSemanticGateError("semantic_gate_report_coverage_invalid")
             if row["acceptance_visibility"] not in {"passed", "failed"}:
@@ -322,10 +341,21 @@ def _evaluate_qwen27b_semantic_coverage(
     if generic_gate_status == "failed":
         failures.append("generic_gate_not_passed")
 
-    all_interaction_sets = {uc: set(mappings[uc].interaction_stable_ids) if uc in mappings else set() for uc in _REQUIRED_UCS[case_id]}
-    signatures = [tuple(sorted(all_interaction_sets[uc])) for uc in _REQUIRED_UCS[case_id]]
-    if len(set(signatures)) != len(signatures):
-        failures.append("use_case_mapping_signatures_identical")
+    dimension_sets: dict[str, dict[str, set[str]]] = {}
+    for use_case_id in _REQUIRED_UCS[case_id]:
+        mapping = mappings.get(use_case_id)
+        acceptance = [
+            item
+            for item in candidate.acceptance_checks
+            if use_case_id in item.use_case_ids
+        ]
+        dimension_sets[use_case_id] = {
+            "section": set(mapping.section_stable_ids) if mapping else set(),
+            "component": set(mapping.component_stable_ids) if mapping else set(),
+            "interaction": set(mapping.interaction_stable_ids) if mapping else set(),
+            "acceptance_check": {item.stable_id for item in acceptance},
+            "acceptance_state": {item.state_stable_id for item in acceptance},
+        }
 
     for use_case_id, requirements in _RULES[case_id].items():
         scoped, text = _scope(candidate, use_case_id)
@@ -352,10 +382,24 @@ def _evaluate_qwen27b_semantic_coverage(
             row_failures.append("trigger_not_visible_in_source_state")
         if any(not visible_by_state.get(item.state_stable_id, set()) for item in acceptance):
             row_failures.append("acceptance_state_visibility_empty")
-        other_sets = [all_interaction_sets[other] for other in _REQUIRED_UCS[case_id] if other != use_case_id]
-        exclusive = set(mapping.interaction_stable_ids) - set.intersection(*other_sets) if mapping is not None else set()
-        if not exclusive:
-            row_failures.append("exclusive_interaction_missing")
+
+        other_use_cases = [
+            other for other in _REQUIRED_UCS[case_id] if other != use_case_id
+        ]
+        current_sets = dimension_sets[use_case_id]
+        independent_kinds = sorted(
+            kind
+            for kind, values in current_sets.items()
+            if values
+            - set().union(
+                *(dimension_sets[other][kind] for other in other_use_cases)
+            )
+        )
+        exclusive = current_sets["interaction"] - set().union(
+            *(dimension_sets[other]["interaction"] for other in other_use_cases)
+        )
+        if not independent_kinds:
+            row_failures.append("independent_semantic_contribution_missing")
         failures.extend(f"{use_case_id.lower().replace('-', '_')}_{code}" for code in row_failures)
         coverage.append({
             "use_case_id": use_case_id,
@@ -364,6 +408,7 @@ def _evaluate_qwen27b_semantic_coverage(
             "acceptance_check_ids": [item.stable_id for item in acceptance],
             "concept_groups": [{"terms": list(group), "covered": result} for group, result in zip(concept_groups, group_results)],
             "exclusive_interaction_ids": sorted(exclusive),
+            "independent_contribution_kinds": independent_kinds,
             "trigger_visibility": "passed" if "trigger_not_visible_in_source_state" not in row_failures else "failed",
             "acceptance_visibility": "passed" if "acceptance_state_visibility_empty" not in row_failures else "failed",
             "failure_codes": row_failures,
