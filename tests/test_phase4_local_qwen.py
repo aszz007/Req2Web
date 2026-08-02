@@ -313,6 +313,27 @@ class Phase4LocalQwenTests(unittest.TestCase):
                 integrity_evidence=evidence_path,
             )
 
+    def test_model_inventory_excludes_only_huggingface_local_cache(self):
+        parent = Path.cwd() / ".p4-03-test-results" / f"cache-{len(self._test_roots)}"
+        parent.mkdir(parents=True, exist_ok=False)
+        self._test_roots.append(parent)
+        model_root, evidence_path = _write_fake_integrity(parent)
+        cache_file = model_root / ".cache" / "huggingface" / "CACHEDIR.TAG"
+        cache_file.parent.mkdir(parents=True)
+        cache_file.write_bytes(b"Signature: 8a477f597d28d172789f06886806bc55\n")
+        inventory = validate_model_inventory_metadata(
+            model_root=model_root,
+            integrity_evidence=evidence_path,
+        )
+        self.assertEqual(inventory["file_count"], 3)
+        self.assertEqual(inventory["excluded_local_cache_file_count"], 1)
+        (model_root / "unexpected.txt").write_bytes(b"not model evidence")
+        with self.assertRaises(Phase4LocalQwenContractError):
+            validate_model_inventory_metadata(
+                model_root=model_root,
+                integrity_evidence=evidence_path,
+            )
+
     def test_prompt_and_backend_include_exact_actual_input(self):
         _, policies, profile, _, _ = _binding_profile_manifest()
         actual_input = b'{"actual":"node-input"}'

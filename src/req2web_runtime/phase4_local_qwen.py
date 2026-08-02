@@ -113,6 +113,7 @@ _ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$")
 _SHA_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
 _HEX_RE = re.compile(r"^[0-9a-f]{64}$")
 _RELATIVE_RE = re.compile(r"^[A-Za-z0-9.][A-Za-z0-9_./-]{0,254}$")
+_HF_LOCAL_CACHE_PREFIX = ".cache/huggingface/"
 _REAL_RUNTIME_CAPABILITY = object()
 _FIXTURE_BACKEND_CAPABILITY = object()
 
@@ -2473,11 +2474,16 @@ def validate_model_inventory_metadata(
         raise Phase4LocalQwenContractError("integrity evidence paths are not unique")
 
     live_paths: list[Path] = []
+    local_cache_paths: list[str] = []
     for path in model_root.rglob("*"):
         if path.is_symlink():
             raise Phase4LocalQwenContractError("model inventory forbids symlinks")
         if path.is_file():
-            live_paths.append(path)
+            relative_path = path.relative_to(model_root).as_posix()
+            if relative_path.startswith(_HF_LOCAL_CACHE_PREFIX):
+                local_cache_paths.append(relative_path)
+            else:
+                live_paths.append(path)
     live_paths.sort(key=lambda path: path.relative_to(model_root).as_posix())
     if [path.relative_to(model_root).as_posix() for path in live_paths] != [
         str(row["relative_path"]) for row in expected_rows
@@ -2506,6 +2512,12 @@ def validate_model_inventory_metadata(
         "file_count": expected_count,
         "total_byte_length": total,
         "files": live_rows,
+        "excluded_local_cache_file_count": len(local_cache_paths),
+        "excluded_local_cache_paths_identity": _identity(
+            sorted(local_cache_paths),
+            revision=f"{P4_03_SCHEMA_PREFIX}.local-cache-paths.v1",
+            identity_kind="canonical_row_list",
+        ),
         "weight_bytes_hashed": True,
         "inventory_identity": _identity(
             live_rows,
