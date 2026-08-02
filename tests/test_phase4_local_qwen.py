@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import hashlib
 import copy
+import io
 import queue
 import shutil
 import subprocess
@@ -18,6 +19,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 import req2web_runtime.phase4_local_qwen as p4q
+from scripts import run_phase4_local_qwen_pilot as pilot_script
 
 from req2web_orchestration.phase4_graph import (
     Phase4GraphRuntime,
@@ -257,6 +259,408 @@ class Phase4LocalQwenTests(unittest.TestCase):
             assembler_guidance=guidance,
         )
         return runner, root, b_input
+
+    def _run_mocked_integrated_success(
+        self,
+        *,
+        teardown,
+        stderr_bytes,
+        stderr_persist_side_effect=None,
+    ):
+        b_input, policies, profile, binding, manifest = _binding_profile_manifest()
+        root = Path.cwd() / ".p4-03-test-results" / f"supervisor-{len(self._test_roots)}"
+        root.mkdir(parents=True, exist_ok=False)
+        self._test_roots.append(root)
+        lease = PilotExecutionLease.create(
+            pilot=binding, manifest=manifest, parent_pid=1
+        )
+
+        class FakeBackend:
+            generation_started = False
+
+            def close(self):
+                return copy.deepcopy(teardown)
+
+            @property
+            def stderr_bytes(self):
+                return stderr_bytes
+
+        backend = FakeBackend()
+
+        class FakeRuntime:
+            pass
+
+        runtime = FakeRuntime()
+        runtime.backend = backend
+        runtime.pilot = binding
+        runtime.policies = policies
+        runtime.profile = profile
+        runtime.manifest = manifest
+        runtime.b_input = b_input
+        runtime.load_receipt = object()
+        runtime.execution_lease = lease
+        runtime.runtime_start_claim = object()
+
+        class SuccessfulAttempt:
+            failure_code = None
+
+        class IntegratedSuccess:
+            status = "integrated_success"
+
+            @staticmethod
+            def to_dict():
+                return {"status": "integrated_success"}
+
+        class FakeRunner:
+            stopped = False
+            latest_result = None
+
+            @staticmethod
+            def run_node_local(*, node_id):
+                del node_id
+                return SuccessfulAttempt()
+
+            @staticmethod
+            def run_integrated():
+                return IntegratedSuccess()
+
+        captured_receipts = []
+        with patch.object(
+            pilot_script,
+            "load_prepared_local_qwen_pilot",
+            return_value=(binding, policies, profile, manifest),
+        ), patch.object(
+            pilot_script,
+            "acquire_pilot_execution_lease",
+            return_value=lease,
+        ), patch.object(
+            pilot_script,
+            "start_supervised_local_qwen_runtime",
+            return_value=runtime,
+        ), patch.object(
+            pilot_script,
+            "Phase4LocalQwenPilotRunner",
+            return_value=FakeRunner(),
+        ), patch.object(
+            pilot_script,
+            "persist_pilot_outcome",
+        ), patch.object(
+            pilot_script,
+            "persist_worker_stderr_artifact",
+            side_effect=stderr_persist_side_effect,
+        ) as stderr_persist, patch.object(
+            pilot_script,
+            "persist_supervisor_receipt",
+            side_effect=lambda **kwargs: captured_receipts.append(kwargs["receipt"]),
+        ):
+            return_code = pilot_script.main(
+                [
+                    "run",
+                    "--model-root",
+                    str(root / "model"),
+                    "--integrity-evidence",
+                    str(root / "integrity.json"),
+                    "--result-root",
+                    str(root),
+                ]
+            )
+        return return_code, captured_receipts[0], stderr_persist
+
+    def test_worker_stderr_artifact_round_trip_binds_exact_file_bytes(self):
+        root = Path.cwd() / ".p4-03-test-results" / "stderr-round-trip"
+        root.mkdir(parents=True, exist_ok=False)
+        self._test_roots.append(root)
+        raw = b"load traceback\x00\xff\n"
+        artifact = p4q.persist_worker_stderr_artifact(
+            result_root=root, stderr_bytes=raw
+        )
+        persisted = p4q.WorkerStderrArtifact.from_bytes(
+            (root / "worker_stderr.json").read_bytes()
+        )
+        self.assertEqual(persisted.stderr_bytes, raw)
+        self.assertEqual(
+            persisted.canonical_bytes(), (root / "worker_stderr.json").read_bytes()
+        )
+        self.assertEqual(artifact.identity(), persisted.identity())
+        self.assertEqual(
+            artifact.identity(),
+            p4q.make_canonical_identity(
+                persisted.to_dict(), revision=p4q.WORKER_STDERR_SCHEMA_VERSION
+            ),
+        )
+
+    def test_start_failure_carries_immutable_stderr_bytes(self):
+        class FakeProcess:
+            pid = 5252
+
+            def __init__(self):
+                self.exit_code = None
+
+            def poll(self):
+                return self.exit_code
+
+            def terminate(self):
+                self.exit_code = 17
+
+            def kill(self):
+                self.exit_code = 18
+
+            def wait(self, timeout=None):
+                del timeout
+                if self.exit_code is None:
+                    self.exit_code = 0
+                return self.exit_code
+
+        raw = b"Traceback\nload failed\n"
+        capture_state = p4q._WorkerStderrCapture()
+        capture_state.append(raw[:10])
+        capture_state.append(raw[10:])
+        capture_state.complete()
+
+        class JoinedThread:
+            def join(self, timeout=None):
+                del timeout
+
+            @staticmethod
+            def is_alive():
+                return False
+
+        with self.assertRaises(p4q.SupervisedWorkerStartFailure) as captured:
+            p4q._raise_worker_start_failure(
+                process=FakeProcess(),
+                stderr_capture=capture_state,
+                stderr_thread=JoinedThread(),
+                message="synthetic load failure",
+            )
+        self.assertEqual(captured.exception.stderr_bytes, raw)
+        self.assertEqual(
+            captured.exception.teardown_facts["stderr_identity"],
+            p4q.WorkerStderrArtifact.create(stderr_bytes=raw).identity(),
+        )
+
+    def test_incomplete_stderr_capture_never_claims_an_artifact_identity(self):
+        class ExitedProcess:
+            pid = 5262
+
+            @staticmethod
+            def poll():
+                return 2
+
+        class AliveThread:
+            def join(self, timeout=None):
+                del timeout
+
+            @staticmethod
+            def is_alive():
+                return True
+
+        delayed = p4q._WorkerStderrCapture()
+        delayed.append(b"partial delayed stderr")
+        with self.assertRaises(p4q.SupervisedWorkerStartFailure) as alive_failure:
+            p4q._raise_worker_start_failure(
+                process=ExitedProcess(),
+                stderr_capture=delayed,
+                stderr_thread=AliveThread(),
+                message="synthetic delayed stderr",
+            )
+        self.assertIsNone(alive_failure.exception.stderr_bytes)
+        self.assertFalse(
+            alive_failure.exception.teardown_facts["stderr_capture_completed"]
+        )
+        self.assertIsNone(alive_failure.exception.teardown_facts["stderr_identity"])
+
+        class FailingBuffer:
+            def __init__(self):
+                self.calls = 0
+
+            def read(self, _):
+                self.calls += 1
+                if self.calls == 1:
+                    return b"partial before read failure"
+                raise OSError("synthetic stderr read failure")
+
+        class FailingStream:
+            def __init__(self):
+                self.buffer = FailingBuffer()
+
+        failed = p4q._WorkerStderrCapture()
+        p4q._worker_stderr_reader(FailingStream(), failed)
+        snapshot = failed.snapshot(
+            stderr_thread=None,
+            worker_exit_verified=True,
+        )
+        self.assertFalse(snapshot["completed"])
+        self.assertIn("synthetic stderr read failure", snapshot["error"])
+        self.assertIsNone(snapshot["stderr_bytes"])
+
+    def test_worker_load_exception_writes_traceback_without_changing_stdout_schema(self):
+        class FakeStream:
+            def __init__(self, raw=b""):
+                self.buffer = io.BytesIO(raw)
+
+        class FakeBackend:
+            def __init__(self, **_):
+                pass
+
+            def load(self):
+                raise RuntimeError("synthetic load traceback")
+
+        old_stdin, old_stdout, old_stderr = sys.stdin, sys.stdout, sys.stderr
+        try:
+            sys.stdin = FakeStream(
+                p4q._canonical_bytes(
+                    {
+                        "protocol": "req2web.phase4.p4_03.worker-ipc.v1",
+                        "kind": "load",
+                        "profile_b64": "e30=",
+                    }
+                )
+                + b"\n"
+            )
+            stdout = FakeStream()
+            stderr = io.StringIO()
+            sys.stdout = stdout
+            sys.stderr = stderr
+            with patch(
+                "req2web_runtime.phase4_local_qwen._LazyTransformersQwenBackend",
+                FakeBackend,
+            ), patch.object(
+                p4q.LocalQwenProfile,
+                "from_bytes",
+                return_value=object(),
+            ):
+                self.assertEqual(
+                    p4q._run_local_qwen_worker_protocol(model_root=Path("C:/model")),
+                    2,
+                )
+            response = p4q._strict_json(stdout.buffer.getvalue().rstrip(b"\r\n"))
+            self.assertEqual(set(response), {"protocol", "kind"})
+            self.assertEqual(response["kind"], "load_error")
+            self.assertIn("Traceback", stderr.getvalue())
+            self.assertIn("synthetic load traceback", stderr.getvalue())
+        finally:
+            sys.stdin, sys.stdout, sys.stderr = old_stdin, old_stdout, old_stderr
+
+    def test_stderr_artifact_persistence_failure_keeps_receipt_identity_absent(self):
+        b_input, policies, profile, binding, manifest = _binding_profile_manifest()
+        root = Path.cwd() / ".p4-03-test-results" / "stderr-persist-failure"
+        root.mkdir(parents=True, exist_ok=False)
+        self._test_roots.append(root)
+        lease = PilotExecutionLease.create(
+            pilot=binding, manifest=manifest, parent_pid=1
+        )
+        teardown = {
+            "worker_id": "worker-stderr-failure",
+            "worker_pid": 5353,
+            "worker_exit_code": 2,
+            "worker_exit_verified": True,
+            "graceful_shutdown_requested": False,
+            "terminate_sent": True,
+            "kill_sent": False,
+            "terminal_status": "load_failed",
+            "stderr_capture_completed": True,
+            "stderr_capture_error": None,
+            "stderr_thread_joined": True,
+            "stderr_identity": p4q.WorkerStderrArtifact.create(
+                stderr_bytes=b"traceback"
+            ).identity(),
+        }
+        captured_receipts = []
+        with patch.object(
+            pilot_script,
+            "load_prepared_local_qwen_pilot",
+            return_value=(binding, policies, profile, manifest),
+        ), patch.object(
+            pilot_script,
+            "acquire_pilot_execution_lease",
+            return_value=lease,
+        ), patch.object(
+            pilot_script,
+            "start_supervised_local_qwen_runtime",
+            side_effect=p4q.SupervisedWorkerStartFailure(
+                "synthetic startup failure",
+                teardown,
+                stderr_bytes=b"traceback",
+            ),
+        ), patch.object(
+            pilot_script,
+            "persist_worker_stderr_artifact",
+            side_effect=OSError("synthetic stderr artifact failure"),
+        ), patch.object(
+            pilot_script,
+            "persist_supervisor_receipt",
+            side_effect=lambda **kwargs: captured_receipts.append(kwargs["receipt"]),
+        ):
+            self.assertEqual(
+                pilot_script.main(
+                    [
+                        "run",
+                        "--model-root",
+                        str(root / "model"),
+                        "--integrity-evidence",
+                        str(root / "integrity.json"),
+                        "--result-root",
+                        str(root),
+                    ]
+                ),
+                2,
+            )
+        self.assertEqual(len(captured_receipts), 1)
+        receipt = captured_receipts[0]
+        self.assertEqual(receipt.terminal_status, "evidence_persistence_failed")
+        self.assertIsNone(receipt.stderr_identity)
+
+    def test_integrated_success_is_not_returned_when_stderr_persistence_fails(self):
+        raw = b"complete stderr"
+        teardown = {
+            "worker_id": "worker-normal-close",
+            "worker_pid": 5454,
+            "worker_exit_code": 0,
+            "worker_exit_verified": True,
+            "graceful_shutdown_requested": True,
+            "terminate_sent": False,
+            "kill_sent": False,
+            "terminal_status": "normal_completed",
+            "stderr_capture_completed": True,
+            "stderr_capture_error": None,
+            "stderr_thread_joined": True,
+            "stderr_identity": p4q.WorkerStderrArtifact.create(
+                stderr_bytes=raw
+            ).identity(),
+        }
+        code, receipt, stderr_persist = self._run_mocked_integrated_success(
+            teardown=teardown,
+            stderr_bytes=raw,
+            stderr_persist_side_effect=OSError("synthetic stderr persistence failure"),
+        )
+        self.assertEqual(code, 2)
+        self.assertEqual(receipt.terminal_status, "evidence_persistence_failed")
+        self.assertIsNone(receipt.stderr_identity)
+        stderr_persist.assert_called_once()
+
+    def test_unverified_worker_exit_outranks_incomplete_stderr_failure(self):
+        teardown = {
+            "worker_id": "worker-unverified-close",
+            "worker_pid": 5555,
+            "worker_exit_code": None,
+            "worker_exit_verified": False,
+            "graceful_shutdown_requested": True,
+            "terminate_sent": True,
+            "kill_sent": True,
+            "terminal_status": "worker_teardown_unverified",
+            "stderr_capture_completed": False,
+            "stderr_capture_error": "worker_exit_unverified",
+            "stderr_thread_joined": False,
+            "stderr_identity": None,
+        }
+        code, receipt, stderr_persist = self._run_mocked_integrated_success(
+            teardown=teardown,
+            stderr_bytes=None,
+        )
+        self.assertEqual(code, 2)
+        self.assertEqual(receipt.terminal_status, "worker_teardown_unverified")
+        self.assertIsNone(receipt.stderr_identity)
+        stderr_persist.assert_not_called()
 
     def test_exact_records_reject_bool_and_direct_constructor(self):
         _, _, _, binding, _ = _binding_profile_manifest()
@@ -853,10 +1257,13 @@ class Phase4LocalQwenTests(unittest.TestCase):
             stderr=subprocess.PIPE,
             text=True,
         )
+        for stream in (process.stdin, process.stdout, process.stderr):
+            if stream is not None:
+                self.addCleanup(stream.close)
         backend = SupervisedLocalQwenBackend(
             process=process,
             messages=queue.Queue(),
-            stderr_chunks=[],
+            stderr_capture=p4q._WorkerStderrCapture(),
             profile=profile,
             worker_id="worker-synthetic-timeout",
             loaded_facts={"synthetic": True},
@@ -927,7 +1334,7 @@ class Phase4LocalQwenTests(unittest.TestCase):
         backend = SupervisedLocalQwenBackend(
             process=BrokenProcess(),
             messages=queue.Queue(),
-            stderr_chunks=[],
+            stderr_capture=p4q._WorkerStderrCapture(),
             profile=profile,
             worker_id="worker-unverified-exit",
             loaded_facts={"synthetic": True},

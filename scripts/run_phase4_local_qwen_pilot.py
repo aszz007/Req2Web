@@ -23,6 +23,7 @@ from req2web_runtime.phase4_local_qwen import (
     make_canonical_identity,
     persist_pilot_outcome,
     persist_supervisor_receipt,
+    persist_worker_stderr_artifact,
     prepare_local_qwen_pilot,
     probe_local_gpu_facts,
     start_supervised_local_qwen_runtime,
@@ -156,6 +157,7 @@ def main(argv: list[str] | None = None) -> int:
         evidence_persistence_failed = False
         outcome_persisted = False
         startup_teardown = None
+        startup_stderr_bytes = None
         try:
             load_attempted = True
             runtime = start_supervised_local_qwen_runtime(
@@ -211,6 +213,7 @@ def main(argv: list[str] | None = None) -> int:
             execution_failed = True
             if isinstance(exc, SupervisedWorkerStartFailure):
                 startup_teardown = exc.teardown_facts
+                startup_stderr_bytes = exc.stderr_bytes
                 if exc.failure_code == "evidence_persistence_failed":
                     evidence_persistence_failed = True
             if runner is not None and outcome is None:
@@ -237,10 +240,33 @@ def main(argv: list[str] | None = None) -> int:
                     "terminate_sent": False,
                     "kill_sent": False,
                     "terminal_status": "load_failed",
+                    "stderr_capture_completed": False,
+                    "stderr_capture_error": "worker_not_started",
+                    "stderr_thread_joined": False,
                     "stderr_identity": None,
                 }
             else:
                 teardown = backend.close()
+            stderr_bytes = (
+                startup_stderr_bytes
+                if backend is None
+                else backend.stderr_bytes
+            )
+            stderr_identity = None
+            if (
+                teardown.get("stderr_capture_completed") is not True
+                or stderr_bytes is None
+            ):
+                evidence_persistence_failed = True
+            else:
+                try:
+                    stderr_artifact = persist_worker_stderr_artifact(
+                        result_root=args.result_root,
+                        stderr_bytes=stderr_bytes,
+                    )
+                    stderr_identity = stderr_artifact.identity()
+                except Exception:
+                    evidence_persistence_failed = True
             latest_result = None if runner is None else runner.latest_result
             terminal_status = str(teardown["terminal_status"])
             if teardown["worker_exit_verified"] is not True:
@@ -298,12 +324,16 @@ def main(argv: list[str] | None = None) -> int:
                         outcome.to_dict(), revision=OUTCOME_SCHEMA_VERSION
                     )
                 ),
-                stderr_identity=teardown["stderr_identity"],
+                stderr_identity=stderr_identity,
                 model_action=load_attempted,
             )
             persist_supervisor_receipt(
                 result_root=args.result_root,
                 receipt=receipt,
+            )
+        if terminal_status not in {"normal_completed", "pilot_stopped"}:
+            raise Phase4LocalQwenContractError(
+                f"pilot supervisor terminated as {terminal_status}"
             )
         if outcome is None:
             raise Phase4LocalQwenContractError("pilot ended without an outcome")

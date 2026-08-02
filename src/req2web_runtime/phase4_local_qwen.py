@@ -32,6 +32,7 @@ import subprocess
 import sys
 import tempfile
 import threading
+import traceback
 import uuid
 from pathlib import Path
 from typing import Any, Callable, ClassVar, Iterable, Mapping, NamedTuple, Protocol, Sequence, TypedDict
@@ -52,6 +53,7 @@ MANIFEST_SCHEMA_VERSION = f"{P4_03_SCHEMA_PREFIX}.pre_call_manifest.v1"
 EXECUTION_LEASE_SCHEMA_VERSION = f"{P4_03_SCHEMA_PREFIX}.execution_lease.v1"
 RUNTIME_START_CLAIM_SCHEMA_VERSION = f"{P4_03_SCHEMA_PREFIX}.runtime_start_claim.v1"
 SUPERVISOR_RECEIPT_SCHEMA_VERSION = f"{P4_03_SCHEMA_PREFIX}.supervisor_receipt.v1"
+WORKER_STDERR_SCHEMA_VERSION = f"{P4_03_SCHEMA_PREFIX}.worker_stderr.v1"
 
 QWEN_MODEL_ID = "Qwen/Qwen3.5-9B"
 QWEN_MODEL_REVISION = "c202236235762e1c871ad0ccb60c8ee5ba337b9a"
@@ -284,8 +286,13 @@ def _b64(raw: bytes, name: str) -> str:
     return encoded
 
 
-def _decode_b64(value: object, name: str) -> bytes:
-    text = _text(value, name)
+def _decode_b64(value: object, name: str, *, allow_empty: bool = False) -> bytes:
+    if allow_empty:
+        if type(value) is not str or value != value.strip():
+            raise Phase4LocalQwenContractError(f"{name} must be a trimmed string")
+        text = value
+    else:
+        text = _text(value, name)
     try:
         raw = base64.b64decode(text.encode("ascii"), validate=True)
     except (ValueError, UnicodeEncodeError) as exc:
@@ -1247,6 +1254,44 @@ class LocalQwenLoadReceipt(_CanonicalRecord):
             != _identity(profile.to_dict(), revision=LOCAL_QWEN_PROFILE_SCHEMA_VERSION)
         ):
             raise Phase4LocalQwenContractError("load receipt binding drifted")
+
+
+class WorkerStderrArtifact(_CanonicalRecord):
+    """Canonical, replayable bytes captured from the supervised worker stderr."""
+
+    KEYS = ("schema_version", "stderr_b64")
+    SCHEMA_VERSION = WORKER_STDERR_SCHEMA_VERSION
+
+    @classmethod
+    def create(cls, *, stderr_bytes: bytes) -> "WorkerStderrArtifact":
+        if type(stderr_bytes) is not bytes:
+            raise Phase4LocalQwenContractError("worker stderr must be bytes")
+        return cls._from_payload(
+            {
+                "schema_version": cls.SCHEMA_VERSION,
+                "stderr_b64": _b64(stderr_bytes, "WorkerStderrArtifact.stderr_bytes"),
+            }
+        )  # type: ignore[return-value]
+
+    @classmethod
+    def _validate_payload(cls, data: Mapping[str, object]) -> None:
+        _common_record(data, schema=cls.SCHEMA_VERSION, name="WorkerStderrArtifact")
+        _decode_b64(
+            data["stderr_b64"],
+            "WorkerStderrArtifact.stderr_b64",
+            allow_empty=True,
+        )
+
+    @property
+    def stderr_bytes(self) -> bytes:
+        return _decode_b64(
+            self.to_dict()["stderr_b64"],
+            "WorkerStderrArtifact.stderr_b64",
+            allow_empty=True,
+        )
+
+    def identity(self) -> dict[str, object]:
+        return _identity(self.to_dict(), revision=self.SCHEMA_VERSION)
 
 
 def _action_record_root(data: Mapping[str, object]) -> dict[str, object]:
@@ -2946,6 +2991,16 @@ def persist_local_qwen_load_receipt(
     )
 
 
+def persist_worker_stderr_artifact(
+    *, result_root: Path, stderr_bytes: bytes
+) -> WorkerStderrArtifact:
+    """Persist the exact worker stderr once and return its file-bound identity."""
+
+    artifact = WorkerStderrArtifact.create(stderr_bytes=stderr_bytes)
+    _write_once(result_root, "worker_stderr.json", artifact.canonical_bytes())
+    return artifact
+
+
 class QwenBackend(Protocol):
     """Explicit backend seam; tests provide a fake, real code stays lazy."""
 
@@ -3216,6 +3271,74 @@ class SupervisedWorkerFailure(Phase4LocalQwenContractError):
         self.failure_code = failure_code
 
 
+class _WorkerStderrCapture:
+    """Thread-safe stderr bytes plus explicit reader completion/error state."""
+
+    def __init__(self) -> None:
+        self._chunks: list[bytes] = []
+        self._completed = False
+        self._error: str | None = None
+        self._lock = threading.Lock()
+
+    def append(self, raw: bytes) -> None:
+        if type(raw) is not bytes:
+            raise Phase4LocalQwenContractError("worker stderr chunk must be bytes")
+        with self._lock:
+            if self._completed or self._error is not None:
+                raise Phase4LocalQwenContractError("worker stderr capture is terminal")
+            self._chunks.append(raw)
+
+    def complete(self) -> None:
+        with self._lock:
+            if self._error is None:
+                self._completed = True
+
+    def fail(self, exc: BaseException) -> None:
+        with self._lock:
+            self._completed = False
+            self._error = f"{type(exc).__name__}: {exc}"
+
+    def snapshot(
+        self,
+        *,
+        stderr_thread: threading.Thread | None,
+        worker_exit_verified: bool,
+    ) -> dict[str, object]:
+        thread_joined = False
+        join_error: str | None = None
+        if stderr_thread is not None:
+            try:
+                stderr_thread.join(timeout=10)
+                thread_joined = not stderr_thread.is_alive()
+            except (RuntimeError, OSError) as exc:
+                join_error = f"{type(exc).__name__}: {exc}"
+        with self._lock:
+            reader_completed = self._completed
+            reader_error = self._error
+            raw = b"".join(self._chunks)
+        capture_error = reader_error or join_error
+        if capture_error is None and not worker_exit_verified:
+            capture_error = "worker_exit_unverified"
+        if capture_error is None and not thread_joined:
+            capture_error = "stderr_reader_not_joined"
+        if capture_error is None and not reader_completed:
+            capture_error = "stderr_reader_not_completed"
+        completed = (
+            worker_exit_verified
+            and thread_joined
+            and reader_completed
+            and capture_error is None
+        )
+        return {
+            "completed": completed,
+            "reader_completed": reader_completed,
+            "thread_joined": thread_joined,
+            "error": capture_error,
+            "byte_length_observed": len(raw),
+            "stderr_bytes": raw if completed else None,
+        }
+
+
 class SupervisedWorkerStartFailure(Phase4LocalQwenContractError):
     """A load/start failure whose child-process teardown was verified."""
 
@@ -3224,11 +3347,21 @@ class SupervisedWorkerStartFailure(Phase4LocalQwenContractError):
         message: str,
         teardown_facts: Mapping[str, object],
         *,
+        stderr_bytes: bytes | None,
         failure_code: str = "load_failed",
     ) -> None:
         super().__init__(message)
         self.teardown_facts = copy.deepcopy(dict(teardown_facts))
+        if stderr_bytes is not None and type(stderr_bytes) is not bytes:
+            raise Phase4LocalQwenContractError(
+                "worker start failure stderr must be bytes or absent"
+            )
+        self._stderr_bytes = None if stderr_bytes is None else bytes(stderr_bytes)
         self.failure_code = failure_code
+
+    @property
+    def stderr_bytes(self) -> bytes | None:
+        return None if self._stderr_bytes is None else bytes(self._stderr_bytes)
 
 
 class SupervisedLocalQwenBackend:
@@ -3239,11 +3372,12 @@ class SupervisedLocalQwenBackend:
         *,
         process: subprocess.Popen[str],
         messages: "queue.Queue[dict[str, object]]",
-        stderr_chunks: list[bytes],
+        stderr_capture: _WorkerStderrCapture,
         profile: LocalQwenProfile,
         worker_id: str,
         loaded_facts: Mapping[str, object],
         capability: object,
+        stderr_thread: threading.Thread | None = None,
     ) -> None:
         if capability is not _REAL_RUNTIME_CAPABILITY:
             raise Phase4LocalQwenContractError("real worker capability is invalid")
@@ -3252,7 +3386,8 @@ class SupervisedLocalQwenBackend:
             raise Phase4LocalQwenContractError("model worker process is invalid")
         self._process = process
         self._messages = messages
-        self._stderr_chunks = stderr_chunks
+        self._stderr_capture = stderr_capture
+        self._stderr_thread = stderr_thread
         self._profile = profile
         self._worker_id = _text(worker_id, "worker_id", pattern=_ID_RE)
         self._loaded_facts = copy.deepcopy(dict(loaded_facts))
@@ -3284,15 +3419,29 @@ class SupervisedLocalQwenBackend:
         return self._last_raw_captured
 
     @property
-    def stderr_bytes(self) -> bytes:
-        return b"".join(self._stderr_chunks)
+    def stderr_bytes(self) -> bytes | None:
+        snapshot = self._stderr_capture.snapshot(
+            stderr_thread=self._stderr_thread,
+            worker_exit_verified=bool(self._teardown["worker_exit_verified"]),
+        )
+        value = snapshot["stderr_bytes"]
+        return None if value is None else bytes(value)
 
     @property
     def teardown_facts(self) -> dict[str, object]:
         facts = copy.deepcopy(self._teardown)
-        facts["stderr_identity"] = _identity(
-            {"stderr_b64": _b64(self.stderr_bytes, "worker.stderr")},
-            revision=f"{P4_03_SCHEMA_PREFIX}.worker-stderr.v1",
+        capture = self._stderr_capture.snapshot(
+            stderr_thread=self._stderr_thread,
+            worker_exit_verified=bool(facts["worker_exit_verified"]),
+        )
+        facts["stderr_capture_completed"] = capture["completed"]
+        facts["stderr_capture_error"] = capture["error"]
+        facts["stderr_thread_joined"] = capture["thread_joined"]
+        stderr = capture["stderr_bytes"]
+        facts["stderr_identity"] = (
+            None
+            if stderr is None
+            else WorkerStderrArtifact.create(stderr_bytes=stderr).identity()
         )
         return facts
 
@@ -3486,21 +3635,24 @@ def _worker_stdout_reader(
         messages.put({"kind": "protocol_error"})
 
 
-def _worker_stderr_reader(stream: object, chunks: list[bytes]) -> None:
+def _worker_stderr_reader(stream: object, capture: _WorkerStderrCapture) -> None:
     try:
         while True:
             raw = stream.buffer.read(4096)  # type: ignore[union-attr]
             if not raw:
+                capture.complete()
                 return
-            chunks.append(raw)
-    except Exception:
+            capture.append(raw)
+    except Exception as exc:
+        capture.fail(exc)
         return
 
 
 def _raise_worker_start_failure(
     *,
     process: subprocess.Popen[str],
-    stderr_chunks: Sequence[bytes],
+    stderr_capture: _WorkerStderrCapture | None,
+    stderr_thread: threading.Thread | None = None,
     message: str,
     worker_id: str | None = None,
 ) -> None:
@@ -3526,7 +3678,16 @@ def _raise_worker_start_failure(
         exit_code = process.poll()
     except OSError:
         exit_code = None
-    stderr = b"".join(stderr_chunks)
+    capture = (
+        {"completed": False, "thread_joined": False,
+         "error": "stderr_reader_unavailable", "stderr_bytes": None}
+        if stderr_capture is None
+        else stderr_capture.snapshot(
+            stderr_thread=stderr_thread,
+            worker_exit_verified=exit_code is not None,
+        )
+    )
+    stderr = capture["stderr_bytes"]
     raise SupervisedWorkerStartFailure(
         message,
         {
@@ -3542,11 +3703,16 @@ def _raise_worker_start_failure(
                 if exit_code is not None
                 else "worker_teardown_unverified"
             ),
-            "stderr_identity": _identity(
-                {"stderr_b64": _b64(stderr, "worker.stderr")},
-                revision=f"{P4_03_SCHEMA_PREFIX}.worker-stderr.v1",
+            "stderr_capture_completed": capture["completed"],
+            "stderr_capture_error": capture["error"],
+            "stderr_thread_joined": capture["thread_joined"],
+            "stderr_identity": (
+                None
+                if stderr is None
+                else WorkerStderrArtifact.create(stderr_bytes=stderr).identity()
             ),
         },
+        stderr_bytes=None if stderr is None else bytes(stderr),
     )
 
 
@@ -3637,21 +3803,22 @@ def start_supervised_local_qwen_runtime(
     if process.stdout is None or process.stderr is None or process.stdin is None:
         _raise_worker_start_failure(
             process=process,
-            stderr_chunks=(),
+            stderr_capture=None,
             message="model worker IPC streams are unavailable",
         )
     messages: "queue.Queue[dict[str, object]]" = queue.Queue()
-    stderr_chunks: list[bytes] = []
+    stderr_capture = _WorkerStderrCapture()
     threading.Thread(
         target=_worker_stdout_reader,
         args=(process.stdout, messages),
         daemon=True,
     ).start()
-    threading.Thread(
+    stderr_thread = threading.Thread(
         target=_worker_stderr_reader,
-        args=(process.stderr, stderr_chunks),
+        args=(process.stderr, stderr_capture),
         daemon=True,
-    ).start()
+    )
+    stderr_thread.start()
     try:
         process.stdin.write(
             _canonical_bytes(
@@ -3670,19 +3837,22 @@ def start_supervised_local_qwen_runtime(
     except queue.Empty:
         _raise_worker_start_failure(
             process=process,
-            stderr_chunks=stderr_chunks,
+            stderr_capture=stderr_capture,
+            stderr_thread=stderr_thread,
             message="model worker load timed out",
         )
     except (BrokenPipeError, OSError):
         _raise_worker_start_failure(
             process=process,
-            stderr_chunks=stderr_chunks,
+            stderr_capture=stderr_capture,
+            stderr_thread=stderr_thread,
             message="model worker load IPC failed closed",
         )
     if loaded.get("kind") != "loaded":
         _raise_worker_start_failure(
             process=process,
-            stderr_chunks=stderr_chunks,
+            stderr_capture=stderr_capture,
+            stderr_thread=stderr_thread,
             message="model worker load failed closed",
         )
     data = _exact(
@@ -3699,7 +3869,8 @@ def start_supervised_local_qwen_runtime(
     ):
         _raise_worker_start_failure(
             process=process,
-            stderr_chunks=stderr_chunks,
+            stderr_capture=stderr_capture,
+            stderr_thread=stderr_thread,
             message="model worker load identity drifted",
             worker_id=(
                 data["worker_id"]
@@ -3711,7 +3882,8 @@ def start_supervised_local_qwen_runtime(
     backend = SupervisedLocalQwenBackend(
         process=process,
         messages=messages,
-        stderr_chunks=stderr_chunks,
+        stderr_capture=stderr_capture,
+        stderr_thread=stderr_thread,
         profile=profile,
         worker_id=_text(data["worker_id"], "worker_loaded.worker_id", pattern=_ID_RE),
         loaded_facts=data["loaded_facts"],
@@ -3733,6 +3905,7 @@ def start_supervised_local_qwen_runtime(
         raise SupervisedWorkerStartFailure(
             "model load receipt persistence failed closed",
             backend.teardown_facts,
+            stderr_bytes=backend.stderr_bytes,
             failure_code="evidence_persistence_failed",
         ) from exc
     return SupervisedLocalQwenRuntime(
@@ -3831,6 +4004,8 @@ def _run_local_qwen_worker_protocol(*, model_root: Path) -> int:
                     "raw_b64": _b64(raw, "worker.raw"),
                 }
             except Exception:
+                traceback.print_exc(file=sys.stderr)
+                sys.stderr.flush()
                 response = {
                     "protocol": f"{P4_03_SCHEMA_PREFIX}.worker-ipc.v1",
                     "kind": "generation_error",
@@ -3839,6 +4014,8 @@ def _run_local_qwen_worker_protocol(*, model_root: Path) -> int:
             sys.stdout.buffer.write(_canonical_bytes(response) + b"\n")
             sys.stdout.buffer.flush()
     except Exception:
+        traceback.print_exc(file=sys.stderr)
+        sys.stderr.flush()
         try:
             sys.stdout.buffer.write(
                 _canonical_bytes(
@@ -4652,6 +4829,7 @@ __all__ = [
     "OUTCOME_SCHEMA_VERSION",
     "RUNTIME_START_CLAIM_SCHEMA_VERSION",
     "SUPERVISOR_RECEIPT_SCHEMA_VERSION",
+    "WORKER_STDERR_SCHEMA_VERSION",
     "AttemptLedger",
     "AttemptPreCall",
     "AttemptResult",
@@ -4678,6 +4856,7 @@ __all__ = [
     "SupervisedWorkerStartFailure",
     "TRANSFORMERS_VERSION",
     "TORCH_VERSION",
+    "WorkerStderrArtifact",
     "acquire_pilot_execution_lease",
     "build_config_bytes",
     "build_prompt_v1",
@@ -4691,6 +4870,7 @@ __all__ = [
     "persist_pilot_outcome",
     "persist_local_qwen_load_receipt",
     "persist_supervisor_receipt",
+    "persist_worker_stderr_artifact",
     "prepare_local_qwen_pilot",
     "probe_local_gpu_facts",
     "start_supervised_local_qwen_runtime",
