@@ -1,0 +1,204 @@
+{
+  "receipt_version": "req2web.phase4.langgraph_acquisition.p4_02a.v1",
+  "work_item": "P4-02a",
+  "source_index": "https://pypi.org/simple",
+  "acquisition_network_used": true,
+  "direct_pin": "langgraph==1.2.9",
+  "requirements_file_identity": {
+    "relative_path": "requirements-phase4-agent.txt",
+    "canonical_byte_length": 17,
+    "canonical_sha256": "sha256:285ec5b0f32b13aed643b814645b9b2b226b54ddd1b4b7ed51c3c881bcac8b66"
+  },
+  "resolved_closure": [
+    {
+      "distribution": "annotated-types",
+      "version": "0.8.0",
+      "record_sha256": "sha256:3999aa3e7cd1afa1ae67b55bf5b04bbc3ca55fdd6c7dcfe571b1aad05da849af"
+    },
+    {
+      "distribution": "anyio",
+      "version": "4.14.2",
+      "record_sha256": "sha256:e37e9ee4007e9a4a74843d7e8c5153dd928f35dac5b3c56fb988792b1207965e"
+    },
+    {
+      "distribution": "certifi",
+      "version": "2026.7.22",
+      "record_sha256": "sha256:e6c48519c08f2bbe98bb8ccb9c3aa9a157fd41de210173fe047e77b8e8d35421"
+    },
+    {
+      "distribution": "charset-normalizer",
+      "version": "3.4.9",
+      "record_sha256": "sha256:5c60ff92d2c0143b4ef973598cdb97be6b0dcd41e26e231bb67391ae2f50e802"
+    },
+    {
+      "distribution": "distro",
+      "version": "1.9.0",
+      "record_sha256": "sha256:c6f8ce01979b4bdfd5f207c45d0938b5e4015716f5185db47d39406c829f040e"
+    },
+    {
+      "distribution": "h11",
+      "version": "0.16.0",
+      "record_sha256": "sha256:3a11572d1a11c198b9ab7cc31a1fb685997c7596b566e5074983161f0f0cfec9"
+    },
+    {
+      "distribution": "httpcore",
+      "version": "1.0.9",
+      "record_sha256": "sha256:491f4b59545289189a7adb8ad6e318069ac16e2d254dd8b66b0a6ebd5f2a262a"
+    },
+    {
+      "distribution": "httpx",
+      "version": "0.28.1",
+      "record_sha256": "sha256:c97fd04565a0afbb9af444f20f3cc8b28db42126c38b6e50ebc22eff9d3793e7"
+    },
+    {
+      "distribution": "idna",
+      "version": "3.18",
+      "record_sha256": "sha256:a13cc421beec956e447eb7a3118309ac45a615fb84cef9928142830800f7b269"
+    },
+    {
+      "distribution": "jsonpatch",
+      "version": "1.33",
+      "record_sha256": "sha256:cf18a111aeb762d3ff8390a1ac4010dde5cd89dc6c1b747092742aab89c86f2d"
+    },
+    {
+      "distribution": "jsonpointer",
+      "version": "3.1.1",
+      "record_sha256": "sha256:583291fef7ae35e78afc1cd2b347b07cb2eab9917b5a04ed5287545f51cf21d7"
+    },
+    {
+      "distribution": "langchain-core",
+      "version": "1.5.3",
+      "record_sha256": "sha256:fba1c582ad6f85bc9a20b2c43646f2a755bb0bf17bbaf6b687ed0df88e670043"
+    },
+    {
+      "distribution": "langchain-protocol",
+      "version": "0.0.18",
+      "record_sha256": "sha256:01bc100327cf0fb3722901eca66ccd7eb46116d13f889ee2a682802ac1a12e55"
+    },
+    {
+      "distribution": "langgraph",
+      "version": "1.2.9",
+      "record_sha256": "sha256:20a584e8b85a5c23c50aa665e5957a231ec1a8cde74678c1e387e45a4b81cff6"
+    },
+    {
+      "distribution": "langgraph-checkpoint",
+      "version": "4.1.1",
+      "record_sha256": "sha256:76a231e8f066c56edce7f4ff7b16d9297b053c1582a6feb3ae888e56383a528e"
+    },
+    {
+      "distribution": "langgraph-prebuilt",
+      "version": "1.1.0",
+      "record_sha256": "sha256:d21d98a56b24a945c4d1dac088587614b6a02487ec2455645afbc622e79c7560"
+    },
+    {
+      "distribution": "langgraph-sdk",
+      "version": "0.4.2",
+      "record_sha256": "sha256:fd846ce951a3938c51ec49caaf1b04867c81421cb76e00806cfc239417bebed0"
+    },
+    {
+      "distribution": "langsmith",
+      "version": "0.10.15",
+      "record_sha256": "sha256:c3c9d83327b5cfc8dbea4721f5226cd17e08ad080cfe3c5ed261352a91f0282f"
+    },
+    {
+      "distribution": "orjson",
+      "version": "3.11.9",
+      "record_sha256": "sha256:61dd912e95640411319f1be846f13012258bee0a5fdfdfa2a80bf762d1c84d97"
+    },
+    {
+      "distribution": "ormsgpack",
+      "version": "1.12.2",
+      "record_sha256": "sha256:fdd0ed18ee363510173c392c586a2b28688810d5a298c3ab09dfbe93cf80cdf1"
+    },
+    {
+      "distribution": "packaging",
+      "version": "26.2",
+      "record_sha256": "sha256:021212501efe1729490f5cf47539459186b26bcd0a1f36fc2528fad32ffaed1a"
+    },
+    {
+      "distribution": "pydantic",
+      "version": "2.13.4",
+      "record_sha256": "sha256:961389739a4b3e924d2da2248f92dcf035b3a0cb45168a1b2790be21dba19e6d"
+    },
+    {
+      "distribution": "pydantic_core",
+      "version": "2.46.4",
+      "record_sha256": "sha256:3a804f1dcad67692d7faed9dbb37595678654a1cfccda37f9e2bd01aeef51b05"
+    },
+    {
+      "distribution": "PyYAML",
+      "version": "6.0.3",
+      "record_sha256": "sha256:8192cce9eb03fd9bc6afd05abcf791fb6835ef5c46b629eefa05ad315be3d915"
+    },
+    {
+      "distribution": "requests",
+      "version": "2.34.2",
+      "record_sha256": "sha256:f6bd62ddca64dc9176c0085893fe2f153f553bef4869e9d53416a7c81be5532b"
+    },
+    {
+      "distribution": "requests-toolbelt",
+      "version": "1.0.0",
+      "record_sha256": "sha256:3feb8afde32f25be5d792b8f28dc491301f399cb9f3a97dfd2d3b56fc0edcef3"
+    },
+    {
+      "distribution": "sniffio",
+      "version": "1.3.1",
+      "record_sha256": "sha256:72b4ca07dc9af2f0f1c02f284c23e96c67a5520f88df4c9091841c557c82db5a"
+    },
+    {
+      "distribution": "tenacity",
+      "version": "9.1.4",
+      "record_sha256": "sha256:45dc9a28ed2cf06e5d9b50d016f2f117edad4c831fe43e5e397cd36751f61871"
+    },
+    {
+      "distribution": "typing_extensions",
+      "version": "4.16.0",
+      "record_sha256": "sha256:a346a921aa5be35b34ced3258614183d152887b954caaae5de2a94be72d5f2ec"
+    },
+    {
+      "distribution": "typing-inspection",
+      "version": "0.4.2",
+      "record_sha256": "sha256:ebc64822c47dbc097de1d59feefbc1e31a4337a097c9ae39789d29fae939d0de"
+    },
+    {
+      "distribution": "urllib3",
+      "version": "2.7.0",
+      "record_sha256": "sha256:95702432bf1a78ed9de032042479b92d01dcf79aa352f6768a5ce1de001fbbc0"
+    },
+    {
+      "distribution": "uuid_utils",
+      "version": "0.17.0",
+      "record_sha256": "sha256:7c739d1a15f59ccdb2d250ca47977a0cf98158b1ce24125524119487f038c950"
+    },
+    {
+      "distribution": "websockets",
+      "version": "15.0.1",
+      "record_sha256": "sha256:88085f49b49235800482a63766847af478c02f56a6d6cd51ae5018937f31fbb2"
+    },
+    {
+      "distribution": "xxhash",
+      "version": "3.8.1",
+      "record_sha256": "sha256:eebacf3b970b5705eeecf2c5e19c867b14c1eee3368462d4e7a8cafe4032b89c"
+    },
+    {
+      "distribution": "zstandard",
+      "version": "0.25.0",
+      "record_sha256": "sha256:fab5ba17c1a0ad1d250ccc4703ebb293aad0ab0ead642d4230f488cab7ec4ef2"
+    }
+  ],
+  "installed_file_inventory_identity": {
+    "identity_kind": "canonical_row_list",
+    "sha256": "sha256:7d08024341f7c50306e7ca99e1ba57dc87809b1e8123bf88a0120edcf95689e8",
+    "byte_length": 251365,
+    "revision": "req2web.phase4.langgraph_installed_files.p4_02a.v1"
+  },
+  "action_state": {
+    "action_state_version": "req2web.phase4.action_state.p4_02a.v1",
+    "runtime_kind": "dependency_acquisition",
+    "model_action": false,
+    "graph_runtime_execution": false,
+    "dependency_installation": true,
+    "training": false,
+    "remote_action": false
+  }
+}
