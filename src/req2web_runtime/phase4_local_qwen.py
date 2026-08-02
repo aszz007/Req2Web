@@ -112,7 +112,7 @@ _NODE_OUTPUT_CONTRACTS: dict[str, dict[str, object]] = {
 _ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$")
 _SHA_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
 _HEX_RE = re.compile(r"^[0-9a-f]{64}$")
-_RELATIVE_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_./-]{0,254}$")
+_RELATIVE_RE = re.compile(r"^[A-Za-z0-9.][A-Za-z0-9_./-]{0,254}$")
 _REAL_RUNTIME_CAPABILITY = object()
 _FIXTURE_BACKEND_CAPABILITY = object()
 

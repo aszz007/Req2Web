@@ -135,6 +135,7 @@ def _write_fake_integrity(parent: Path) -> tuple[Path, Path]:
     model_root = parent / "fake-model"
     model_root.mkdir(parents=True)
     files = {
+        ".gitattributes": b"*.safetensors filter=lfs diff=lfs merge=lfs -text\n",
         "config.json": b'{"model_type":"qwen3_5"}',
         "weights.bin": b"small-test-weight-bytes",
     }
