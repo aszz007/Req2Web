@@ -1792,6 +1792,240 @@ def validate_graph_state(
     )
 
 
+def phase4_create_authority_state(
+    b_input: Mapping[str, object],
+) -> Phase4GraphState:
+    """Create an in-memory authority state for a later P4-03 caller.
+
+    This is deliberately a facade over the existing P4-02a constructor.  It
+    does not change the P4-02a graph topology, serialized state, or action
+    state; P4-03 owns its separate attempt/action records around this state.
+    """
+
+    state = create_initial_state(b_input)
+    _phase4_validate_authority_state(state, ())
+    return state
+
+
+def _phase4_validate_authority_state(
+    state: Mapping[str, object],
+    required_nodes: tuple[str, ...],
+) -> Phase4GraphState:
+    """Validate the P4-03 in-memory facade state without graph event claims."""
+
+    data = _object(state, _STATE_KEYS, "P4-03.authority_state")
+    if (
+        data["schema_version"] != STATE_SCHEMA_VERSION
+        or data["graph_revision"] != GRAPH_REVISION
+        or data["source_kind"] != "deterministic_synthetic_fixture"
+        or data["status"] != "ready"
+        or data["failure"] is not None
+    ):
+        raise Phase4ContractError("P4-03 authority state root drifted")
+    b_input = validate_b_input(data["b_input"])
+    if (
+        data["case_id"] != b_input["case_id"]
+        or data["request_id"] != b_input["request_id"]
+        or not _identity_matches(data["b_identity"], b_input, revision="canonical_b.p4.v1")
+        or not _identity_matches(
+            data["constraint_identity"],
+            b_input["constraints"],
+            revision="canonical_b.constraints.p4.v1",
+            identity_kind="canonical_row_list",
+        )
+    ):
+        raise Phase4ContractError("P4-03 authority B binding drifted")
+    _validate_dispositions(data["advisory_dispositions"])
+    _validate_action_state(data["action_state"])
+    if (
+        tuple(data["node_results"]) != required_nodes
+        or data["pending_node_id"] is not None
+        or data["pending_output"] is not None
+        or data["mapping_record"] is not None
+        or data["candidate_composition_record"] is not None
+        or data["assembly_record"] is not None
+        or data["events"] != []
+        or data["completed_graph_nodes"] != []
+        or data["execution_counts"] != {node_id: 0 for node_id in NODE_ORDER}
+    ):
+        raise Phase4ContractError("P4-03 authority topology drifted")
+    for node_id in required_nodes:
+        _validate_node_result(node_id, data["node_results"][node_id], data)
+    expected_inventory, expected_identities = _expected_registry(data)
+    if (
+        data["registry_inventory"] != expected_inventory
+        or data["registry_identities"] != expected_identities
+    ):
+        raise Phase4ContractError("P4-03 registry authority drifted")
+    return data  # type: ignore[return-value]
+
+
+def phase4_validate_node_output(
+    node_id: str,
+    output: object,
+    state: Mapping[str, object],
+) -> dict[str, object]:
+    """Reuse the existing F1-F4 validator without creating a second schema."""
+
+    return _node_validator(node_id, output, state)
+
+
+def phase4_register_node_output(
+    state: Mapping[str, object],
+    node_id: str,
+    output: Mapping[str, object],
+) -> Phase4GraphState:
+    """Reuse the existing stable-ID registry for a P4-03 in-memory state."""
+
+    expected_prior = tuple(NODE_ORDER[: NODE_ORDER.index(node_id)]) if node_id in NODE_ORDER else ()
+    current = copy.deepcopy(_phase4_validate_authority_state(state, expected_prior))
+    if current.get("pending_node_id") is not None or current.get("pending_output") is not None:
+        raise Phase4ContractError("P4-03 authority state has a pending output")
+    if node_id in current.get("node_results", {}):
+        raise Phase4ContractError("P4-03 authority node was already registered")
+    current["pending_node_id"] = node_id
+    current["pending_output"] = copy.deepcopy(dict(output))
+    _node_validator(node_id, current["pending_output"], current)
+    _register(current, node_id)
+    _phase4_validate_authority_state(current, (*expected_prior, node_id))
+    return current  # type: ignore[return-value]
+
+
+def phase4_create_mapping(
+    state: Mapping[str, object],
+) -> dict[str, object]:
+    """Reuse the existing deterministic use-case mapping authority."""
+
+    checked = _phase4_validate_authority_state(
+        state,
+        tuple(state.get("node_results", {})),
+    )
+    if tuple(checked["node_results"]) not in {NODE_ORDER[:3], NODE_ORDER}:
+        raise Phase4ContractError("P4-03 mapping authority is incomplete")
+    mapping = _mapping_record(checked)
+    return _validate_mapping(mapping, checked)
+
+
+def phase4_project_node_input_authority(
+    state: Mapping[str, object],
+    node_id: str,
+) -> dict[str, object]:
+    """Project live deterministic registry/mapping facts for one P4-03 input.
+
+    The registry remains an identity/mapping authority only.  This projection
+    exposes its already-derived facts and never rewrites node semantics.
+    """
+
+    if node_id not in NODE_ORDER:
+        raise Phase4ContractError("P4-03 authority projection node is invalid")
+    required = list(NODE_ORDER[: NODE_ORDER.index(node_id)])
+    state = _phase4_validate_authority_state(state, tuple(required))
+    for prior_node in required:
+        _node_validator(
+            prior_node,
+            state["node_results"][prior_node]["payload"]["node_output"],
+            state,
+        )
+    registry_rows = [
+        copy.deepcopy(row)
+        for row in state["registry_inventory"]
+        if row["node_id"] in required
+    ]
+    registry_identities = {
+        prior_node: copy.deepcopy(state["registry_identities"][prior_node])
+        for prior_node in required
+    }
+    f2_local_state_to_stable_id = [
+        {"local_id": row["local_id"], "stable_id": row["stable_id"]}
+        for row in registry_rows
+        if row["node_id"] == "F2" and row["entity_type"] == "state"
+    ]
+    canonical_b_use_case_refs = [
+        {
+            "ref_type": "canonical_b_use_case",
+            "ref_id": row["use_case_id"],
+            "ref_revision": "canonical_b.use_case.v1",
+        }
+        for row in state["b_input"]["use_cases"]
+    ]
+    f2_state_refs = [
+        {
+            "ref_type": "registry_stable",
+            "ref_id": row["stable_id"],
+            "ref_revision": REGISTRY_REVISION,
+        }
+        for row in registry_rows
+        if row["node_id"] == "F2" and row["entity_type"] == "state"
+    ]
+    mapping = None
+    mapping_identity = None
+    ordered_mappings: list[dict[str, object]] = []
+    if node_id == "F4":
+        mapping = _validate_mapping(_mapping_record(state), state)
+        mapping_identity = make_identity(mapping, revision=MAPPING_REVISION)
+        ordered_mappings = copy.deepcopy(mapping["ordered_mappings"])
+    return {
+        "authority_revision": "req2web.phase4.p4_03.node_input_authority.v1",
+        "node_id": node_id,
+        "b_identity": copy.deepcopy(state["b_identity"]),
+        "constraint_identity": copy.deepcopy(state["constraint_identity"]),
+        "registry_identities": registry_identities,
+        "registry_rows": registry_rows,
+        "f2_local_state_to_stable_id": f2_local_state_to_stable_id,
+        "canonical_b_use_case_refs": canonical_b_use_case_refs,
+        "f2_state_refs": f2_state_refs,
+        "mapping_identity": mapping_identity,
+        "ordered_mappings": ordered_mappings,
+        "registry_semantics_role": "identity_and_mapping_only_no_semantic_rewrite",
+    }
+
+
+def phase4_compose_candidate(
+    state: Mapping[str, object],
+) -> dict[str, object]:
+    """Reuse the existing candidate projection and live canonical reparse."""
+
+    checked = copy.deepcopy(_phase4_validate_authority_state(state, NODE_ORDER))
+    checked["mapping_record"] = _validate_mapping(
+        _mapping_record(checked), checked
+    )
+    candidate = _candidate_composition(checked)
+    return _validate_candidate_composition(candidate, checked)
+
+
+def phase4_assemble_candidate(
+    candidate_bytes: bytes,
+    context: AgentContextBundle,
+    guidance: object,
+) -> object:
+    """Reuse the owning parser/assembler for a P4-03 integrated candidate."""
+
+    if type(candidate_bytes) is not bytes or not candidate_bytes:
+        raise Phase4ContractError("P4-03 candidate bytes must be non-empty bytes")
+    return CanonicalPageSpecAssembler().assemble(
+        ProviderRawResponse.from_bytes(candidate_bytes),
+        context,
+        guidance,
+    )
+
+
+def phase4_synthetic_assembler_bindings(
+    state: Mapping[str, object],
+) -> tuple[AgentContextBundle, object]:
+    """Expose the existing synthetic assembler binding only as a test seam."""
+
+    return _synthetic_assembler_bindings(state)
+
+
+def phase4_synthetic_fixture_output(
+    node_id: str,
+    state: Mapping[str, object],
+) -> dict[str, object]:
+    """Expose the accepted deterministic fixture for contract-only tests."""
+
+    return _fixture_output(node_id, state, "happy")
+
+
 @dataclass(frozen=True)
 class PauseHandle:
     thread_id: str
@@ -2111,6 +2345,15 @@ __all__ = [
     "Phase4ContractError",
     "Phase4GraphRuntime",
     "create_initial_state",
+    "phase4_assemble_candidate",
+    "phase4_compose_candidate",
+    "phase4_create_authority_state",
+    "phase4_create_mapping",
+    "phase4_project_node_input_authority",
+    "phase4_register_node_output",
+    "phase4_synthetic_assembler_bindings",
+    "phase4_synthetic_fixture_output",
+    "phase4_validate_node_output",
     "make_identity",
     "synthetic_commerce_b_input",
     "validate_b_input",
