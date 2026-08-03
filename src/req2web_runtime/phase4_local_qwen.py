@@ -235,6 +235,8 @@ P4R6_PILOT_ID = "p4-03r6-local-qwen-9b"
 P4R6_PROMPT_REVISION = "p4-03r6-prompt-v1"
 P4R6_PROMPT_V2_REVISION = "p4-03r6-prompt-v2"
 P4R6_PROJECTION_REVISION = P4R5_PROJECTION_REVISION
+P4R6_CHECKPOINT_REF_TARGET_SCOPE_IDENTITY_REVISION = f"{P4_03_SCHEMA_PREFIX}.r6.checkpoint_ref_target_scope.v1"
+P4R6_CHECKPOINT_REF_IMPORT_IDENTITY_REVISION = f"{P4_03_SCHEMA_PREFIX}.r6.checkpoint_ref_import.v1"
 P4R6_POLICY_RELATIVE_PATH = "docs/phase4_local_qwen_r6_policy.json"
 P4R6_POLICY_PATH = Path(__file__).resolve().parents[2] / P4R6_POLICY_RELATIVE_PATH
 P4R6_RESULT_POLICY_NAME = "p4_03r6_policy.json"
@@ -2537,6 +2539,72 @@ def _p4r6_replay_r5_checkpoint(*, packet: P4R5CheckpointPacket, receipt: P4R5Che
     if _identity(authority_state, revision=f"{P4_03_SCHEMA_PREFIX}.r5.checkpoint_authority_state.v1") != packet.authority_state_identity:
         raise Phase4LocalQwenContractError("P4R6 R5 checkpoint authority replay drifted")
     return {"authority_state": authority_state, "outputs": outputs, "refs": refs}
+
+
+def _p4r6_import_checkpoint_refs(
+    *,
+    source_refs: Mapping[str, Mapping[str, object]],
+    checkpoint_outputs: Mapping[str, bytes],
+    pilot_id: str,
+    run_id: str,
+    case_id: str,
+    request_id: str,
+) -> dict[str, dict[str, object]]:
+    """Import immutable R5 checkpoint refs into the current R6 node-local scope."""
+
+    if pilot_id != P4R6_PILOT_ID or run_id != f"{P4R6_PILOT_ID}-node-local":
+        raise Phase4LocalQwenContractError("P4R6 checkpoint ref target run scope drifted")
+    _validate_id_scope(
+        {"pilot_id": pilot_id, "run_id": run_id, "case_id": case_id, "request_id": request_id},
+        "P4R6 checkpoint ref target scope",
+        "pilot_id",
+        "run_id",
+        "case_id",
+        "request_id",
+    )
+    if list(source_refs) != ["F1", "F2"] or list(checkpoint_outputs) != ["F1", "F2"]:
+        raise Phase4LocalQwenContractError("P4R6 checkpoint ref import inventory drifted")
+    imported: dict[str, dict[str, object]] = {}
+    for node_id in ("F1", "F2"):
+        source_ref = _ref(source_refs[node_id], f"P4R6 source R5 ref {node_id}", "node_output")
+        expected_source_revision = f"{P4_03_SCHEMA_PREFIX}.node_output.{P4R5_PILOT_ID}.{P4R5_CHECKPOINT_RUN_ID}.{case_id}.{request_id}.{node_id}"
+        if source_ref["ref_revision"] != expected_source_revision or source_ref["ref_id"] != source_ref["ref_sha256"]:
+            raise Phase4LocalQwenContractError("P4R6 checkpoint source ref scope drifted")
+        raw = checkpoint_outputs[node_id]
+        if type(raw) is not bytes or not raw:
+            raise Phase4LocalQwenContractError("P4R6 checkpoint import raw bytes are invalid")
+        target_scope = {
+            "pilot_id": pilot_id,
+            "run_id": run_id,
+            "case_id": case_id,
+            "request_id": request_id,
+            "node_id": node_id,
+        }
+        target_scope_identity = _identity(
+            target_scope,
+            revision=P4R6_CHECKPOINT_REF_TARGET_SCOPE_IDENTITY_REVISION,
+        )
+        import_identity = _identity(
+            {
+                "import_semantics": "r5_checkpoint_source_import_not_r6_model_output",
+                "source_ref": source_ref,
+                "source_checkpoint_raw_identity": _identity(
+                    raw,
+                    revision=P4R5_CHECKPOINT_RAW_IDENTITY_REVISION,
+                    identity_kind="raw_bytes",
+                ),
+                "target_scope_identity": target_scope_identity,
+            },
+            revision=P4R6_CHECKPOINT_REF_IMPORT_IDENTITY_REVISION,
+        )
+        ref = {
+            "ref_type": "node_output",
+            "ref_id": import_identity["sha256"],
+            "ref_sha256": import_identity["sha256"],
+            "ref_revision": f"{P4_03_SCHEMA_PREFIX}.node_output.{pilot_id}.{run_id}.{case_id}.{request_id}.{node_id}",
+        }
+        imported[node_id] = _ref(ref, f"P4R6 imported checkpoint ref {node_id}", "node_output")
+    return imported
 
 
 def _p4r6_load_r5_source(*, model_root: Path, b_input: Mapping[str, object]) -> dict[str, object]:
@@ -7491,7 +7559,19 @@ class Phase4LocalQwenPilotRunner:
             self._active_call_kind = "node_local"
             self._active_run_id = f"{self._pilot.pilot_id}-node-local"
             self._active_outputs = dict(self._node_local_outputs)
-            self._active_refs = dict(self._node_local_refs)
+            if self._pilot.pilot_id == P4R6_PILOT_ID:
+                if self._checkpoint_seed is None:
+                    raise Phase4LocalQwenContractError("R6 checkpoint seed is missing before ref import")
+                self._active_refs = _p4r6_import_checkpoint_refs(
+                    source_refs=self._node_local_refs,
+                    checkpoint_outputs=self._node_local_outputs,
+                    pilot_id=self._pilot.pilot_id,
+                    run_id=self._active_run_id,
+                    case_id=self._pilot.case_binding["case_id"],
+                    request_id=self._pilot.case_binding["request_id"],
+                )
+            else:
+                self._active_refs = dict(self._node_local_refs)
             self._active_authority_state = (
                 copy.deepcopy(self._checkpoint_seed["authority_state"])
                 if self._real_pilot_revision in {"r5", "r6"} and self._checkpoint_seed is not None

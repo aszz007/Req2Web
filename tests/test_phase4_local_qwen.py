@@ -3343,8 +3343,30 @@ class Phase4LocalQwenTests(unittest.TestCase):
                 "ref_type": "node_output",
                 "ref_id": identity["sha256"],
                 "ref_sha256": identity["sha256"],
-                "ref_revision": f"{p4q.P4_03_SCHEMA_PREFIX}.node_output.{P4R6_PILOT_ID}.{P4R6_PILOT_ID}-node-local.{b_input['case_id']}.{b_input['request_id']}.{node_id}",
+                "ref_revision": f"{p4q.P4_03_SCHEMA_PREFIX}.node_output.{P4R5_PILOT_ID}.{p4q.P4R5_CHECKPOINT_RUN_ID}.{b_input['case_id']}.{b_input['request_id']}.{node_id}",
             }
+        checkpoint_outputs = {"F1": outputs[0], "F2": outputs[1]}
+        import_kwargs = {
+            "source_refs": refs,
+            "checkpoint_outputs": checkpoint_outputs,
+            "pilot_id": P4R6_PILOT_ID,
+            "run_id": f"{P4R6_PILOT_ID}-node-local",
+            "case_id": b_input["case_id"],
+            "request_id": b_input["request_id"],
+        }
+        expected_imports = p4q._p4r6_import_checkpoint_refs(**import_kwargs)
+        self.assertEqual(expected_imports, p4q._p4r6_import_checkpoint_refs(**import_kwargs))
+        tampered_outputs = dict(checkpoint_outputs)
+        tampered_outputs["F1"] += b"\n"
+        tampered_imports = p4q._p4r6_import_checkpoint_refs(
+            **{**import_kwargs, "checkpoint_outputs": tampered_outputs}
+        )
+        self.assertNotEqual(tampered_imports["F1"]["ref_id"], expected_imports["F1"]["ref_id"])
+        tampered_refs = copy.deepcopy(refs)
+        tampered_refs["F1"]["ref_id"] = "sha256:" + "0" * 64
+        with self.assertRaises(Phase4LocalQwenContractError):
+            p4q._p4r6_import_checkpoint_refs(**{**import_kwargs, "source_refs": tampered_refs})
+        source_ref_snapshot = copy.deepcopy(refs)
         backend = FakeBackend(outputs[2:])
         runner = Phase4LocalQwenPilotRunner(
             pilot=binding,
@@ -3366,8 +3388,25 @@ class Phase4LocalQwenTests(unittest.TestCase):
             runner.run_node_local(node_id="F2")
         self.assertEqual(backend.calls, [])
         self.assertEqual(runner.ledger.node_total_counts, {"F1": 0, "F2": 0, "F3": 0, "F4": 0})
-        self.assertIsNone(runner.run_node_local(node_id="F3").failure_code)
+        f3_result = runner.run_node_local(node_id="F3")
+        self.assertIsNone(f3_result.failure_code)
+        self.assertEqual({node_id: runner._active_refs[node_id] for node_id in ("F1", "F2")}, expected_imports)
+        self.assertEqual(
+            {node_id: runner._node_local_refs[node_id] for node_id in ("F1", "F2")},
+            source_ref_snapshot,
+        )
+        f3_ref = copy.deepcopy(runner._active_refs["F3"])
+        self.assertEqual(f3_ref["ref_id"], f3_result.result_id)
+        self.assertNotIn(f3_ref["ref_id"], {ref["ref_id"] for ref in expected_imports.values()})
         self.assertIsNone(runner.run_node_local(node_id="F4").failure_code)
+        f4_pre_call = p4q.AttemptPreCall.from_bytes(
+            (root / "runs" / f"{P4R6_PILOT_ID}-node-local" / "F4" / "attempt-01" / "pre_call.json").read_bytes()
+        )
+        self.assertEqual(
+            f4_pre_call.upstream_identities,
+            [expected_imports["F1"], expected_imports["F2"], f3_ref],
+        )
+        self.assertEqual(backend.calls, ["F3", "F4"])
         with self.assertRaises(Phase4LocalQwenContractError):
             runner.run_integrated()
         outcome = runner.stop_for_report(reason="r6_node_local_complete")
@@ -3388,7 +3427,7 @@ class Phase4LocalQwenTests(unittest.TestCase):
         for node_id, raw in zip(("F1", "F2"), outputs[:2], strict=True):
             state = phase4_register_node_output(state, node_id, json.loads(raw))
             identity = make_identity({"node_id": node_id, "raw": raw.decode("utf-8")}, revision="test.r6.prompt.ref.v1")
-            refs[node_id] = {"ref_type": "node_output", "ref_id": identity["sha256"], "ref_sha256": identity["sha256"], "ref_revision": f"{p4q.P4_03_SCHEMA_PREFIX}.node_output.{P4R6_PILOT_ID}.{P4R6_PILOT_ID}-node-local.{b_input['case_id']}.{b_input['request_id']}.{node_id}"}
+            refs[node_id] = {"ref_type": "node_output", "ref_id": identity["sha256"], "ref_sha256": identity["sha256"], "ref_revision": f"{p4q.P4_03_SCHEMA_PREFIX}.node_output.{P4R5_PILOT_ID}.{p4q.P4R5_CHECKPOINT_RUN_ID}.{b_input['case_id']}.{b_input['request_id']}.{node_id}"}
         runner = Phase4LocalQwenPilotRunner(
             pilot=binding,
             policies=policies,
