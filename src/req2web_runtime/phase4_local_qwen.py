@@ -275,6 +275,26 @@ P4R6_TIMEOUT_WORKER_PID = 24724
 P4R6_TIMEOUT_SUMMARY_COPY_NAME = "p4_03r6_timeout_predecessor_result.json"
 P4R6_TIMEOUT_AGGREGATE_SNAPSHOT_NAME = "p4_03r6_timeout_predecessor_aggregate.json"
 P4R6_ATTEMPT_CONTINUATION_RECEIPT_NAME = "p4_03r6_attempt_continuation_receipt.json"
+P4D1_POLICY_SCHEMA_VERSION = f"{P4_03_SCHEMA_PREFIX}.d1.stream_diagnostic_policy.v1"
+P4D1_MANIFEST_SCHEMA_VERSION = f"{P4_03_SCHEMA_PREFIX}.d1.preflight_manifest.v1"
+P4D1_TERMINAL_RECEIPT_SCHEMA_VERSION = f"{P4_03_SCHEMA_PREFIX}.d1.terminal_receipt.v1"
+P4D1_PARTIAL_TRANSCRIPT_SCHEMA_VERSION = f"{P4_03_SCHEMA_PREFIX}.d1.partial_transcript.v1"
+P4D1_RAW_IDENTITY_REVISION = f"{P4_03_SCHEMA_PREFIX}.d1.complete_raw.v1"
+P4D1_WORKER_IPC_PROTOCOL = f"{P4_03_SCHEMA_PREFIX}.d1.worker-ipc.v1"
+P4D1_STREAM_EVENT_SCHEMA_VERSION = f"{P4_03_SCHEMA_PREFIX}.d1.stream_event.v1"
+P4D1_DIAGNOSTIC_ID = "p4-03d1-local-qwen-stream-diagnostic"
+P4D1_POLICY_RELATIVE_PATH = "docs/phase4_local_qwen_stream_diagnostic_policy.json"
+P4D1_POLICY_PATH = Path(__file__).resolve().parents[2] / P4D1_POLICY_RELATIVE_PATH
+P4D1_POLICY_SHA256 = "sha256:73b72b53f84d9d3521559ed83b502111cd0d2a3701ce9deba03b82c3a0c7b3df"
+P4D1_POLICY_BYTE_LENGTH = 3100
+P4D1_TIMEOUT_SECONDS = 1200
+P4D1_RESULT_POLICY_NAME = "p4_03d1_stream_diagnostic_policy.json"
+P4D1_CHECKPOINT_PACKET_NAME = "p4_03d1_r5_checkpoint_packet.json"
+P4D1_CHECKPOINT_RECEIPT_NAME = "p4_03d1_r5_checkpoint_receipt.json"
+P4D1_MANIFEST_NAME = "preflight_manifest.json"
+P4D1_RAW_NAME = "diagnostic_complete_raw.bin"
+P4D1_PARTIAL_TRANSCRIPT_NAME = "partial_diagnostic_transcript.json"
+P4D1_TERMINAL_RECEIPT_NAME = "terminal_receipt.json"
 P4R2_POLICY_RELATIVE_PATH = "docs/phase4_local_qwen_r2_policy.json"
 P4R2_RESULT_POLICY_NAME = "p4_03r2_policy.json"
 P4R2_RESULT_LEDGER_NAME = "p4_03r2_predecessor_aggregate_ledger.json"
@@ -1378,6 +1398,398 @@ class P4R6Policy(_CanonicalRecord):
     @property
     def prompt_v2_revision(self) -> str:
         return str(self.prompt["retry_revision"])
+
+
+class P4D1StreamDiagnosticPolicy(_CanonicalRecord):
+    """Tracked owner authorization for one isolated visible-stream call."""
+
+    KEYS = (
+        "schema_version", "diagnostic_id", "current_date", "status",
+        "authorization", "case", "checkpoint", "prompt", "runtime",
+        "call_budget", "streaming", "evidence", "execution_boundaries",
+        "claim_boundaries", "r6_isolation",
+    )
+    SCHEMA_VERSION = P4D1_POLICY_SCHEMA_VERSION
+
+    @classmethod
+    def _validate_payload(cls, data: Mapping[str, object]) -> None:
+        _common_record(data, schema=cls.SCHEMA_VERSION, name="P4D1StreamDiagnosticPolicy")
+        if (
+            data["diagnostic_id"] != P4D1_DIAGNOSTIC_ID
+            or data["current_date"] != "2026-08-03"
+            or data["status"] != "owner_authorized_single_manual_stream_diagnostic"
+        ):
+            raise Phase4LocalQwenContractError("P4D1 policy identity drifted")
+        authorization = _exact(
+            data["authorization"],
+            (
+                "authorized_generate_calls", "manual_foreground_observation",
+                "owner_authorization_source", "requires_explicit_cli_confirmation",
+            ),
+            "P4D1StreamDiagnosticPolicy.authorization",
+        )
+        if (
+            _integer(authorization["authorized_generate_calls"], "P4D1 authorization call cap", minimum=1, maximum=1) != 1
+            or _bool(authorization["manual_foreground_observation"], "P4D1 manual observation") is not True
+            or authorization["owner_authorization_source"] != "current_project_owner_instruction_2026-08-03"
+            or _bool(authorization["requires_explicit_cli_confirmation"], "P4D1 explicit confirmation") is not True
+        ):
+            raise Phase4LocalQwenContractError("P4D1 authorization drifted")
+        case = _exact(data["case"], ("case_id", "model_id", "model_revision", "request_id"), "P4D1 case")
+        if case != {
+            "case_id": "path3-commerce-checkout",
+            "model_id": QWEN_MODEL_ID,
+            "model_revision": QWEN_MODEL_REVISION,
+            "request_id": "p4-02a-synthetic-request-001",
+        }:
+            raise Phase4LocalQwenContractError("P4D1 case drifted")
+        call_budget = _exact(data["call_budget"], ("automatic_retry", "generate_call_cap", "retry_count", "timeout_seconds"), "P4D1 call budget")
+        if call_budget != {"automatic_retry": False, "generate_call_cap": 1, "retry_count": 0, "timeout_seconds": P4D1_TIMEOUT_SECONDS}:
+            raise Phase4LocalQwenContractError("P4D1 call budget drifted")
+        checkpoint = _exact(
+            data["checkpoint"],
+            (
+                "packet_raw_byte_length", "packet_raw_sha256", "receipt_is_not_authority",
+                "receipt_raw_byte_length", "receipt_raw_sha256", "replay_authority",
+                "replay_order", "source_pilot_id", "source_result_root_leaf",
+            ),
+            "P4D1 checkpoint",
+        )
+        if checkpoint != {
+            "packet_raw_byte_length": P4R5_CHECKPOINT_PACKET_BYTE_LENGTH,
+            "packet_raw_sha256": P4R5_CHECKPOINT_PACKET_SHA256,
+            "receipt_is_not_authority": True,
+            "receipt_raw_byte_length": P4R5_CHECKPOINT_RECEIPT_BYTE_LENGTH,
+            "receipt_raw_sha256": P4R5_CHECKPOINT_RECEIPT_SHA256,
+            "replay_authority": "phase4_validate_node_output_then_phase4_register_node_output",
+            "replay_order": ["F1", "F2"],
+            "source_pilot_id": P4R5_PILOT_ID,
+            "source_result_root_leaf": P4R5_RESULT_ROOT_LEAF,
+        }:
+            raise Phase4LocalQwenContractError("P4D1 checkpoint drifted")
+        prompt = _exact(
+            data["prompt"],
+            (
+                "change_reason", "f3_exact_key_order", "max_new_tokens", "node_id",
+                "projection_revision", "prompt_revision", "source_prior_failure",
+            ),
+            "P4D1 prompt",
+        )
+        if prompt != {
+            "change_reason": "output_schema_clarification",
+            "f3_exact_key_order": [
+                "local_id", "entity_type", "trigger_component_local_id",
+                "source_state_local_id", "action", "target_state_local_id",
+                "user_feedback", "refs",
+            ],
+            "max_new_tokens": 512,
+            "node_id": "F3",
+            "projection_revision": P4R6_PROJECTION_REVISION,
+            "prompt_revision": P4R6_PROMPT_V2_REVISION,
+            "source_prior_failure": "immutable_r6_f3_attempt_1_generation_timeout",
+        }:
+            raise Phase4LocalQwenContractError("P4D1 prompt drifted")
+        runtime = _exact(data["runtime"], ("local_files_only", "model_load", "offline", "profile_name", "supervised_worker"), "P4D1 runtime")
+        if runtime != {"local_files_only": True, "model_load": True, "offline": True, "profile_name": LOCAL_PROFILE_NAME, "supervised_worker": True}:
+            raise Phase4LocalQwenContractError("P4D1 runtime drifted")
+        r6_isolation = _exact(data["r6_isolation"], ("aggregate_read", "aggregate_reset", "aggregate_write", "f3_budget_exhausted_unchanged", "not_a_budget_expansion"), "P4D1 R6 isolation")
+        if r6_isolation != {"aggregate_read": False, "aggregate_reset": False, "aggregate_write": False, "f3_budget_exhausted_unchanged": True, "not_a_budget_expansion": True}:
+            raise Phase4LocalQwenContractError("P4D1 R6 isolation drifted")
+        if _sha256(_canonical_bytes(data)) != P4D1_POLICY_SHA256 or len(_canonical_bytes(data)) != P4D1_POLICY_BYTE_LENGTH:
+            raise Phase4LocalQwenContractError("P4D1 tracked policy bytes drifted")
+
+
+def load_p4d1_stream_diagnostic_policy() -> tuple[P4D1StreamDiagnosticPolicy, bytes]:
+    """Load the exact tracked D1 authorization without performing an action."""
+
+    raw = _read_tracked_canonical_record(P4D1_POLICY_PATH, "P4D1 stream diagnostic policy")
+    if _sha256(raw) != P4D1_POLICY_SHA256 or len(raw) != P4D1_POLICY_BYTE_LENGTH:
+        raise Phase4LocalQwenContractError("P4D1 tracked policy identity drifted")
+    return P4D1StreamDiagnosticPolicy.from_bytes(raw), raw  # type: ignore[return-value]
+
+
+def _p4d1_action_state(*, model_action: bool) -> dict[str, object]:
+    return {
+        "action_state_version": f"{P4_03_SCHEMA_PREFIX}.d1.action_state.v1",
+        "runtime_kind": "local_qwen_stream_diagnostic",
+        "model_action": model_action,
+        "graph_runtime_execution": False,
+        "dependency_installation": False,
+        "training": False,
+        "remote_action": False,
+        "network": False,
+        "telemetry": False,
+        "tracing": False,
+        "local_files_only": True,
+    }
+
+
+def _validate_p4d1_action_state(value: object, name: str, *, model_action: bool) -> dict[str, object]:
+    expected = _p4d1_action_state(model_action=model_action)
+    data = _exact(value, tuple(expected), name)
+    if data != expected:
+        raise Phase4LocalQwenContractError(f"{name} drifted")
+    return data
+
+
+class P4D1PreflightManifest(_CanonicalRecord):
+    """Exact D1 preflight and F3 prompt/input binding written before load."""
+
+    KEYS = (
+        "schema_version", "manifest_id", "diagnostic_id", "result_root_marker",
+        "case", "policy_identity", "profile", "inventory", "checkpoint_source",
+        "checkpoint_replay", "f3", "source_failure_identity", "execution",
+        "action_state",
+    )
+    SCHEMA_VERSION = P4D1_MANIFEST_SCHEMA_VERSION
+
+    @classmethod
+    def create(
+        cls,
+        *,
+        result_root_marker: str,
+        policy_raw: bytes,
+        profile: "LocalQwenProfile",
+        inventory: Mapping[str, object],
+        packet_raw: bytes,
+        receipt_raw: bytes,
+        authority_state: Mapping[str, object],
+        outputs: Mapping[str, bytes],
+        input_bytes: bytes,
+        prompt_bytes: bytes,
+        config_bytes: bytes,
+        request_bytes: bytes,
+        prior_failure: "AttemptResult",
+    ) -> "P4D1PreflightManifest":
+        profile.validate()
+        prior_failure.validate()
+        if list(outputs) != ["F1", "F2"]:
+            raise Phase4LocalQwenContractError("P4D1 checkpoint replay inventory drifted")
+        root: dict[str, object] = {
+            "schema_version": cls.SCHEMA_VERSION,
+            "manifest_id": "pending",
+            "diagnostic_id": P4D1_DIAGNOSTIC_ID,
+            "result_root_marker": _text(result_root_marker, "P4D1 result root marker", pattern=_ID_RE),
+            "case": {
+                "case_id": "path3-commerce-checkout",
+                "request_id": "p4-02a-synthetic-request-001",
+                "model_id": QWEN_MODEL_ID,
+                "model_revision": QWEN_MODEL_REVISION,
+            },
+            "policy_identity": _identity(policy_raw, revision=P4D1_POLICY_SCHEMA_VERSION, identity_kind="raw_bytes"),
+            "profile": profile.to_dict(),
+            "inventory": copy.deepcopy(dict(inventory)),
+            "checkpoint_source": {
+                "source_pilot_id": P4R5_PILOT_ID,
+                "source_result_root_leaf": P4R5_RESULT_ROOT_LEAF,
+                "packet_identity": _identity(packet_raw, revision=P4R5_CHECKPOINT_PACKET_SCHEMA_VERSION, identity_kind="raw_bytes"),
+                "receipt_identity": _identity(receipt_raw, revision=P4R5_CHECKPOINT_RECEIPT_SCHEMA_VERSION, identity_kind="raw_bytes"),
+                "receipt_is_not_authority": True,
+            },
+            "checkpoint_replay": {
+                "node_ids": ["F1", "F2"],
+                "output_raw_identities": {
+                    node_id: _identity(outputs[node_id], revision=P4R5_CHECKPOINT_RAW_IDENTITY_REVISION, identity_kind="raw_bytes")
+                    for node_id in ("F1", "F2")
+                },
+                "authority_state_identity": _identity(authority_state, revision=f"{P4_03_SCHEMA_PREFIX}.r5.checkpoint_authority_state.v1"),
+                "owning_validator_and_registry_replayed": True,
+                "model_calls": 0,
+            },
+            "f3": {
+                "node_id": "F3",
+                "projection_revision": P4R6_PROJECTION_REVISION,
+                "prompt_revision": P4R6_PROMPT_V2_REVISION,
+                "change_reason": "output_schema_clarification",
+                "input_identity": _identity(input_bytes, revision=P4R6_PROJECTION_REVISION, identity_kind="raw_bytes"),
+                "prompt_identity": _identity(prompt_bytes, revision=P4R6_PROMPT_V2_REVISION, identity_kind="raw_bytes"),
+                "config_identity": _identity(config_bytes, revision=f"{P4_03_SCHEMA_PREFIX}.d1.config.v1", identity_kind="raw_bytes"),
+                "request_identity": _identity(request_bytes, revision=f"{P4_03_SCHEMA_PREFIX}.d1.request.v1", identity_kind="raw_bytes"),
+            },
+            "source_failure_identity": _identity(prior_failure.to_dict(), revision=ATTEMPT_RESULT_SCHEMA_VERSION),
+            "execution": {
+                "generate_call_cap": 1,
+                "retry_count": 0,
+                "timeout_seconds": P4D1_TIMEOUT_SECONDS,
+                "parse": "not_executed",
+                "registry": "not_executed",
+                "f4": "not_executed",
+                "integrated": "not_executed",
+                "composition": "not_executed",
+                "assembler": "not_executed",
+                "downstream": "not_executed",
+            },
+            "action_state": _p4d1_action_state(model_action=False),
+        }
+        root["manifest_id"] = _sha256(_canonical_bytes({key: value for key, value in root.items() if key != "manifest_id"}))
+        return cls._from_payload(root)  # type: ignore[return-value]
+
+    @classmethod
+    def _validate_payload(cls, data: Mapping[str, object]) -> None:
+        _common_record(data, schema=cls.SCHEMA_VERSION, name="P4D1PreflightManifest")
+        _sha(data["manifest_id"], "P4D1PreflightManifest.manifest_id")
+        if data["diagnostic_id"] != P4D1_DIAGNOSTIC_ID:
+            raise Phase4LocalQwenContractError("P4D1 manifest identity drifted")
+        _text(data["result_root_marker"], "P4D1PreflightManifest.result_root_marker", pattern=_ID_RE)
+        case = _exact(data["case"], ("case_id", "request_id", "model_id", "model_revision"), "P4D1 manifest case")
+        if case != {"case_id": "path3-commerce-checkout", "request_id": "p4-02a-synthetic-request-001", "model_id": QWEN_MODEL_ID, "model_revision": QWEN_MODEL_REVISION}:
+            raise Phase4LocalQwenContractError("P4D1 manifest case drifted")
+        _validate_identity(data["policy_identity"], "P4D1 manifest policy identity")
+        profile = LocalQwenProfile.from_dict(data["profile"])
+        if profile.timeout_seconds != P4D1_TIMEOUT_SECONDS or profile.max_new_tokens != 512:
+            raise Phase4LocalQwenContractError("P4D1 manifest profile drifted")
+        inventory = _exact(data["inventory"], ("schema_version", "model_id", "model_revision", "file_count", "total_byte_length", "files", "excluded_local_cache_file_count", "excluded_local_cache_paths_identity", "weight_bytes_hashed", "inventory_identity", "evidence_identity"), "P4D1 manifest inventory")
+        if inventory["model_id"] != QWEN_MODEL_ID or inventory["model_revision"] != QWEN_MODEL_REVISION or inventory["inventory_identity"] != profile.model_inventory_identity:
+            raise Phase4LocalQwenContractError("P4D1 manifest inventory drifted")
+        source = _exact(data["checkpoint_source"], ("source_pilot_id", "source_result_root_leaf", "packet_identity", "receipt_identity", "receipt_is_not_authority"), "P4D1 checkpoint source")
+        if source["source_pilot_id"] != P4R5_PILOT_ID or source["source_result_root_leaf"] != P4R5_RESULT_ROOT_LEAF or source["receipt_is_not_authority"] is not True:
+            raise Phase4LocalQwenContractError("P4D1 checkpoint source drifted")
+        _validate_identity(source["packet_identity"], "P4D1 packet identity")
+        _validate_identity(source["receipt_identity"], "P4D1 receipt identity")
+        replay = _exact(data["checkpoint_replay"], ("node_ids", "output_raw_identities", "authority_state_identity", "owning_validator_and_registry_replayed", "model_calls"), "P4D1 checkpoint replay")
+        if replay["node_ids"] != ["F1", "F2"] or replay["owning_validator_and_registry_replayed"] is not True or replay["model_calls"] != 0:
+            raise Phase4LocalQwenContractError("P4D1 checkpoint replay drifted")
+        output_ids = _exact(replay["output_raw_identities"], ("F1", "F2"), "P4D1 checkpoint output identities")
+        for node_id in ("F1", "F2"):
+            _validate_identity(output_ids[node_id], f"P4D1 {node_id} output identity")
+        _validate_identity(replay["authority_state_identity"], "P4D1 authority state identity")
+        f3 = _exact(data["f3"], ("node_id", "projection_revision", "prompt_revision", "change_reason", "input_identity", "prompt_identity", "config_identity", "request_identity"), "P4D1 F3")
+        if f3["node_id"] != "F3" or f3["projection_revision"] != P4R6_PROJECTION_REVISION or f3["prompt_revision"] != P4R6_PROMPT_V2_REVISION or f3["change_reason"] != "output_schema_clarification":
+            raise Phase4LocalQwenContractError("P4D1 F3 binding drifted")
+        for key in ("input_identity", "prompt_identity", "config_identity", "request_identity"):
+            _validate_identity(f3[key], f"P4D1 F3 {key}")
+        _validate_identity(data["source_failure_identity"], "P4D1 source failure identity")
+        execution = _exact(data["execution"], ("generate_call_cap", "retry_count", "timeout_seconds", "parse", "registry", "f4", "integrated", "composition", "assembler", "downstream"), "P4D1 execution")
+        if execution != {"generate_call_cap": 1, "retry_count": 0, "timeout_seconds": P4D1_TIMEOUT_SECONDS, "parse": "not_executed", "registry": "not_executed", "f4": "not_executed", "integrated": "not_executed", "composition": "not_executed", "assembler": "not_executed", "downstream": "not_executed"}:
+            raise Phase4LocalQwenContractError("P4D1 execution boundary drifted")
+        _validate_p4d1_action_state(data["action_state"], "P4D1 manifest action state", model_action=False)
+        expected = _sha256(_canonical_bytes({key: data[key] for key in data if key != "manifest_id"}))
+        if data["manifest_id"] != expected:
+            raise Phase4LocalQwenContractError("P4D1 manifest identity drifted")
+
+
+class P4D1TerminalReceipt(_CanonicalRecord):
+    """Terminal D1 evidence; it never represents model or contract success."""
+
+    KEYS = (
+        "schema_version", "receipt_id", "diagnostic_id", "case_id", "request_id",
+        "result_root_marker", "manifest_identity", "profile_identity", "worker",
+        "call", "terminal_status", "raw", "partial_transcript",
+        "worker_stderr_identity", "execution", "claims",
+    )
+    SCHEMA_VERSION = P4D1_TERMINAL_RECEIPT_SCHEMA_VERSION
+
+    @classmethod
+    def create(
+        cls,
+        *,
+        manifest: P4D1PreflightManifest,
+        profile: "LocalQwenProfile",
+        teardown_facts: Mapping[str, object],
+        terminal_status: str,
+        raw_identity: Mapping[str, object] | None,
+        partial_identity: Mapping[str, object] | None,
+        stderr_identity: Mapping[str, object],
+    ) -> "P4D1TerminalReceipt":
+        manifest.validate()
+        profile.validate()
+        if terminal_status not in {"generation_completed", "generation_timeout", "generation_cancelled", "generation_failed"}:
+            raise Phase4LocalQwenContractError("P4D1 terminal status is invalid")
+        worker = {
+            "worker_id": teardown_facts.get("worker_id"),
+            "worker_pid": teardown_facts.get("worker_pid"),
+            "worker_exit_code": teardown_facts.get("worker_exit_code"),
+            "worker_exit_verified": teardown_facts.get("worker_exit_verified"),
+            "terminal_status": teardown_facts.get("terminal_status"),
+        }
+        root: dict[str, object] = {
+            "schema_version": cls.SCHEMA_VERSION,
+            "receipt_id": "pending",
+            "diagnostic_id": P4D1_DIAGNOSTIC_ID,
+            "case_id": "path3-commerce-checkout",
+            "request_id": "p4-02a-synthetic-request-001",
+            "result_root_marker": manifest.result_root_marker,
+            "manifest_identity": _identity(manifest.to_dict(), revision=P4D1_MANIFEST_SCHEMA_VERSION),
+            "profile_identity": _identity(profile.to_dict(), revision=LOCAL_QWEN_PROFILE_SCHEMA_VERSION),
+            "worker": worker,
+            "call": {"node_id": "F3", "generate_calls": 1, "retry_count": 0, "timeout_seconds": P4D1_TIMEOUT_SECONDS},
+            "terminal_status": terminal_status,
+            "raw": {
+                "status": "captured_authoritative_complete" if raw_identity is not None else "not_captured",
+                "relative_path": P4D1_RAW_NAME if raw_identity is not None else None,
+                "identity": None if raw_identity is None else dict(raw_identity),
+            },
+            "partial_transcript": {
+                "status": "non_authoritative_partial_diagnostic_transcript" if partial_identity is not None else "not_applicable",
+                "relative_path": P4D1_PARTIAL_TRANSCRIPT_NAME if partial_identity is not None else None,
+                "identity": None if partial_identity is None else dict(partial_identity),
+            },
+            "worker_stderr_identity": dict(stderr_identity),
+            "execution": {"parse": "not_executed", "registry": "not_executed", "f4": "not_executed", "integrated": "not_executed", "composition": "not_executed", "assembler": "not_executed", "downstream": "not_executed"},
+            "claims": {"model_success": False, "quality": False, "graph_resume": False, "r6_continuation": False, "r6_budget_reset": False},
+        }
+        root["receipt_id"] = _sha256(_canonical_bytes({key: value for key, value in root.items() if key != "receipt_id"}))
+        return cls._from_payload(root)  # type: ignore[return-value]
+
+    @classmethod
+    def _validate_payload(cls, data: Mapping[str, object]) -> None:
+        _common_record(data, schema=cls.SCHEMA_VERSION, name="P4D1TerminalReceipt")
+        _sha(data["receipt_id"], "P4D1TerminalReceipt.receipt_id")
+        if data["diagnostic_id"] != P4D1_DIAGNOSTIC_ID or data["case_id"] != "path3-commerce-checkout" or data["request_id"] != "p4-02a-synthetic-request-001":
+            raise Phase4LocalQwenContractError("P4D1 terminal scope drifted")
+        _text(data["result_root_marker"], "P4D1 terminal result root marker", pattern=_ID_RE)
+        _validate_identity(data["manifest_identity"], "P4D1 terminal manifest identity")
+        _validate_identity(data["profile_identity"], "P4D1 terminal profile identity")
+        worker = _exact(data["worker"], ("worker_id", "worker_pid", "worker_exit_code", "worker_exit_verified", "terminal_status"), "P4D1 terminal worker")
+        _text(worker["worker_id"], "P4D1 worker id", pattern=_ID_RE)
+        _integer(worker["worker_pid"], "P4D1 worker pid", minimum=1)
+        if type(worker["worker_exit_code"]) is not int or _bool(worker["worker_exit_verified"], "P4D1 worker exit verified") is not True:
+            raise Phase4LocalQwenContractError("P4D1 terminal worker exit is not verified")
+        _text(worker["terminal_status"], "P4D1 worker terminal status")
+        call = _exact(data["call"], ("node_id", "generate_calls", "retry_count", "timeout_seconds"), "P4D1 terminal call")
+        if call != {"node_id": "F3", "generate_calls": 1, "retry_count": 0, "timeout_seconds": P4D1_TIMEOUT_SECONDS}:
+            raise Phase4LocalQwenContractError("P4D1 terminal call drifted")
+        terminal_status = data["terminal_status"]
+        if terminal_status not in {"generation_completed", "generation_timeout", "generation_cancelled", "generation_failed"}:
+            raise Phase4LocalQwenContractError("P4D1 terminal status drifted")
+        raw = _exact(data["raw"], ("status", "relative_path", "identity"), "P4D1 terminal raw")
+        partial = _exact(data["partial_transcript"], ("status", "relative_path", "identity"), "P4D1 terminal partial")
+        if terminal_status == "generation_completed":
+            if raw["status"] != "captured_authoritative_complete" or raw["relative_path"] != P4D1_RAW_NAME or raw["identity"] is None or partial != {"status": "not_applicable", "relative_path": None, "identity": None}:
+                raise Phase4LocalQwenContractError("P4D1 completed raw semantics drifted")
+            _validate_identity(raw["identity"], "P4D1 complete raw identity")
+        else:
+            if raw != {"status": "not_captured", "relative_path": None, "identity": None}:
+                raise Phase4LocalQwenContractError("P4D1 failed run cannot claim raw")
+            if partial["status"] not in {"not_applicable", "non_authoritative_partial_diagnostic_transcript"}:
+                raise Phase4LocalQwenContractError("P4D1 partial transcript status drifted")
+            if partial["status"] == "not_applicable":
+                if partial != {"status": "not_applicable", "relative_path": None, "identity": None}:
+                    raise Phase4LocalQwenContractError("P4D1 absent partial transcript drifted")
+            else:
+                if partial["relative_path"] != P4D1_PARTIAL_TRANSCRIPT_NAME or partial["identity"] is None:
+                    raise Phase4LocalQwenContractError("P4D1 partial transcript binding drifted")
+                _validate_identity(partial["identity"], "P4D1 partial transcript identity")
+        _validate_identity(data["worker_stderr_identity"], "P4D1 worker stderr identity")
+        execution = _exact(data["execution"], ("parse", "registry", "f4", "integrated", "composition", "assembler", "downstream"), "P4D1 terminal execution")
+        if set(execution.values()) != {"not_executed"}:
+            raise Phase4LocalQwenContractError("P4D1 downstream execution drifted")
+        claims = _exact(data["claims"], ("model_success", "quality", "graph_resume", "r6_continuation", "r6_budget_reset"), "P4D1 terminal claims")
+        if any(value is not False for value in claims.values()):
+            raise Phase4LocalQwenContractError("P4D1 terminal claims drifted")
+        expected = _sha256(_canonical_bytes({key: data[key] for key in data if key != "receipt_id"}))
+        if data["receipt_id"] != expected:
+            raise Phase4LocalQwenContractError("P4D1 terminal receipt identity drifted")
+
+
+class P4D1PreparedDiagnostic(NamedTuple):
+    result_root: Path
+    manifest: P4D1PreflightManifest
+    profile: "LocalQwenProfile"
+    input_bytes: bytes
+    prompt_bytes: bytes
+    config_bytes: bytes
+    request_bytes: bytes
 
 
 class P4R5CheckpointPacket(_CanonicalRecord):
@@ -2632,6 +3044,56 @@ def _p4r6_replay_r5_checkpoint(*, packet: P4R5CheckpointPacket, receipt: P4R5Che
     if _identity(authority_state, revision=f"{P4_03_SCHEMA_PREFIX}.r5.checkpoint_authority_state.v1") != packet.authority_state_identity:
         raise Phase4LocalQwenContractError("P4R6 R5 checkpoint authority replay drifted")
     return {"authority_state": authority_state, "outputs": outputs, "refs": refs}
+
+
+def _p4d1_load_checkpoint_source(
+    *, model_root: Path, b_input: Mapping[str, object]
+) -> dict[str, object]:
+    """Read the immutable R5 checkpoint and exact R6 timeout used by D1."""
+
+    root = _p4r6_r5_result_root(model_root)
+    packet_raw = _p4r5_read_expected_file(
+        root / P4R5_CHECKPOINT_PACKET_NAME,
+        expected_sha256=P4R5_CHECKPOINT_PACKET_SHA256,
+        expected_byte_length=P4R5_CHECKPOINT_PACKET_BYTE_LENGTH,
+        name="P4D1 R5 checkpoint packet",
+    )
+    receipt_raw = _p4r5_read_expected_file(
+        root / P4R5_CHECKPOINT_RECEIPT_NAME,
+        expected_sha256=P4R5_CHECKPOINT_RECEIPT_SHA256,
+        expected_byte_length=P4R5_CHECKPOINT_RECEIPT_BYTE_LENGTH,
+        name="P4D1 R5 checkpoint receipt",
+    )
+    timeout_root = _p4r6_timeout_result_root(model_root)
+    prior_raw = _p4r5_read_expected_file(
+        timeout_root / P4R6_TIMEOUT_ATTEMPT_RELATIVE_PATH,
+        expected_sha256=P4R6_TIMEOUT_ATTEMPT_SHA256,
+        expected_byte_length=P4R6_TIMEOUT_ATTEMPT_BYTE_LENGTH,
+        name="P4D1 immutable R6 F3 attempt 1 timeout",
+    )
+    packet = P4R5CheckpointPacket.from_bytes(packet_raw)
+    receipt = P4R5CheckpointReceipt.from_bytes(receipt_raw)
+    prior_failure = _validate_p4r6_timeout_prior_attempt(
+        AttemptResult.from_bytes(prior_raw)
+    )
+    prior_raw_path = timeout_root / prior_failure.raw_response_relative_path
+    if prior_raw_path.exists() or prior_raw_path.is_symlink():
+        raise Phase4LocalQwenContractError("P4D1 timeout source raw must remain absent")
+    replay = _p4r6_replay_r5_checkpoint(
+        packet=packet,
+        receipt=receipt,
+        b_input=b_input,
+    )
+    return {
+        "root": root,
+        "packet": packet,
+        "packet_raw": packet_raw,
+        "receipt": receipt,
+        "receipt_raw": receipt_raw,
+        "prior_failure": prior_failure,
+        "prior_failure_raw": prior_raw,
+        **replay,
+    }
 
 
 def _p4r6_import_checkpoint_refs(
@@ -5722,6 +6184,20 @@ def _write_once(root: Path, relative_path: str, raw: bytes) -> None:
                 pass
 
 
+def _p4d1_write_once(root: Path, relative_path: str, raw: bytes) -> None:
+    """Publish one D1 artifact and fsync its final file before returning."""
+
+    _write_once(root, relative_path, raw)
+    destination = root / _relative_path(relative_path, "P4D1 relative path")
+    try:
+        with destination.open("r+b") as handle:
+            os.fsync(handle.fileno())
+    except OSError as exc:
+        raise Phase4LocalQwenContractError(
+            f"P4D1 artifact fsync failed: {relative_path}"
+        ) from exc
+
+
 def acquire_pilot_execution_lease(
     *,
     result_root: Path,
@@ -5803,6 +6279,182 @@ def build_synthetic_case_binding(
             revision=f"{P4_03_SCHEMA_PREFIX}.constraints.v1",
         )["sha256"],
     }
+
+
+def _p4d1_f3_policy() -> NodeProjectionPolicy:
+    return NodeProjectionPolicy.create(
+        node_id="F3",
+        allowed_categories=[
+            "canonical_b_input", "validated_F1_output", "validated_F2_output",
+            "deterministic_registry",
+        ],
+        prohibited_categories=[
+            "b_aux_sidecar", "retrieval_evidence", "h1_gold",
+            "browser_evidence", "hidden_reasoning",
+        ],
+        field_caps={
+            "input_bytes": 131072,
+            "output_bytes": 65536,
+            "prompt_bytes": 16384,
+            "config_bytes": 8192,
+            "request_bytes": 8192,
+            "ref_count": 32,
+        },
+        upstream_required_node_ids=["F1", "F2"],
+        projection_revision=P4R6_PROJECTION_REVISION,
+        prompt_template_revision=P4R6_PROMPT_REVISION,
+        config_revision="p4-03r6-config-v1",
+    )
+
+
+def _p4d1_request_bytes() -> bytes:
+    return _canonical_bytes(
+        {
+            "request_schema_version": f"{P4_03_SCHEMA_PREFIX}.d1.request.v1",
+            "diagnostic_id": P4D1_DIAGNOSTIC_ID,
+            "case_id": "path3-commerce-checkout",
+            "request_id": "p4-02a-synthetic-request-001",
+            "node_id": "F3",
+            "generate_call_index": 1,
+            "retry_count": 0,
+            "execution_kind": "manual_visible_stream_diagnostic",
+            "not_node_contract_run": True,
+        }
+    )
+
+
+def prepare_p4d1_stream_diagnostic(
+    *,
+    model_root: Path,
+    integrity_evidence: Path,
+    result_root: Path,
+    environment: Mapping[str, str] | None = None,
+) -> P4D1PreparedDiagnostic:
+    """Perform the D1 live preflight and write a fresh no-call result root."""
+
+    from req2web_orchestration.phase4_graph import synthetic_commerce_b_input
+
+    if not isinstance(result_root, Path) or not result_root.is_absolute():
+        raise Phase4LocalQwenContractError("P4D1 result root must be absolute")
+    if result_root.exists() or result_root.is_symlink():
+        raise Phase4LocalQwenContractError("P4D1 result root must be new")
+    if not result_root.parent.is_dir() or result_root.parent.is_symlink():
+        raise Phase4LocalQwenContractError("P4D1 result root parent is invalid")
+    policy, policy_raw = load_p4d1_stream_diagnostic_policy()
+    policy.validate()
+    offline = verify_offline_environment(environment=environment)
+    inventory = validate_model_inventory_metadata(
+        model_root=model_root,
+        integrity_evidence=integrity_evidence,
+    )
+    gpu_facts = probe_local_gpu_facts()
+    if gpu_facts.get("executed") is not True:
+        raise Phase4LocalQwenContractError("P4D1 requires a live GPU preflight")
+    facts = collect_runtime_facts(gpu_facts=gpu_facts)
+    for key, expected in {
+        "transformers_version": TRANSFORMERS_VERSION,
+        "torch_version": TORCH_VERSION,
+        "bitsandbytes_version": BITSANDBYTES_VERSION,
+        "accelerate_version": ACCELERATE_VERSION,
+    }.items():
+        if facts[key] != expected:
+            raise Phase4LocalQwenContractError(f"P4D1 runtime version drifted: {key}")
+    model_inventory_identity = dict(inventory["inventory_identity"])
+    model_root_identity = _identity(
+        {
+            "model_id": QWEN_MODEL_ID,
+            "model_revision": QWEN_MODEL_REVISION,
+            "resolved_model_root": str(model_root.resolve(strict=True)),
+            "inventory": model_inventory_identity,
+        },
+        revision=f"{P4_03_SCHEMA_PREFIX}.model-root.v1",
+    )
+    profile = LocalQwenProfile.create(
+        model_root_identity=model_root_identity,
+        model_inventory_identity=model_inventory_identity,
+        model_file_count=int(inventory["file_count"]),
+        python_version=str(facts["python_version"]),
+        device_name=str(gpu_facts["device_name"]),
+        device_uuid=str(gpu_facts["device_uuid"]),
+        total_vram_bytes=int(gpu_facts["total_vram_bytes"]),
+        free_vram_bytes_at_preflight=int(gpu_facts["free_vram_bytes"]),
+        driver_version=str(gpu_facts["driver_version"]),
+        cuda_version=str(gpu_facts["cuda_version"]),
+        max_new_tokens=512,
+        timeout_seconds=P4D1_TIMEOUT_SECONDS,
+    )
+    if gpu_facts["device_index"] != 0:
+        raise Phase4LocalQwenContractError("P4D1 GPU preflight drifted from GPU0")
+    b_input = synthetic_commerce_b_input()
+    b_input_bytes = _canonical_bytes(b_input)
+    checkpoint = _p4d1_load_checkpoint_source(
+        model_root=model_root,
+        b_input=b_input,
+    )
+    f3_policy = _p4d1_f3_policy()
+    input_bytes = derive_node_input(
+        node_id="F3",
+        b_input_bytes=b_input_bytes,
+        upstream_outputs=checkpoint["outputs"],
+        authority_state=checkpoint["authority_state"],
+        policy=f3_policy,
+    )
+    prompt_bytes = build_prompt_v2(
+        node_id="F3",
+        input_bytes=input_bytes,
+        policy=f3_policy,
+        profile=profile,
+        prior_failure=checkpoint["prior_failure"],
+        change_reason="output_schema_clarification",
+    )
+    config_bytes = build_config_bytes(profile=profile, policy=f3_policy)
+    request_bytes = _p4d1_request_bytes()
+    marker = f"p4-03d1-result-root-{uuid.uuid4().hex[:20]}"
+    result_root.mkdir(exist_ok=False)
+    marker_path = result_root / RESULT_ROOT_MARKER_NAME
+    try:
+        with marker_path.open("xb") as handle:
+            handle.write((marker + "\n").encode("ascii"))
+            handle.flush()
+            os.fsync(handle.fileno())
+    except OSError as exc:
+        raise Phase4LocalQwenContractError("P4D1 result-root marker write failed") from exc
+    manifest = P4D1PreflightManifest.create(
+        result_root_marker=marker,
+        policy_raw=policy_raw,
+        profile=profile,
+        inventory=inventory,
+        packet_raw=checkpoint["packet_raw"],
+        receipt_raw=checkpoint["receipt_raw"],
+        authority_state=checkpoint["authority_state"],
+        outputs=checkpoint["outputs"],
+        input_bytes=input_bytes,
+        prompt_bytes=prompt_bytes,
+        config_bytes=config_bytes,
+        request_bytes=request_bytes,
+        prior_failure=checkpoint["prior_failure"],
+    )
+    for relative, raw in (
+        (P4D1_RESULT_POLICY_NAME, policy_raw),
+        (P4D1_CHECKPOINT_PACKET_NAME, checkpoint["packet_raw"]),
+        (P4D1_CHECKPOINT_RECEIPT_NAME, checkpoint["receipt_raw"]),
+        ("f3_diagnostic_input.json", input_bytes),
+        ("f3_diagnostic_prompt.json", prompt_bytes),
+        ("f3_diagnostic_config.json", config_bytes),
+        ("f3_diagnostic_request.json", request_bytes),
+        ("inventory_evidence_summary.json", _canonical_bytes(inventory)),
+        (P4D1_MANIFEST_NAME, manifest.canonical_bytes()),
+    ):
+        _p4d1_write_once(result_root, relative, raw)
+    return P4D1PreparedDiagnostic(
+        result_root=result_root,
+        manifest=manifest,
+        profile=profile,
+        input_bytes=input_bytes,
+        prompt_bytes=prompt_bytes,
+        config_bytes=config_bytes,
+        request_bytes=request_bytes,
+    )
 
 
 def prepare_local_qwen_pilot(
@@ -6359,6 +7011,41 @@ class _IntegratedGraphState(TypedDict):
     terminal: bool
 
 
+class _P4D1TokenDeltaStreamer:
+    """Emit every generated token for observation; displayed text is advisory."""
+
+    def __init__(self, *, tokenizer: object, emit_delta: Callable[[bytes], None]) -> None:
+        if not callable(getattr(tokenizer, "decode", None)) or not callable(emit_delta):
+            raise Phase4LocalQwenContractError("P4D1 token streamer dependency is invalid")
+        self._tokenizer = tokenizer
+        self._emit_delta = emit_delta
+        self._prompt_seen = False
+
+    def put(self, value: object) -> None:
+        if not callable(getattr(value, "tolist", None)):
+            raise Phase4LocalQwenContractError("P4D1 streamed token tensor is invalid")
+        token_ids = value.tolist()  # type: ignore[union-attr]
+        if not self._prompt_seen:
+            self._prompt_seen = True
+            return
+        if type(token_ids) is list and len(token_ids) == 1 and type(token_ids[0]) is list:
+            token_ids = token_ids[0]
+        if type(token_ids) is not list or len(token_ids) != 1 or type(token_ids[0]) is not int:
+            raise Phase4LocalQwenContractError("P4D1 streamed token batch drifted")
+        text = self._tokenizer.decode(  # type: ignore[union-attr]
+            token_ids,
+            skip_special_tokens=True,
+            clean_up_tokenization_spaces=False,
+        )
+        if type(text) is not str:
+            raise Phase4LocalQwenContractError("P4D1 streamed token decode is invalid")
+        if text:
+            self._emit_delta(text.encode("utf-8"))
+
+    def end(self) -> None:
+        return None
+
+
 class _LazyTransformersQwenBackend:
     """Lazy, explicit Transformers foundation; construction performs no load."""
 
@@ -6544,6 +7231,70 @@ class _LazyTransformersQwenBackend:
         except Exception as exc:
             raise Phase4LocalQwenContractError("explicit local Qwen generation failed closed") from exc
 
+    def generate_stream_diagnostic(
+        self,
+        *,
+        node_id: str,
+        input_bytes: bytes,
+        prompt_bytes: bytes,
+        config_bytes: bytes,
+        request_bytes: bytes,
+        emit_delta: Callable[[bytes], None],
+    ) -> bytes:
+        """Stream diagnostic deltas while retaining tensor decode as authority."""
+
+        if self._runtime_capability is not _REAL_RUNTIME_CAPABILITY or not self.loaded:
+            raise Phase4LocalQwenContractError("P4D1 backend is not explicitly loaded")
+        if node_id != "F3" or not callable(emit_delta):
+            raise Phase4LocalQwenContractError("P4D1 generation scope drifted")
+        try:  # pragma: no cover - explicit user-run model action
+            prompt_contract = _strict_json(prompt_bytes)
+            actual_input = _strict_json(input_bytes)
+            _strict_json(config_bytes)
+            request = _strict_json(request_bytes)
+            if request.get("diagnostic_id") != P4D1_DIAGNOSTIC_ID:
+                raise Phase4LocalQwenContractError("P4D1 request identity drifted")
+            model_text = (
+                "PROMPT_CONTRACT_JSON\n"
+                + _canonical_bytes(prompt_contract).decode("utf-8")
+                + "\nACTUAL_NODE_INPUT_JSON\n"
+                + _canonical_bytes(actual_input).decode("utf-8")
+            )
+            rendered = self._processor.apply_chat_template(
+                [{"role": "user", "content": [{"type": "text", "text": model_text}]}],
+                tokenize=False,
+                add_generation_prompt=True,
+                enable_thinking=False,
+            )
+            encoded = self._processor(text=[rendered], return_tensors="pt")
+            keys = self._validated_text_inputs(encoded)
+            encoded = {key: encoded[key].to("cuda:0") for key in keys}
+            input_length = int(encoded["input_ids"].shape[1])
+            if input_length > self._profile.max_input_tokens:
+                raise Phase4LocalQwenContractError("model input token cap exceeded")
+            tokenizer = getattr(self._processor, "tokenizer", self._processor)
+            streamer = _P4D1TokenDeltaStreamer(
+                tokenizer=tokenizer,
+                emit_delta=emit_delta,
+            )
+            self._torch.manual_seed(self._profile.seed)
+            self._torch.cuda.manual_seed_all(self._profile.seed)
+            generated = self._model.generate(
+                **encoded,
+                streamer=streamer,
+                max_new_tokens=self._profile.max_new_tokens,
+                do_sample=False,
+                num_return_sequences=1,
+            )
+            generated_only = generated[:, input_length:]  # type: ignore[index]
+            text = self._processor.batch_decode(
+                generated_only,
+                skip_special_tokens=True,
+            )[0]
+            return text.encode("utf-8")
+        except Exception as exc:
+            raise Phase4LocalQwenContractError("explicit P4D1 generation failed closed") from exc
+
 
 class SupervisedWorkerFailure(Phase4LocalQwenContractError):
     """A terminal worker failure already handled by the surviving parent."""
@@ -6660,6 +7411,8 @@ class SupervisedLocalQwenBackend:
         loaded_facts: Mapping[str, object],
         capability: object,
         stderr_thread: threading.Thread | None = None,
+        protocol: str = f"{P4_03_SCHEMA_PREFIX}.worker-ipc.v1",
+        generate_call_cap: int | None = None,
     ) -> None:
         if capability is not _REAL_RUNTIME_CAPABILITY:
             raise Phase4LocalQwenContractError("real worker capability is invalid")
@@ -6673,6 +7426,11 @@ class SupervisedLocalQwenBackend:
         self._profile = profile
         self._worker_id = _text(worker_id, "worker_id", pattern=_ID_RE)
         self._loaded_facts = copy.deepcopy(dict(loaded_facts))
+        self._protocol = _text(protocol, "worker IPC protocol")
+        if generate_call_cap is not None:
+            _integer(generate_call_cap, "worker generate call cap", minimum=1)
+        self._generate_call_cap = generate_call_cap
+        self._generate_call_count = 0
         self._closed = False
         self._generation_started = False
         self._last_raw_captured = False
@@ -6803,12 +7561,21 @@ class SupervisedLocalQwenBackend:
             raise SupervisedWorkerFailure(
                 "worker_unavailable", "model worker exited before generation"
             )
+        if (
+            self._generate_call_cap is not None
+            and self._generate_call_count >= self._generate_call_cap
+        ):
+            raise SupervisedWorkerFailure(
+                "generate_call_cap_exhausted",
+                "model worker generate call cap is exhausted",
+            )
         call_id = f"call-{uuid.uuid4().hex}"
+        self._generate_call_count += 1
         self._generation_started = True
         self._last_raw_captured = False
         self._send(
             {
-                "protocol": f"{P4_03_SCHEMA_PREFIX}.worker-ipc.v1",
+                "protocol": self._protocol,
                 "kind": "generate",
                 "call_id": call_id,
                 "node_id": node_id,
@@ -6841,7 +7608,7 @@ class SupervisedLocalQwenBackend:
             "worker_generation_result",
         )
         if (
-            data["protocol"] != f"{P4_03_SCHEMA_PREFIX}.worker-ipc.v1"
+            data["protocol"] != self._protocol
             or data["kind"] != "generation_result"
             or data["worker_id"] != self._worker_id
         ):
@@ -6859,7 +7626,7 @@ class SupervisedLocalQwenBackend:
             try:
                 self._send(
                     {
-                        "protocol": f"{P4_03_SCHEMA_PREFIX}.worker-ipc.v1",
+                        "protocol": self._protocol,
                         "kind": "shutdown",
                     }
                 )
@@ -6925,14 +7692,68 @@ def _worker_stdout_reader(
         messages.put({"kind": "protocol_error"})
 
 
-def _worker_stderr_reader(stream: object, capture: _WorkerStderrCapture) -> None:
+class P4D1StreamMirror:
+    """Low-latency console mirror plus non-authoritative token transcript."""
+
+    def __init__(self, target: object | None = None) -> None:
+        self._target = target if target is not None else sys.stderr
+        self._partial_chunks: list[bytes] = []
+        self._lock = threading.Lock()
+
+    def stage(self, label: str) -> None:
+        text = _text(label, "P4D1 stage")
+        with self._lock:
+            self._target.write(f"\n[P4-03D1] {text}\n")  # type: ignore[union-attr]
+            self._target.flush()  # type: ignore[union-attr]
+
+    def feed(self, raw: bytes) -> None:
+        if type(raw) is not bytes:
+            raise Phase4LocalQwenContractError("P4D1 mirrored stderr must be bytes")
+        try:
+            event = _strict_json(raw.rstrip(b"\r\n"))
+        except Phase4LocalQwenContractError:
+            with self._lock:
+                self._target.write(raw.decode("utf-8", errors="replace"))  # type: ignore[union-attr]
+                self._target.flush()  # type: ignore[union-attr]
+            return
+        if event.get("schema_version") != P4D1_STREAM_EVENT_SCHEMA_VERSION:
+            with self._lock:
+                self._target.write(raw.decode("utf-8", errors="replace"))  # type: ignore[union-attr]
+                self._target.flush()  # type: ignore[union-attr]
+            return
+        data = _exact(event, ("schema_version", "event", "delta_b64"), "P4D1 stream event")
+        event_name = _text(data["event"], "P4D1 stream event name")
+        delta = _decode_b64(data["delta_b64"], "P4D1 stream delta", allow_empty=True)
+        if event_name == "token_delta":
+            with self._lock:
+                self._partial_chunks.append(delta)
+                self._target.write(delta.decode("utf-8", errors="replace"))  # type: ignore[union-attr]
+                self._target.flush()  # type: ignore[union-attr]
+            return
+        if delta:
+            raise Phase4LocalQwenContractError("P4D1 stage event cannot carry a delta")
+        self.stage(event_name.replace("_", " "))
+
+    @property
+    def partial_bytes(self) -> bytes:
+        with self._lock:
+            return b"".join(self._partial_chunks)
+
+
+def _worker_stderr_reader(
+    stream: object,
+    capture: _WorkerStderrCapture,
+    mirror: Callable[[bytes], None] | None = None,
+) -> None:
     try:
         while True:
-            raw = stream.buffer.read(4096)  # type: ignore[union-attr]
+            raw = stream.buffer.readline()  # type: ignore[union-attr]
             if not raw:
                 capture.complete()
                 return
             capture.append(raw)
+            if mirror is not None:
+                mirror(raw)
     except Exception as exc:
         capture.fail(exc)
         return
@@ -7313,6 +8134,427 @@ def start_supervised_local_qwen_runtime(
         profile=profile,
         manifest=manifest,
         b_input=copy.deepcopy(b_input),
+    )
+
+
+class P4D1SupervisedRuntime(NamedTuple):
+    backend: SupervisedLocalQwenBackend
+    loaded_facts: dict[str, object]
+
+
+def _p4d1_worker_stderr_write(raw: bytes) -> None:
+    stream = getattr(sys.stderr, "buffer", None)
+    if stream is not None:
+        stream.write(raw)
+        stream.flush()
+    else:  # synthetic StringIO tests
+        sys.stderr.write(raw.decode("utf-8"))
+        sys.stderr.flush()
+
+
+def _p4d1_emit_worker_event(event: str, delta: bytes = b"") -> None:
+    _p4d1_worker_stderr_write(
+        _canonical_bytes(
+            {
+                "schema_version": P4D1_STREAM_EVENT_SCHEMA_VERSION,
+                "event": _text(event, "P4D1 worker event"),
+                "delta_b64": _b64(delta, "P4D1 worker delta"),
+            }
+        )
+        + b"\n"
+    )
+
+
+def _run_p4d1_stream_diagnostic_worker_protocol(*, model_root: Path) -> int:
+    """Dedicated D1 child protocol; stdout remains JSON IPC only."""
+
+    worker_id = f"worker-{uuid.uuid4().hex}"
+    generate_seen = False
+    try:
+        first = sys.stdin.buffer.readline()
+        load = _exact(
+            _strict_json(first.rstrip(b"\r\n")),
+            ("protocol", "kind", "profile_b64"),
+            "P4D1 worker load request",
+        )
+        if load["protocol"] != P4D1_WORKER_IPC_PROTOCOL or load["kind"] != "load":
+            raise Phase4LocalQwenContractError("P4D1 worker load request drifted")
+        profile = LocalQwenProfile.from_bytes(
+            _decode_b64(load["profile_b64"], "P4D1 worker profile")
+        )
+        if profile.timeout_seconds != P4D1_TIMEOUT_SECONDS or profile.max_new_tokens != 512:
+            raise Phase4LocalQwenContractError("P4D1 worker profile drifted")
+        _p4d1_emit_worker_event("load_started")
+        backend = _LazyTransformersQwenBackend(
+            model_root=model_root,
+            profile=profile,
+            runtime_capability=_REAL_RUNTIME_CAPABILITY,
+        )
+        backend.load()
+        loaded_facts = backend.loaded_facts
+        if loaded_facts is None:
+            raise Phase4LocalQwenContractError("P4D1 worker loaded facts are unavailable")
+        _p4d1_emit_worker_event("load_completed")
+        sys.stdout.buffer.write(
+            _canonical_bytes(
+                {
+                    "protocol": P4D1_WORKER_IPC_PROTOCOL,
+                    "kind": "loaded",
+                    "worker_id": worker_id,
+                    "worker_pid": os.getpid(),
+                    "loaded_facts": loaded_facts,
+                }
+            )
+            + b"\n"
+        )
+        sys.stdout.buffer.flush()
+        while True:
+            line = sys.stdin.buffer.readline()
+            if not line:
+                return 0
+            request = _strict_json(line.rstrip(b"\r\n"))
+            if request.get("protocol") != P4D1_WORKER_IPC_PROTOCOL:
+                raise Phase4LocalQwenContractError("P4D1 worker protocol drifted")
+            if request.get("kind") == "shutdown":
+                sys.stdout.buffer.write(
+                    _canonical_bytes(
+                        {
+                            "protocol": P4D1_WORKER_IPC_PROTOCOL,
+                            "kind": "shutdown_ack",
+                            "worker_id": worker_id,
+                        }
+                    )
+                    + b"\n"
+                )
+                sys.stdout.buffer.flush()
+                return 0
+            data = _exact(
+                request,
+                (
+                    "protocol", "kind", "call_id", "node_id", "input_b64",
+                    "prompt_b64", "config_b64", "request_b64",
+                ),
+                "P4D1 worker generate request",
+            )
+            if data["kind"] != "generate" or data["node_id"] != "F3" or generate_seen:
+                raise Phase4LocalQwenContractError("P4D1 worker one-call scope drifted")
+            generate_seen = True
+            try:
+                _p4d1_emit_worker_event("generation_started")
+                raw = backend.generate_stream_diagnostic(
+                    node_id="F3",
+                    input_bytes=_decode_b64(data["input_b64"], "P4D1 worker input"),
+                    prompt_bytes=_decode_b64(data["prompt_b64"], "P4D1 worker prompt"),
+                    config_bytes=_decode_b64(data["config_b64"], "P4D1 worker config"),
+                    request_bytes=_decode_b64(data["request_b64"], "P4D1 worker request"),
+                    emit_delta=lambda delta: _p4d1_emit_worker_event("token_delta", delta),
+                )
+                _p4d1_emit_worker_event("generation_completed")
+                response = {
+                    "protocol": P4D1_WORKER_IPC_PROTOCOL,
+                    "kind": "generation_result",
+                    "call_id": data["call_id"],
+                    "worker_id": worker_id,
+                    "raw_b64": _b64(raw, "P4D1 worker raw"),
+                }
+            except Exception:
+                _p4d1_emit_worker_event("generation_failed")
+                traceback.print_exc(file=sys.stderr)
+                sys.stderr.flush()
+                response = {
+                    "protocol": P4D1_WORKER_IPC_PROTOCOL,
+                    "kind": "generation_error",
+                    "call_id": data["call_id"],
+                }
+            sys.stdout.buffer.write(_canonical_bytes(response) + b"\n")
+            sys.stdout.buffer.flush()
+    except Exception:
+        traceback.print_exc(file=sys.stderr)
+        sys.stderr.flush()
+        try:
+            sys.stdout.buffer.write(
+                _canonical_bytes(
+                    {"protocol": P4D1_WORKER_IPC_PROTOCOL, "kind": "load_error"}
+                )
+                + b"\n"
+            )
+            sys.stdout.buffer.flush()
+        except Exception:
+            pass
+        return 2
+
+
+def start_p4d1_stream_diagnostic_runtime(
+    *,
+    model_root: Path,
+    prepared: P4D1PreparedDiagnostic,
+    mirror: P4D1StreamMirror,
+    load_timeout_seconds: int = 600,
+) -> P4D1SupervisedRuntime:
+    """Start one isolated D1 worker after immutable runtime evidence is written."""
+
+    prepared.manifest.validate()
+    prepared.profile.validate()
+    if (prepared.result_root / P4D1_MANIFEST_NAME).read_bytes() != prepared.manifest.canonical_bytes():
+        raise Phase4LocalQwenContractError("P4D1 prepared manifest drifted")
+    _integer(load_timeout_seconds, "P4D1 load timeout", minimum=1, maximum=P4D1_TIMEOUT_SECONDS)
+    runtime_claim = {
+        "schema_version": f"{P4_03_SCHEMA_PREFIX}.d1.runtime_start_claim.v1",
+        "diagnostic_id": P4D1_DIAGNOSTIC_ID,
+        "parent_pid": os.getpid(),
+        "manifest_identity": _identity(prepared.manifest.to_dict(), revision=P4D1_MANIFEST_SCHEMA_VERSION),
+        "profile_identity": _identity(prepared.profile.to_dict(), revision=LOCAL_QWEN_PROFILE_SCHEMA_VERSION),
+        "explicit_confirmation_received": True,
+        "generate_call_cap": 1,
+        "retry_count": 0,
+        "action_state": _p4d1_action_state(model_action=False),
+    }
+    _p4d1_write_once(
+        prepared.result_root,
+        "runtime_start_claim.json",
+        _canonical_bytes(runtime_claim),
+    )
+    mirror.stage("load started")
+    worker_bootstrap = (
+        "import sys; from pathlib import Path; "
+        "from req2web_runtime.phase4_local_qwen import "
+        "_run_p4d1_stream_diagnostic_worker_protocol; "
+        "raise SystemExit(_run_p4d1_stream_diagnostic_worker_protocol(model_root=Path(sys.argv[1])))"
+    )
+    worker_executable, worker_pythonpath = _supervised_worker_python_runtime()
+    environment = dict(os.environ)
+    environment.update(
+        {
+            "HF_HUB_OFFLINE": "1",
+            "TRANSFORMERS_OFFLINE": "1",
+            "HF_HUB_DISABLE_TELEMETRY": "1",
+            "DO_NOT_TRACK": "1",
+            "LANGSMITH_TRACING": "0",
+            "LANGCHAIN_TRACING_V2": "0",
+            "PYTHONPATH": worker_pythonpath,
+        }
+    )
+    process = subprocess.Popen(
+        [worker_executable, "-c", worker_bootstrap, str(model_root)],
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        encoding="utf-8",
+        bufsize=1,
+        env=environment,
+        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+    )
+    if process.stdout is None or process.stderr is None or process.stdin is None:
+        _raise_worker_start_failure(
+            process=process,
+            stderr_capture=None,
+            message="P4D1 worker IPC streams are unavailable",
+        )
+    messages: "queue.Queue[dict[str, object]]" = queue.Queue()
+    stderr_capture = _WorkerStderrCapture()
+    threading.Thread(
+        target=_worker_stdout_reader,
+        args=(process.stdout, messages),
+        daemon=True,
+    ).start()
+    stderr_thread = threading.Thread(
+        target=_worker_stderr_reader,
+        args=(process.stderr, stderr_capture, mirror.feed),
+        daemon=True,
+    )
+    stderr_thread.start()
+    try:
+        process.stdin.write(
+            _canonical_bytes(
+                {
+                    "protocol": P4D1_WORKER_IPC_PROTOCOL,
+                    "kind": "load",
+                    "profile_b64": _b64(prepared.profile.canonical_bytes(), "P4D1 worker profile"),
+                }
+            ).decode("utf-8")
+            + "\n"
+        )
+        process.stdin.flush()
+        loaded = messages.get(timeout=load_timeout_seconds)
+    except queue.Empty:
+        _raise_worker_start_failure(
+            process=process,
+            stderr_capture=stderr_capture,
+            stderr_thread=stderr_thread,
+            message="P4D1 worker load timed out",
+        )
+    except KeyboardInterrupt:
+        _raise_worker_start_failure(
+            process=process,
+            stderr_capture=stderr_capture,
+            stderr_thread=stderr_thread,
+            message="P4D1 worker load was cancelled",
+        )
+    except (BrokenPipeError, OSError):
+        _raise_worker_start_failure(
+            process=process,
+            stderr_capture=stderr_capture,
+            stderr_thread=stderr_thread,
+            message="P4D1 worker load IPC failed closed",
+        )
+    if loaded.get("kind") != "loaded":
+        _raise_worker_start_failure(
+            process=process,
+            stderr_capture=stderr_capture,
+            stderr_thread=stderr_thread,
+            message="P4D1 worker load failed closed",
+        )
+    data = _exact(loaded, ("protocol", "kind", "worker_id", "worker_pid", "loaded_facts"), "P4D1 worker loaded")
+    if data["protocol"] != P4D1_WORKER_IPC_PROTOCOL or data["kind"] != "loaded" or data["worker_pid"] != process.pid or not isinstance(data["loaded_facts"], Mapping):
+        _raise_worker_start_failure(
+            process=process,
+            stderr_capture=stderr_capture,
+            stderr_thread=stderr_thread,
+            message="P4D1 worker load identity drifted",
+        )
+    backend = SupervisedLocalQwenBackend(
+        process=process,
+        messages=messages,
+        stderr_capture=stderr_capture,
+        stderr_thread=stderr_thread,
+        profile=prepared.profile,
+        worker_id=_text(data["worker_id"], "P4D1 worker id", pattern=_ID_RE),
+        loaded_facts=data["loaded_facts"],
+        capability=_REAL_RUNTIME_CAPABILITY,
+        protocol=P4D1_WORKER_IPC_PROTOCOL,
+        generate_call_cap=1,
+    )
+    return P4D1SupervisedRuntime(backend=backend, loaded_facts=backend.loaded_facts)
+
+
+def _p4d1_partial_transcript_payload(raw: bytes) -> dict[str, object]:
+    return {
+        "schema_version": P4D1_PARTIAL_TRANSCRIPT_SCHEMA_VERSION,
+        "diagnostic_id": P4D1_DIAGNOSTIC_ID,
+        "status": "non_authoritative_partial_diagnostic_transcript",
+        "transcript_b64": _b64(raw, "P4D1 partial transcript"),
+        "transcript_sha256": _sha256(raw),
+        "transcript_byte_length": len(raw),
+        "authoritative_raw_response": False,
+        "model_success": False,
+    }
+
+
+def execute_p4d1_stream_diagnostic(
+    *,
+    prepared: P4D1PreparedDiagnostic,
+    backend: object,
+    loaded_facts: Mapping[str, object],
+    mirror: P4D1StreamMirror,
+) -> P4D1TerminalReceipt:
+    """Write one pre-call action, call once, then close and publish evidence."""
+
+    load_receipt = {
+        "schema_version": f"{P4_03_SCHEMA_PREFIX}.d1.load_receipt.v1",
+        "diagnostic_id": P4D1_DIAGNOSTIC_ID,
+        "manifest_identity": _identity(prepared.manifest.to_dict(), revision=P4D1_MANIFEST_SCHEMA_VERSION),
+        "profile_identity": _identity(prepared.profile.to_dict(), revision=LOCAL_QWEN_PROFILE_SCHEMA_VERSION),
+        "loaded_facts": copy.deepcopy(dict(loaded_facts)),
+        "generate_calls": 0,
+        "action_state": _p4d1_action_state(model_action=True),
+    }
+    _p4d1_write_once(prepared.result_root, "load_receipt.json", _canonical_bytes(load_receipt))
+    action = {
+        "schema_version": f"{P4_03_SCHEMA_PREFIX}.d1.generate_action.v1",
+        "diagnostic_id": P4D1_DIAGNOSTIC_ID,
+        "manifest_identity": _identity(prepared.manifest.to_dict(), revision=P4D1_MANIFEST_SCHEMA_VERSION),
+        "node_id": "F3",
+        "generate_call_index": 1,
+        "generate_call_cap": 1,
+        "retry_count": 0,
+        "timeout_seconds": P4D1_TIMEOUT_SECONDS,
+        "input_identity": _identity(prepared.input_bytes, revision=P4R6_PROJECTION_REVISION, identity_kind="raw_bytes"),
+        "prompt_identity": _identity(prepared.prompt_bytes, revision=P4R6_PROMPT_V2_REVISION, identity_kind="raw_bytes"),
+        "action_state": _p4d1_action_state(model_action=True),
+    }
+    _p4d1_write_once(prepared.result_root, "generation_action.json", _canonical_bytes(action))
+    terminal_status = "generation_completed"
+    raw_identity: dict[str, object] | None = None
+    partial_identity: dict[str, object] | None = None
+    try:
+        raw = backend.generate(  # type: ignore[union-attr]
+            node_id="F3",
+            input_bytes=prepared.input_bytes,
+            prompt_bytes=prepared.prompt_bytes,
+            config_bytes=prepared.config_bytes,
+            request_bytes=prepared.request_bytes,
+        )
+        if type(raw) is not bytes or not raw:
+            raise SupervisedWorkerFailure("backend_exception", "P4D1 complete generation bytes are invalid")
+        _p4d1_write_once(prepared.result_root, P4D1_RAW_NAME, raw)
+        raw_identity = _identity(raw, revision=P4D1_RAW_IDENTITY_REVISION, identity_kind="raw_bytes")
+    except SupervisedWorkerFailure as exc:
+        terminal_status = {
+            "generation_timeout": "generation_timeout",
+            "generation_cancelled": "generation_cancelled",
+        }.get(exc.failure_code, "generation_failed")
+        mirror.stage(terminal_status.replace("_", " "))
+    teardown = backend.close()  # type: ignore[union-attr]
+    mirror.stage("worker exit")
+    stderr_bytes = backend.stderr_bytes  # type: ignore[union-attr]
+    if type(stderr_bytes) is not bytes:
+        raise Phase4LocalQwenContractError("P4D1 worker stderr capture is incomplete")
+    stderr_artifact = WorkerStderrArtifact.create(stderr_bytes=stderr_bytes)
+    _p4d1_write_once(prepared.result_root, "worker_stderr.json", stderr_artifact.canonical_bytes())
+    if terminal_status != "generation_completed" and mirror.partial_bytes:
+        partial_payload = _p4d1_partial_transcript_payload(mirror.partial_bytes)
+        _p4d1_write_once(
+            prepared.result_root,
+            P4D1_PARTIAL_TRANSCRIPT_NAME,
+            _canonical_bytes(partial_payload),
+        )
+        partial_identity = _identity(partial_payload, revision=P4D1_PARTIAL_TRANSCRIPT_SCHEMA_VERSION)
+    receipt = P4D1TerminalReceipt.create(
+        manifest=prepared.manifest,
+        profile=prepared.profile,
+        teardown_facts=teardown,
+        terminal_status=terminal_status,
+        raw_identity=raw_identity,
+        partial_identity=partial_identity,
+        stderr_identity=stderr_artifact.identity(),
+    )
+    _p4d1_write_once(prepared.result_root, P4D1_TERMINAL_RECEIPT_NAME, receipt.canonical_bytes())
+    return receipt
+
+
+def run_p4d1_stream_diagnostic(
+    *,
+    model_root: Path,
+    integrity_evidence: Path,
+    result_root: Path,
+    confirm_one_local_generate: bool,
+    console: object | None = None,
+) -> P4D1TerminalReceipt:
+    """Run the explicitly confirmed one-call foreground D1 diagnostic."""
+
+    if confirm_one_local_generate is not True:
+        raise Phase4LocalQwenContractError(
+            "P4D1 requires --confirm-one-local-generate before any worker start"
+        )
+    mirror = P4D1StreamMirror(console)
+    mirror.stage("preflight started")
+    prepared = prepare_p4d1_stream_diagnostic(
+        model_root=model_root,
+        integrity_evidence=integrity_evidence,
+        result_root=result_root,
+    )
+    mirror.stage("preflight completed")
+    runtime = start_p4d1_stream_diagnostic_runtime(
+        model_root=model_root,
+        prepared=prepared,
+        mirror=mirror,
+    )
+    return execute_p4d1_stream_diagnostic(
+        prepared=prepared,
+        backend=runtime.backend,
+        loaded_facts=runtime.loaded_facts,
+        mirror=mirror,
     )
 
 
@@ -8470,6 +9712,17 @@ __all__ = [
     "P4R6_PROMPT_V2_REVISION",
     "P4R6_PROJECTION_REVISION",
     "P4R6_TIMEOUT_RESULT_SUMMARY_SCHEMA_VERSION",
+    "P4D1_DIAGNOSTIC_ID",
+    "P4D1_MANIFEST_NAME",
+    "P4D1_MANIFEST_SCHEMA_VERSION",
+    "P4D1_PARTIAL_TRANSCRIPT_NAME",
+    "P4D1_POLICY_SCHEMA_VERSION",
+    "P4D1_RAW_NAME",
+    "P4D1_STREAM_EVENT_SCHEMA_VERSION",
+    "P4D1_TERMINAL_RECEIPT_NAME",
+    "P4D1_TERMINAL_RECEIPT_SCHEMA_VERSION",
+    "P4D1_TIMEOUT_SECONDS",
+    "P4D1_WORKER_IPC_PROTOCOL",
     "P4R3_RESULT_BINDING_NAME",
     "P4R3_RESULT_POLICY_NAME",
     "P4R3_RESULT_R2_SUMMARY_NAME",
@@ -8508,6 +9761,12 @@ __all__ = [
     "P4R6AggregateBudgetLedger",
     "P4R6Policy",
     "P4R6TimeoutResultSummary",
+    "P4D1PreflightManifest",
+    "P4D1PreparedDiagnostic",
+    "P4D1StreamDiagnosticPolicy",
+    "P4D1StreamMirror",
+    "P4D1SupervisedRuntime",
+    "P4D1TerminalReceipt",
     "R6AttemptContinuationReceipt",
     "Phase4LocalQwenContractError",
     "Phase4LocalQwenPilotRunner",
@@ -8530,6 +9789,7 @@ __all__ = [
     "collect_runtime_facts",
     "create_scripted_fixture_backend",
     "derive_node_input",
+    "execute_p4d1_stream_diagnostic",
     "load_prepared_local_qwen_pilot",
     "load_p4r2_policy_revision",
     "load_p4r2_result_summary",
@@ -8541,14 +9801,17 @@ __all__ = [
     "load_p4r5_result_summary",
     "load_p4r6_policy_revision",
     "load_p4r6_timeout_result_summary",
+    "load_p4d1_stream_diagnostic_policy",
     "make_canonical_identity",
     "persist_pilot_outcome",
     "persist_local_qwen_load_receipt",
     "persist_supervisor_receipt",
     "persist_worker_stderr_artifact",
     "prepare_local_qwen_pilot",
+    "prepare_p4d1_stream_diagnostic",
     "probe_local_gpu_facts",
     "start_supervised_local_qwen_runtime",
+    "start_p4d1_stream_diagnostic_runtime",
     "validate_model_inventory_metadata",
     "verify_offline_environment",
     "validate_p4r2_live_binding",
@@ -8557,4 +9820,5 @@ __all__ = [
     "validate_p4r5_live_binding",
     "validate_p4r6_attempt_continuation",
     "validate_p4r6_live_binding",
+    "run_p4d1_stream_diagnostic",
 ]

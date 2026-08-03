@@ -1,8 +1,4 @@
-"""Focused no-model tests for the Phase 4 local Qwen pre-call foundation.
-
-The focused collection currently contains 18 tests; none loads or calls a
-model.
-"""
+"""Focused no-model tests for the Phase 4 local Qwen foundation."""
 
 from __future__ import annotations
 
@@ -22,6 +18,7 @@ from unittest.mock import patch
 
 import req2web_runtime.phase4_local_qwen as p4q
 from scripts import run_phase4_local_qwen_pilot as pilot_script
+from scripts import run_phase4_local_qwen_stream_diagnostic as diagnostic_script
 
 from req2web_orchestration.phase4_graph import (
     Phase4GraphRuntime,
@@ -787,7 +784,7 @@ class Phase4LocalQwenTests(unittest.TestCase):
             def __init__(self):
                 self.calls = 0
 
-            def read(self, _):
+            def readline(self):
                 self.calls += 1
                 if self.calls == 1:
                     return b"partial before read failure"
@@ -3815,6 +3812,344 @@ class Phase4LocalQwenTests(unittest.TestCase):
         self.assertEqual(policy.pilot_id, p4q.P4R4_PILOT_ID)
         self.assertEqual(policy.runtime["max_new_tokens"], 640)
         self.assertEqual([item.projection_revision for item in pilot_script._r4_policies()], [p4q.P4R2_PROJECTION_REVISION] * 4)
+
+
+class Phase4LocalQwenStreamDiagnosticTests(unittest.TestCase):
+    def setUp(self):
+        self._test_roots: list[Path] = []
+        self._parent = Path.cwd() / ".p4-03-test-results"
+        self._parent.mkdir(parents=True, exist_ok=True)
+
+    def tearDown(self):
+        for root in reversed(self._test_roots):
+            if root.is_dir():
+                shutil.rmtree(root, ignore_errors=True)
+            elif root.exists():
+                root.unlink()
+        if self._parent.is_dir() and not any(self._parent.iterdir()):
+            self._parent.rmdir()
+
+    def _prepared(self, name: str) -> p4q.P4D1PreparedDiagnostic:
+        root = self._parent / name
+        root.mkdir(exist_ok=False)
+        self._test_roots.append(root)
+        inventory_identity = make_identity(
+            [{"relative_path": "config.json", "byte_length": 2, "sha256": "sha256:" + "1" * 64}],
+            revision="req2web.phase4.p4_03.model-inventory.rows.v1",
+        )
+        inventory = {
+            "schema_version": "req2web.phase4.p4_03.live-model-inventory.v1",
+            "model_id": p4q.QWEN_MODEL_ID,
+            "model_revision": p4q.QWEN_MODEL_REVISION,
+            "file_count": 1,
+            "total_byte_length": 2,
+            "files": [{"relative_path": "config.json", "byte_length": 2, "sha256": "1" * 64}],
+            "excluded_local_cache_file_count": 0,
+            "excluded_local_cache_paths_identity": make_identity([], revision="test.d1.cache.v1"),
+            "weight_bytes_hashed": True,
+            "inventory_identity": inventory_identity,
+            "evidence_identity": make_identity({"evidence": "fake"}, revision="test.d1.evidence.v1"),
+        }
+        profile = LocalQwenProfile.create(
+            model_root_identity=make_identity({"root": "fake"}, revision="test.d1.root.v1"),
+            model_inventory_identity=inventory_identity,
+            model_file_count=1,
+            max_new_tokens=512,
+            timeout_seconds=p4q.P4D1_TIMEOUT_SECONDS,
+        )
+        b_input = synthetic_commerce_b_input()
+        fixture = _fixture_bytes(b_input)
+        state = phase4_create_authority_state(b_input)
+        for node_id, raw in zip(("F1", "F2"), fixture[:2], strict=True):
+            state = phase4_register_node_output(state, node_id, json.loads(raw))
+        _, policy_raw = p4q.load_p4d1_stream_diagnostic_policy()
+        input_bytes = p4q._canonical_bytes({"diagnostic": "input"})
+        prompt_bytes = p4q._canonical_bytes({"diagnostic": "prompt", "template_revision": p4q.P4R6_PROMPT_V2_REVISION})
+        config_bytes = p4q._canonical_bytes({"diagnostic": "config"})
+        request_bytes = p4q._p4d1_request_bytes()
+        manifest = p4q.P4D1PreflightManifest.create(
+            result_root_marker=f"p4d1-test-{name}",
+            policy_raw=policy_raw,
+            profile=profile,
+            inventory=inventory,
+            packet_raw=b"synthetic checkpoint packet",
+            receipt_raw=b"synthetic checkpoint receipt",
+            authority_state=state,
+            outputs={"F1": fixture[0], "F2": fixture[1]},
+            input_bytes=input_bytes,
+            prompt_bytes=prompt_bytes,
+            config_bytes=config_bytes,
+            request_bytes=request_bytes,
+            prior_failure=_r6_timeout_prior_attempt(),
+        )
+        (root / p4q.P4D1_MANIFEST_NAME).write_bytes(manifest.canonical_bytes())
+        return p4q.P4D1PreparedDiagnostic(
+            result_root=root,
+            manifest=manifest,
+            profile=profile,
+            input_bytes=input_bytes,
+            prompt_bytes=prompt_bytes,
+            config_bytes=config_bytes,
+            request_bytes=request_bytes,
+        )
+
+    @staticmethod
+    def _teardown(*, terminal_status: str = "normal_completed") -> dict[str, object]:
+        return {
+            "worker_id": "worker-d1-synthetic",
+            "worker_pid": 4242,
+            "worker_exit_code": 0,
+            "worker_exit_verified": True,
+            "terminal_status": terminal_status,
+        }
+
+    def test_policy_is_exact_canonical_and_rejects_tamper(self):
+        policy, raw = p4q.load_p4d1_stream_diagnostic_policy()
+        self.assertEqual(raw, p4q._canonical_bytes(json.loads(raw)))
+        self.assertFalse(raw.startswith(b"\xef\xbb\xbf"))
+        self.assertEqual(policy.diagnostic_id, p4q.P4D1_DIAGNOSTIC_ID)
+        self.assertEqual(policy.call_budget["generate_call_cap"], 1)
+        self.assertFalse(policy.r6_isolation["aggregate_read"])
+        tampered = policy.to_dict()
+        tampered["r6_isolation"]["aggregate_write"] = True
+        with self.assertRaises(Phase4LocalQwenContractError):
+            p4q.P4D1StreamDiagnosticPolicy.from_dict(tampered)
+
+    def test_worker_stdout_ipc_is_not_polluted_and_stderr_tokens_are_visible(self):
+        prepared = self._prepared("d1-worker-protocol")
+
+        class FakeStream:
+            def __init__(self, raw=b""):
+                self.buffer = io.BytesIO(raw)
+
+        class FakeBackend:
+            def __init__(self, **_):
+                self.loaded_facts = {"model_class": "Synthetic"}
+
+            def load(self):
+                return None
+
+            def generate_stream_diagnostic(self, *, emit_delta, **_):
+                emit_delta(b"TOKEN_VISIBLE")
+                return b'{"diagnostic":"complete"}'
+
+        load = p4q._canonical_bytes({
+            "protocol": p4q.P4D1_WORKER_IPC_PROTOCOL,
+            "kind": "load",
+            "profile_b64": p4q._b64(prepared.profile.canonical_bytes(), "test profile"),
+        })
+        generate = p4q._canonical_bytes({
+            "protocol": p4q.P4D1_WORKER_IPC_PROTOCOL,
+            "kind": "generate",
+            "call_id": "call-synthetic",
+            "node_id": "F3",
+            "input_b64": p4q._b64(prepared.input_bytes, "test input"),
+            "prompt_b64": p4q._b64(prepared.prompt_bytes, "test prompt"),
+            "config_b64": p4q._b64(prepared.config_bytes, "test config"),
+            "request_b64": p4q._b64(prepared.request_bytes, "test request"),
+        })
+        shutdown = p4q._canonical_bytes({
+            "protocol": p4q.P4D1_WORKER_IPC_PROTOCOL,
+            "kind": "shutdown",
+        })
+        old_stdin, old_stdout, old_stderr = sys.stdin, sys.stdout, sys.stderr
+        try:
+            sys.stdin = FakeStream(load + b"\n" + generate + b"\n" + shutdown + b"\n")
+            stdout = FakeStream()
+            stderr = FakeStream()
+            sys.stdout = stdout
+            sys.stderr = stderr
+            with patch.object(p4q, "_LazyTransformersQwenBackend", FakeBackend):
+                self.assertEqual(
+                    p4q._run_p4d1_stream_diagnostic_worker_protocol(model_root=Path("C:/model")),
+                    0,
+                )
+        finally:
+            sys.stdin, sys.stdout, sys.stderr = old_stdin, old_stdout, old_stderr
+        stdout_raw = stdout.buffer.getvalue()
+        self.assertNotIn(b"TOKEN_VISIBLE", stdout_raw)
+        messages = [p4q._strict_json(line) for line in stdout_raw.splitlines()]
+        self.assertEqual([item["kind"] for item in messages], ["loaded", "generation_result", "shutdown_ack"])
+        visible = io.StringIO()
+        mirror = p4q.P4D1StreamMirror(visible)
+        for line in stderr.buffer.getvalue().splitlines(keepends=True):
+            mirror.feed(line)
+        self.assertIn("TOKEN_VISIBLE", visible.getvalue())
+        self.assertEqual(mirror.partial_bytes, b"TOKEN_VISIBLE")
+
+    def test_stderr_reader_mirrors_each_line_and_captures_all_bytes(self):
+        stage = p4q._canonical_bytes({"schema_version": p4q.P4D1_STREAM_EVENT_SCHEMA_VERSION, "event": "generation_started", "delta_b64": ""}) + b"\n"
+        delta = p4q._canonical_bytes({"schema_version": p4q.P4D1_STREAM_EVENT_SCHEMA_VERSION, "event": "token_delta", "delta_b64": p4q._b64(b"abc", "test delta")}) + b"\n"
+
+        class Stream:
+            def __init__(self):
+                self.buffer = io.BytesIO(stage + delta)
+
+        class JoinedThread:
+            def join(self, timeout=None):
+                del timeout
+
+            @staticmethod
+            def is_alive():
+                return False
+
+        target = io.StringIO()
+        mirror = p4q.P4D1StreamMirror(target)
+        capture = p4q._WorkerStderrCapture()
+        p4q._worker_stderr_reader(Stream(), capture, mirror.feed)
+        snapshot = capture.snapshot(stderr_thread=JoinedThread(), worker_exit_verified=True)
+        self.assertTrue(snapshot["completed"])
+        self.assertEqual(snapshot["stderr_bytes"], stage + delta)
+        self.assertIn("generation started", target.getvalue())
+        self.assertTrue(target.getvalue().endswith("abc"))
+
+    def test_token_streamer_emits_compact_json_without_waiting_for_spaces(self):
+        class Tokenizer:
+            @staticmethod
+            def decode(token_ids, **kwargs):
+                self_kwargs = kwargs
+                if self_kwargs != {
+                    "skip_special_tokens": True,
+                    "clean_up_tokenization_spaces": False,
+                }:
+                    raise AssertionError("decode options drifted")
+                return {1: "{", 2: '"local_id"', 3: ":", 4: '"i-1"', 5: "}"}[token_ids[0]]
+
+        class Value:
+            def __init__(self, value):
+                self._value = value
+
+            def tolist(self):
+                return self._value
+
+        chunks: list[bytes] = []
+        streamer = p4q._P4D1TokenDeltaStreamer(
+            tokenizer=Tokenizer(),
+            emit_delta=chunks.append,
+        )
+        streamer.put(Value([[99, 98]]))
+        for token_id in (1, 2, 3, 4, 5):
+            streamer.put(Value([token_id]))
+        streamer.end()
+        self.assertEqual(b"".join(chunks), b'{"local_id":"i-1"}')
+
+    def test_success_writes_complete_raw_before_terminal_receipt_and_calls_once(self):
+        prepared = self._prepared("d1-success")
+
+        class Backend:
+            stderr_bytes = b"synthetic stderr\n"
+
+            def __init__(self):
+                self.calls = 0
+
+            def generate(self, **_):
+                self.calls += 1
+                self.assert_raw_absent = not (prepared.result_root / p4q.P4D1_RAW_NAME).exists()
+                return b"complete authoritative bytes"
+
+            def close(self):
+                return Phase4LocalQwenStreamDiagnosticTests._teardown()
+
+        backend = Backend()
+        writes: list[str] = []
+        original = p4q._p4d1_write_once
+
+        def observed(root, relative_path, raw):
+            writes.append(relative_path)
+            return original(root, relative_path, raw)
+
+        with patch.object(p4q, "_p4d1_write_once", side_effect=observed):
+            receipt = p4q.execute_p4d1_stream_diagnostic(
+                prepared=prepared,
+                backend=backend,
+                loaded_facts={"model_class": "Synthetic"},
+                mirror=p4q.P4D1StreamMirror(io.StringIO()),
+            )
+        self.assertEqual(backend.calls, 1)
+        self.assertTrue(backend.assert_raw_absent)
+        self.assertLess(writes.index(p4q.P4D1_RAW_NAME), writes.index(p4q.P4D1_TERMINAL_RECEIPT_NAME))
+        self.assertEqual(receipt.terminal_status, "generation_completed")
+        self.assertEqual(receipt.raw["status"], "captured_authoritative_complete")
+        self.assertEqual(receipt.call, {"node_id": "F3", "generate_calls": 1, "retry_count": 0, "timeout_seconds": 1200})
+        self.assertEqual((prepared.result_root / p4q.P4D1_RAW_NAME).read_bytes(), b"complete authoritative bytes")
+
+    def test_timeout_and_cancel_partial_never_masquerade_as_raw(self):
+        for failure_code in ("generation_timeout", "generation_cancelled"):
+            with self.subTest(failure_code=failure_code):
+                prepared = self._prepared(f"d1-{failure_code}")
+                mirror = p4q.P4D1StreamMirror(io.StringIO())
+                mirror.feed(p4q._canonical_bytes({
+                    "schema_version": p4q.P4D1_STREAM_EVENT_SCHEMA_VERSION,
+                    "event": "token_delta",
+                    "delta_b64": p4q._b64(b"partial", "test partial"),
+                }) + b"\n")
+
+                class Backend:
+                    stderr_bytes = b"synthetic partial stderr\n"
+
+                    def __init__(self):
+                        self.calls = 0
+
+                    def generate(self, **_):
+                        self.calls += 1
+                        raise SupervisedWorkerFailure(failure_code, "synthetic terminal")
+
+                    def close(self):
+                        return Phase4LocalQwenStreamDiagnosticTests._teardown(terminal_status=failure_code)
+
+                backend = Backend()
+                receipt = p4q.execute_p4d1_stream_diagnostic(
+                    prepared=prepared,
+                    backend=backend,
+                    loaded_facts={"model_class": "Synthetic"},
+                    mirror=mirror,
+                )
+                self.assertEqual(backend.calls, 1)
+                self.assertFalse((prepared.result_root / p4q.P4D1_RAW_NAME).exists())
+                self.assertEqual(receipt.raw, {"status": "not_captured", "relative_path": None, "identity": None})
+                self.assertEqual(receipt.partial_transcript["status"], "non_authoritative_partial_diagnostic_transcript")
+                partial = json.loads((prepared.result_root / p4q.P4D1_PARTIAL_TRANSCRIPT_NAME).read_bytes())
+                self.assertFalse(partial["authoritative_raw_response"])
+                self.assertFalse(partial["model_success"])
+
+    def test_diagnostic_execution_does_not_touch_r6_aggregate(self):
+        prepared = self._prepared("d1-r6-isolation")
+        aggregate = self._parent / p4q.P4R6_TIMEOUT_AGGREGATE_FILENAME
+        aggregate.write_bytes(b"immutable-r6-aggregate")
+        self._test_roots.append(aggregate)
+
+        class Backend:
+            stderr_bytes = b""
+
+            @staticmethod
+            def generate(**_):
+                return b"diagnostic only"
+
+            @staticmethod
+            def close():
+                return Phase4LocalQwenStreamDiagnosticTests._teardown()
+
+        with patch.object(p4q, "_reserve_p4r6_aggregate_generate_entry", side_effect=AssertionError("R6 aggregate accessed")), patch.object(p4q, "_validate_p4r6_aggregate_budget", side_effect=AssertionError("R6 aggregate accessed")), patch.object(p4q, "_initialize_or_validate_p4r6_aggregate_budget", side_effect=AssertionError("R6 aggregate accessed")):
+            p4q.execute_p4d1_stream_diagnostic(
+                prepared=prepared,
+                backend=Backend(),
+                loaded_facts={"model_class": "Synthetic"},
+                mirror=p4q.P4D1StreamMirror(io.StringIO()),
+            )
+        self.assertEqual(aggregate.read_bytes(), b"immutable-r6-aggregate")
+
+    def test_cli_missing_confirmation_rejects_before_popen(self):
+        args = [
+            "--model-root", "missing-model",
+            "--integrity-evidence", "missing-integrity.json",
+            "--result-root", "new-result-root",
+        ]
+        with patch.object(p4q.subprocess, "Popen") as popen, patch.object(diagnostic_script, "run_p4d1_stream_diagnostic") as run:
+            with self.assertRaises(SystemExit) as captured:
+                diagnostic_script.main(args)
+        self.assertEqual(captured.exception.code, 2)
+        popen.assert_not_called()
+        run.assert_not_called()
 
 
 if __name__ == "__main__":
