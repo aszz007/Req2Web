@@ -245,6 +245,36 @@ P4R6_RESULT_R5_POLICY_NAME = "p4_03r6_predecessor_r5_policy.json"
 P4R6_RESULT_R5_PACKET_NAME = "p4_03r6_r5_checkpoint_packet.json"
 P4R6_RESULT_R5_RECEIPT_NAME = "p4_03r6_r5_checkpoint_receipt.json"
 P4R6_R5_AGGREGATE_FILENAME = P4R5_AGGREGATE_FILENAME
+P4R6_TIMEOUT_RESULT_SUMMARY_SCHEMA_VERSION = f"{P4_03_SCHEMA_PREFIX}.r6.timeout_result_summary.v1"
+P4R6_ATTEMPT_CONTINUATION_RECEIPT_SCHEMA_VERSION = f"{P4_03_SCHEMA_PREFIX}.r6.attempt_continuation_receipt.v1"
+P4R6_TIMEOUT_RESULT_RELATIVE_PATH = "docs/phase4_local_qwen_r6_timeout_result.json"
+P4R6_TIMEOUT_RESULT_PATH = Path(__file__).resolve().parents[2] / P4R6_TIMEOUT_RESULT_RELATIVE_PATH
+P4R6_TIMEOUT_RESULT_SUMMARY_SHA256 = "sha256:b3426206cac89dfddf7d6bbd133fba31f36af2e401f991e347ad8b1c7defc5a2"
+P4R6_TIMEOUT_RESULT_SUMMARY_BYTE_LENGTH = 3624
+P4R6_TIMEOUT_SOURCE_COMMIT = "f280468cc1402fd40ad437091e0284048c41fa24"
+P4R6_TIMEOUT_RESULT_ROOT_LEAF = "p4-03r6-local-qwen-9b-f280468cc1-20260803-b"
+P4R6_TIMEOUT_OUTCOME_SHA256 = "sha256:fe1bc2701bb99b3dff3a4c688245ec2b2ee7c045f5e0c651aa1b61a08d1653d7"
+P4R6_TIMEOUT_OUTCOME_BYTE_LENGTH = 1191
+P4R6_TIMEOUT_SUPERVISOR_SHA256 = "sha256:72db52298c89df68946a82d450bb213f920a701d95def7a65309d660a5e11ca4"
+P4R6_TIMEOUT_SUPERVISOR_BYTE_LENGTH = 1790
+P4R6_TIMEOUT_LEDGER_SHA256 = "sha256:99443870a6d72ca8d5985cb5e64108cb65935b37d94416c10a96a30d85f697a8"
+P4R6_TIMEOUT_LEDGER_BYTE_LENGTH = 643
+P4R6_TIMEOUT_ATTEMPT_RELATIVE_PATH = "runs/p4-03r6-local-qwen-9b-node-local/F3/attempt-01/attempt_result.json"
+P4R6_TIMEOUT_ATTEMPT_SHA256 = "sha256:9848c05dbf7bd34f37029e09b43f9e4776c03b9a67f547f43bd8b0af688f5701"
+P4R6_TIMEOUT_ATTEMPT_BYTE_LENGTH = 1544
+P4R6_TIMEOUT_ATTEMPT_RESULT_ID = "sha256:ca4374474ddde1463cc8a91257c0ef366d983b7b2bc6cc350409e71eb40d4ab6"
+P4R6_TIMEOUT_FAILURE_SHA256 = "sha256:34261765cac44ffea1a3005d9c007e9fa1debf70e0a640cbc20cd651093ec73f"
+P4R6_TIMEOUT_LOAD_RECEIPT_SHA256 = "sha256:161058f25151edbb484f432097e30b2ea990dee761134e38950d3b0017633994"
+P4R6_TIMEOUT_LOAD_RECEIPT_BYTE_LENGTH = 1103
+P4R6_TIMEOUT_LOAD_RECEIPT_ID = "sha256:69d3c61e63bd833963ea89eb3bd5f4881e8729a8dae02fc8e265e9e5d32186eb"
+P4R6_TIMEOUT_AGGREGATE_FILENAME = "p4_03r6_9ea79391c86aaf496c6c3633_aggregate_budget.json"
+P4R6_TIMEOUT_AGGREGATE_SHA256 = "sha256:44f0fa02c03abcec54952f8bc62858a1ead60659a58b5fc351cc7f2503528d9f"
+P4R6_TIMEOUT_AGGREGATE_BYTE_LENGTH = 1290
+P4R6_TIMEOUT_WORKER_ID = "worker-1ab44c38e76147f784f9e225b0e7bece"
+P4R6_TIMEOUT_WORKER_PID = 24724
+P4R6_TIMEOUT_SUMMARY_COPY_NAME = "p4_03r6_timeout_predecessor_result.json"
+P4R6_TIMEOUT_AGGREGATE_SNAPSHOT_NAME = "p4_03r6_timeout_predecessor_aggregate.json"
+P4R6_ATTEMPT_CONTINUATION_RECEIPT_NAME = "p4_03r6_attempt_continuation_receipt.json"
 P4R2_POLICY_RELATIVE_PATH = "docs/phase4_local_qwen_r2_policy.json"
 P4R2_RESULT_POLICY_NAME = "p4_03r2_policy.json"
 P4R2_RESULT_LEDGER_NAME = "p4_03r2_predecessor_aggregate_ledger.json"
@@ -1130,6 +1160,53 @@ class P4R5ResultSummary(_CanonicalRecord):
         claims = _exact(data["historical_claims"], ("r2_immutable", "r3_immutable", "r4_immutable", "r5_is_not_integrated_success", "f1_f2_seeded_zero_calls", "historical_strict_result"), "P4R5ResultSummary.historical_claims")
         if any(_bool(claims[key], f"P4R5ResultSummary.historical_claims.{key}") is not True for key in ("r2_immutable", "r3_immutable", "r4_immutable", "r5_is_not_integrated_success", "f1_f2_seeded_zero_calls")) or claims["historical_strict_result"] != "0/2_unchanged":
             raise Phase4LocalQwenContractError("tracked R5 historical claims drifted")
+
+
+class P4R6TimeoutResultSummary(_CanonicalRecord):
+    """Tracked immutable summary of the first R6 generation-timeout root."""
+
+    KEYS = (
+        "schema_version", "status", "source_commit", "pilot_id",
+        "result_root_leaf", "case", "r6_policy", "pilot_outcome",
+        "supervisor_receipt", "ledger", "attempt", "load_receipt",
+        "aggregate_budget", "historical_claims",
+    )
+    SCHEMA_VERSION = P4R6_TIMEOUT_RESULT_SUMMARY_SCHEMA_VERSION
+
+    @classmethod
+    def _validate_payload(cls, data: Mapping[str, object]) -> None:
+        _common_record(data, schema=cls.SCHEMA_VERSION, name="P4R6TimeoutResultSummary")
+        if data["status"] != "tracked_r6_generation_timeout_result" or data["source_commit"] != P4R6_TIMEOUT_SOURCE_COMMIT or data["pilot_id"] != P4R6_PILOT_ID or data["result_root_leaf"] != P4R6_TIMEOUT_RESULT_ROOT_LEAF:
+            raise Phase4LocalQwenContractError("tracked R6 timeout result identity drifted")
+        case = _exact(data["case"], ("case_id", "request_id", "model_id", "model_revision"), "P4R6TimeoutResultSummary.case")
+        if case != {"case_id": "path3-commerce-checkout", "request_id": "p4-02a-synthetic-request-001", "model_id": QWEN_MODEL_ID, "model_revision": QWEN_MODEL_REVISION}:
+            raise Phase4LocalQwenContractError("tracked R6 timeout case/model drifted")
+        policy = _exact(data["r6_policy"], ("tracked_path", "filename", "raw_sha256", "raw_byte_length"), "P4R6TimeoutResultSummary.r6_policy")
+        if policy["tracked_path"] != P4R6_POLICY_RELATIVE_PATH or policy["filename"] != P4R6_RESULT_POLICY_NAME or policy["raw_sha256"] != "sha256:aac8749b73d9a974ea03c4b452843d51fbfa42be121bcf1729015e4cd2d4a974" or _integer(policy["raw_byte_length"], "P4R6TimeoutResultSummary.r6_policy.raw_byte_length", minimum=1) != 6183:
+            raise Phase4LocalQwenContractError("tracked R6 timeout policy identity drifted")
+        outcome = _exact(data["pilot_outcome"], ("filename", "raw_sha256", "raw_byte_length", "status", "stop_reason", "model_calls_performed", "node_local_statuses", "node_total_counts", "integrated_outcome"), "P4R6TimeoutResultSummary.pilot_outcome")
+        if outcome["filename"] != "pilot_outcome.json" or outcome["raw_sha256"] != P4R6_TIMEOUT_OUTCOME_SHA256 or _integer(outcome["raw_byte_length"], "P4R6TimeoutResultSummary.pilot_outcome.raw_byte_length", minimum=1) != P4R6_TIMEOUT_OUTCOME_BYTE_LENGTH or outcome["status"] != "stopped_after_first_failure" or outcome["stop_reason"] != "worker_terminal_failed_closed" or _integer(outcome["model_calls_performed"], "P4R6TimeoutResultSummary.pilot_outcome.model_calls_performed", minimum=0) != 1 or outcome["integrated_outcome"] != "not_started":
+            raise Phase4LocalQwenContractError("tracked R6 timeout outcome semantics drifted")
+        if _exact(outcome["node_local_statuses"], NODE_ORDER, "P4R6TimeoutResultSummary.pilot_outcome.node_local_statuses") != {"F1": "passed", "F2": "passed", "F3": "failed_once", "F4": "not_started"} or _exact(outcome["node_total_counts"], NODE_ORDER, "P4R6TimeoutResultSummary.pilot_outcome.node_total_counts") != {"F1": 0, "F2": 0, "F3": 1, "F4": 0}:
+            raise Phase4LocalQwenContractError("tracked R6 timeout outcome counts drifted")
+        supervisor = _exact(data["supervisor_receipt"], ("filename", "raw_sha256", "raw_byte_length", "terminal_status", "generation_started", "raw_status", "worker_exit_verified", "worker_id", "worker_pid", "worker_exit_code", "retry_performed"), "P4R6TimeoutResultSummary.supervisor_receipt")
+        if supervisor["filename"] != "supervisor_receipt.json" or supervisor["raw_sha256"] != P4R6_TIMEOUT_SUPERVISOR_SHA256 or _integer(supervisor["raw_byte_length"], "P4R6TimeoutResultSummary.supervisor_receipt.raw_byte_length", minimum=1) != P4R6_TIMEOUT_SUPERVISOR_BYTE_LENGTH or supervisor["terminal_status"] != "generation_timeout" or _bool(supervisor["generation_started"], "P4R6TimeoutResultSummary.supervisor_receipt.generation_started") is not True or supervisor["raw_status"] != "not_captured" or _bool(supervisor["worker_exit_verified"], "P4R6TimeoutResultSummary.supervisor_receipt.worker_exit_verified") is not True or supervisor["worker_id"] != P4R6_TIMEOUT_WORKER_ID or _integer(supervisor["worker_pid"], "P4R6TimeoutResultSummary.supervisor_receipt.worker_pid", minimum=1) != P4R6_TIMEOUT_WORKER_PID or _integer(supervisor["worker_exit_code"], "P4R6TimeoutResultSummary.supervisor_receipt.worker_exit_code") != 1 or _bool(supervisor["retry_performed"], "P4R6TimeoutResultSummary.supervisor_receipt.retry_performed") is not False:
+            raise Phase4LocalQwenContractError("tracked R6 timeout supervisor semantics drifted")
+        ledger = _exact(data["ledger"], ("filename", "raw_sha256", "raw_byte_length", "status", "stop_reason", "node_total_counts", "node_local_counts", "integrated_run_count", "attempt_result_ids", "prior_failure_ids"), "P4R6TimeoutResultSummary.ledger")
+        if ledger["filename"] != "ledger.json" or ledger["raw_sha256"] != P4R6_TIMEOUT_LEDGER_SHA256 or _integer(ledger["raw_byte_length"], "P4R6TimeoutResultSummary.ledger.raw_byte_length", minimum=1) != P4R6_TIMEOUT_LEDGER_BYTE_LENGTH or ledger["status"] != "stopped" or ledger["stop_reason"] != "worker_terminal_failed_closed" or _exact(ledger["node_total_counts"], NODE_ORDER, "P4R6TimeoutResultSummary.ledger.node_total_counts") != {"F1": 0, "F2": 0, "F3": 1, "F4": 0} or _exact(ledger["node_local_counts"], NODE_ORDER, "P4R6TimeoutResultSummary.ledger.node_local_counts") != {"F1": 0, "F2": 0, "F3": 1, "F4": 0} or _integer(ledger["integrated_run_count"], "P4R6TimeoutResultSummary.ledger.integrated_run_count", minimum=0) != 0 or ledger["attempt_result_ids"] != [P4R6_TIMEOUT_ATTEMPT_RESULT_ID] or ledger["prior_failure_ids"] != [P4R6_TIMEOUT_FAILURE_SHA256]:
+            raise Phase4LocalQwenContractError("tracked R6 timeout ledger semantics drifted")
+        attempt = _exact(data["attempt"], ("relative_path", "attempt_result_raw_sha256", "attempt_result_raw_byte_length", "result_id", "node_id", "attempt_index", "call_kind", "call_count", "retry_count", "generate_started", "failure_code", "failure_identity_sha256", "raw_status", "raw_sha256", "raw_byte_length", "terminal"), "P4R6TimeoutResultSummary.attempt")
+        if attempt["relative_path"] != P4R6_TIMEOUT_ATTEMPT_RELATIVE_PATH or attempt["attempt_result_raw_sha256"] != P4R6_TIMEOUT_ATTEMPT_SHA256 or _integer(attempt["attempt_result_raw_byte_length"], "P4R6TimeoutResultSummary.attempt.attempt_result_raw_byte_length", minimum=1) != P4R6_TIMEOUT_ATTEMPT_BYTE_LENGTH or attempt["result_id"] != P4R6_TIMEOUT_ATTEMPT_RESULT_ID or attempt["node_id"] != "F3" or _integer(attempt["attempt_index"], "P4R6TimeoutResultSummary.attempt.attempt_index", minimum=1) != 1 or attempt["call_kind"] != "node_local" or _integer(attempt["call_count"], "P4R6TimeoutResultSummary.attempt.call_count", minimum=1) != 1 or _integer(attempt["retry_count"], "P4R6TimeoutResultSummary.attempt.retry_count", minimum=0) != 0 or _bool(attempt["generate_started"], "P4R6TimeoutResultSummary.attempt.generate_started") is not True or attempt["failure_code"] != "generation_timeout" or attempt["failure_identity_sha256"] != P4R6_TIMEOUT_FAILURE_SHA256 or attempt["raw_status"] != "not_captured" or attempt["raw_sha256"] is not None or _integer(attempt["raw_byte_length"], "P4R6TimeoutResultSummary.attempt.raw_byte_length", minimum=0) != 0 or _bool(attempt["terminal"], "P4R6TimeoutResultSummary.attempt.terminal") is not True:
+            raise Phase4LocalQwenContractError("tracked R6 timeout attempt semantics drifted")
+        load = _exact(data["load_receipt"], ("filename", "raw_sha256", "raw_byte_length", "receipt_id", "model_loaded", "generation_occurred"), "P4R6TimeoutResultSummary.load_receipt")
+        if load["filename"] != "local_qwen_load_receipt.json" or load["raw_sha256"] != P4R6_TIMEOUT_LOAD_RECEIPT_SHA256 or _integer(load["raw_byte_length"], "P4R6TimeoutResultSummary.load_receipt.raw_byte_length", minimum=1) != P4R6_TIMEOUT_LOAD_RECEIPT_BYTE_LENGTH or load["receipt_id"] != P4R6_TIMEOUT_LOAD_RECEIPT_ID or _bool(load["model_loaded"], "P4R6TimeoutResultSummary.load_receipt.model_loaded") is not True or _bool(load["generation_occurred"], "P4R6TimeoutResultSummary.load_receipt.generation_occurred") is not False:
+            raise Phase4LocalQwenContractError("tracked R6 timeout load receipt semantics drifted")
+        aggregate = _exact(data["aggregate_budget"], ("filename", "raw_sha256", "raw_byte_length", "node_total_generate_entry_reservations", "node_local_generate_entry_reservations", "integrated_run_reservations", "generate_entry_reservation_total"), "P4R6TimeoutResultSummary.aggregate_budget")
+        if aggregate["filename"] != P4R6_TIMEOUT_AGGREGATE_FILENAME or aggregate["raw_sha256"] != P4R6_TIMEOUT_AGGREGATE_SHA256 or _integer(aggregate["raw_byte_length"], "P4R6TimeoutResultSummary.aggregate_budget.raw_byte_length", minimum=1) != P4R6_TIMEOUT_AGGREGATE_BYTE_LENGTH or _exact(aggregate["node_total_generate_entry_reservations"], NODE_ORDER, "P4R6TimeoutResultSummary.aggregate_budget.total") != {"F1": 0, "F2": 0, "F3": 1, "F4": 0} or _exact(aggregate["node_local_generate_entry_reservations"], NODE_ORDER, "P4R6TimeoutResultSummary.aggregate_budget.local") != {"F1": 0, "F2": 0, "F3": 1, "F4": 0} or _integer(aggregate["integrated_run_reservations"], "P4R6TimeoutResultSummary.aggregate_budget.integrated", minimum=0) != 0 or _integer(aggregate["generate_entry_reservation_total"], "P4R6TimeoutResultSummary.aggregate_budget.total_reservations", minimum=0) != 1:
+            raise Phase4LocalQwenContractError("tracked R6 timeout aggregate semantics drifted")
+        claims = _exact(data["historical_claims"], ("raw_response_absent", "model_success", "integrated_executed", "automatic_retry", "graph_resume", "first_no_generate_root_is_not_continuation_source"), "P4R6TimeoutResultSummary.historical_claims")
+        if _bool(claims["raw_response_absent"], "P4R6TimeoutResultSummary.historical_claims.raw_response_absent") is not True or _bool(claims["first_no_generate_root_is_not_continuation_source"], "P4R6TimeoutResultSummary.historical_claims.first_no_generate_root_is_not_continuation_source") is not True or any(_bool(claims[key], f"P4R6TimeoutResultSummary.historical_claims.{key}") is not False for key in ("model_success", "integrated_executed", "automatic_retry", "graph_resume")):
+            raise Phase4LocalQwenContractError("tracked R6 timeout historical claims drifted")
 
 
 class P4R5Policy(_CanonicalRecord):
@@ -2291,6 +2368,22 @@ def load_p4r5_result_summary() -> tuple[P4R5ResultSummary, bytes]:
     return P4R5ResultSummary.from_bytes(raw), raw
 
 
+def load_p4r6_timeout_result_summary() -> tuple[P4R6TimeoutResultSummary, bytes]:
+    """Read the tracked canonical summary of the immutable timeout source root."""
+
+    raw = _read_tracked_canonical_record(
+        P4R6_TIMEOUT_RESULT_PATH, "P4R6 timeout result summary"
+    )
+    if (
+        _sha256(raw) != P4R6_TIMEOUT_RESULT_SUMMARY_SHA256
+        or len(raw) != P4R6_TIMEOUT_RESULT_SUMMARY_BYTE_LENGTH
+    ):
+        raise Phase4LocalQwenContractError(
+            "tracked P4R6 timeout result summary raw identity drifted"
+        )
+    return P4R6TimeoutResultSummary.from_bytes(raw), raw
+
+
 def load_p4r6_policy_revision() -> tuple[P4R6Policy, bytes]:
     raw = _read_tracked_canonical_record(P4R6_POLICY_PATH, "P4R6 policy")
     policy = P4R6Policy.from_bytes(raw)
@@ -2648,6 +2741,105 @@ def _p4r6_load_r5_source(*, model_root: Path, b_input: Mapping[str, object]) -> 
             raise Phase4LocalQwenContractError(f"P4R6 R5 {attempt_name} semantics drifted")
     replay = _p4r6_replay_r5_checkpoint(packet=packet, receipt=receipt, b_input=b_input)
     return {"root": root, "summary": summary, "summary_raw": summary_raw, "policy": r5_policy, "policy_raw": r5_policy_raw, "binding": r5_binding, "policies": r5_policies, "profile": r5_profile, "packet": packet, "packet_raw": packet_raw, "receipt": receipt, "receipt_raw": receipt_raw, **replay}
+
+
+def _p4r6_timeout_result_root(model_root: Path) -> Path:
+    if not isinstance(model_root, Path) or not model_root.is_absolute() or not model_root.is_dir() or model_root.is_symlink():
+        raise Phase4LocalQwenContractError("P4R6 timeout source model root is invalid")
+    resolved = model_root.resolve(strict=True)
+    run_root = resolved.parent / "phase4_runs"
+    result_root = run_root / P4R6_TIMEOUT_RESULT_ROOT_LEAF
+    if not run_root.is_dir() or run_root.is_symlink() or not result_root.is_dir() or result_root.is_symlink():
+        raise Phase4LocalQwenContractError("P4R6 timeout source result root is unavailable")
+    return result_root
+
+
+def _p4r6_load_timeout_source(*, model_root: Path) -> dict[str, object]:
+    """Live-read the fixed timeout root and its still-initial shared aggregate."""
+
+    summary, summary_raw = load_p4r6_timeout_result_summary()
+    _, tracked_policy_raw = load_p4r6_policy_revision()
+    root = _p4r6_timeout_result_root(model_root)
+    policy_raw = _p4r5_read_expected_file(root / P4R6_RESULT_POLICY_NAME, expected_sha256="sha256:aac8749b73d9a974ea03c4b452843d51fbfa42be121bcf1729015e4cd2d4a974", expected_byte_length=6183, name="R6 timeout policy copy")
+    outcome_raw = _p4r5_read_expected_file(root / "pilot_outcome.json", expected_sha256=P4R6_TIMEOUT_OUTCOME_SHA256, expected_byte_length=P4R6_TIMEOUT_OUTCOME_BYTE_LENGTH, name="R6 timeout pilot outcome")
+    supervisor_raw = _p4r5_read_expected_file(root / "supervisor_receipt.json", expected_sha256=P4R6_TIMEOUT_SUPERVISOR_SHA256, expected_byte_length=P4R6_TIMEOUT_SUPERVISOR_BYTE_LENGTH, name="R6 timeout supervisor receipt")
+    ledger_raw = _p4r5_read_expected_file(root / "ledger.json", expected_sha256=P4R6_TIMEOUT_LEDGER_SHA256, expected_byte_length=P4R6_TIMEOUT_LEDGER_BYTE_LENGTH, name="R6 timeout ledger")
+    attempt_raw = _p4r5_read_expected_file(root / P4R6_TIMEOUT_ATTEMPT_RELATIVE_PATH, expected_sha256=P4R6_TIMEOUT_ATTEMPT_SHA256, expected_byte_length=P4R6_TIMEOUT_ATTEMPT_BYTE_LENGTH, name="R6 timeout F3 attempt result")
+    load_receipt_raw = _p4r5_read_expected_file(root / "local_qwen_load_receipt.json", expected_sha256=P4R6_TIMEOUT_LOAD_RECEIPT_SHA256, expected_byte_length=P4R6_TIMEOUT_LOAD_RECEIPT_BYTE_LENGTH, name="R6 timeout load receipt")
+    aggregate_raw = _p4r5_read_expected_file(root.parent / P4R6_TIMEOUT_AGGREGATE_FILENAME, expected_sha256=P4R6_TIMEOUT_AGGREGATE_SHA256, expected_byte_length=P4R6_TIMEOUT_AGGREGATE_BYTE_LENGTH, name="R6 timeout aggregate")
+    if policy_raw != tracked_policy_raw:
+        raise Phase4LocalQwenContractError("P4R6 timeout policy copy drifted")
+    outcome = PilotOutcome.from_bytes(outcome_raw)
+    supervisor = PilotSupervisorReceipt.from_bytes(supervisor_raw)
+    ledger = AttemptLedger.from_bytes(ledger_raw)
+    attempt = _validate_p4r6_timeout_prior_attempt(AttemptResult.from_bytes(attempt_raw))
+    load_receipt = LocalQwenLoadReceipt.from_bytes(load_receipt_raw)
+    aggregate = P4R6AggregateBudgetLedger.from_bytes(aggregate_raw)
+    if (root / attempt.raw_response_relative_path).exists() or (root / attempt.raw_response_relative_path).is_symlink():
+        raise Phase4LocalQwenContractError("P4R6 timeout source raw response must remain absent")
+    if outcome.pilot_id != P4R6_PILOT_ID or outcome.case_id != summary.case["case_id"] or outcome.request_id != summary.case["request_id"] or outcome.status != "stopped_after_first_failure" or outcome.stop_reason != "worker_terminal_failed_closed" or outcome.model_calls_performed != 1 or outcome.node_local_statuses != {"F1": "passed", "F2": "passed", "F3": "failed_once", "F4": "not_started"} or outcome.node_total_counts != {"F1": 0, "F2": 0, "F3": 1, "F4": 0} or outcome.integrated_outcome != "not_started" or outcome.composition_status != "not_executed" or outcome.assembler_status != "not_executed":
+        raise Phase4LocalQwenContractError("P4R6 timeout outcome live semantics drifted")
+    if supervisor.pilot_id != P4R6_PILOT_ID or supervisor.case_id != summary.case["case_id"] or supervisor.request_id != summary.case["request_id"] or supervisor.terminal_status != "generation_timeout" or supervisor.generation_started is not True or supervisor.raw_status != "not_captured" or supervisor.worker_exit_verified is not True or supervisor.worker_id != P4R6_TIMEOUT_WORKER_ID or supervisor.worker_pid != P4R6_TIMEOUT_WORKER_PID or supervisor.retry_performed is not False or supervisor.latest_attempt_result_identity != _identity(attempt.to_dict(), revision=ATTEMPT_RESULT_SCHEMA_VERSION) or supervisor.pilot_outcome_identity != _identity(outcome.to_dict(), revision=OUTCOME_SCHEMA_VERSION):
+        raise Phase4LocalQwenContractError("P4R6 timeout supervisor live semantics drifted")
+    if ledger.pilot_id != P4R6_PILOT_ID or ledger.case_id != summary.case["case_id"] or ledger.request_id != summary.case["request_id"] or ledger.node_total_counts != {"F1": 0, "F2": 0, "F3": 1, "F4": 0} or ledger.node_local_counts != {"F1": 0, "F2": 0, "F3": 1, "F4": 0} or ledger.integrated_run_count != 0 or ledger.attempt_result_ids != [P4R6_TIMEOUT_ATTEMPT_RESULT_ID] or ledger.prior_failure_ids != [P4R6_TIMEOUT_FAILURE_SHA256] or ledger.status != "stopped" or ledger.stop_reason != "worker_terminal_failed_closed":
+        raise Phase4LocalQwenContractError("P4R6 timeout ledger live semantics drifted")
+    if load_receipt.pilot_id != P4R6_PILOT_ID or load_receipt.receipt_id != P4R6_TIMEOUT_LOAD_RECEIPT_ID or load_receipt.model_loaded is not True or load_receipt.generation_occurred is not False:
+        raise Phase4LocalQwenContractError("P4R6 timeout load receipt live semantics drifted")
+    if aggregate.pilot_id != P4R6_PILOT_ID or aggregate.case_id != summary.case["case_id"] or aggregate.request_id != summary.case["request_id"] or aggregate.model_id != QWEN_MODEL_ID or aggregate.model_revision != QWEN_MODEL_REVISION or aggregate.node_total_generate_entry_reservations != {"F1": 0, "F2": 0, "F3": 1, "F4": 0} or aggregate.node_local_generate_entry_reservations != {"F1": 0, "F2": 0, "F3": 1, "F4": 0} or aggregate.integrated_run_reservations != 0 or aggregate.generate_entry_reservation_total != 1:
+        raise Phase4LocalQwenContractError("P4R6 timeout aggregate must be exactly F3=1")
+    return {
+        "root": root,
+        "summary": summary,
+        "summary_raw": summary_raw,
+        "policy_raw": policy_raw,
+        "outcome": outcome,
+        "outcome_raw": outcome_raw,
+        "supervisor": supervisor,
+        "supervisor_raw": supervisor_raw,
+        "ledger": ledger,
+        "ledger_raw": ledger_raw,
+        "attempt": attempt,
+        "attempt_raw": attempt_raw,
+        "load_receipt": load_receipt,
+        "load_receipt_raw": load_receipt_raw,
+        "aggregate": aggregate,
+        "aggregate_raw": aggregate_raw,
+    }
+
+
+def validate_p4r6_attempt_continuation(
+    *,
+    model_root: Path,
+    result_root: Path,
+    pilot: "PilotBinding",
+    profile: "LocalQwenProfile",
+    manifest: "PreCallManifest",
+) -> dict[str, object]:
+    """Validate the prepared continuation and its immutable prior evidence."""
+
+    source = _p4r6_load_timeout_source(model_root=model_root)
+    try:
+        summary_copy = (result_root / P4R6_TIMEOUT_SUMMARY_COPY_NAME).read_bytes()
+        aggregate_snapshot = (result_root / P4R6_TIMEOUT_AGGREGATE_SNAPSHOT_NAME).read_bytes()
+        receipt_raw = (result_root / P4R6_ATTEMPT_CONTINUATION_RECEIPT_NAME).read_bytes()
+    except OSError as exc:
+        raise Phase4LocalQwenContractError("prepared R6 continuation evidence is unavailable") from exc
+    if summary_copy != source["summary_raw"] or aggregate_snapshot != source["aggregate_raw"]:
+        raise Phase4LocalQwenContractError("prepared R6 continuation source copy drifted")
+    receipt = R6AttemptContinuationReceipt.from_bytes(receipt_raw)
+    receipt.validate_against(pilot=pilot, profile=profile, manifest=manifest, prior_attempt=source["attempt"])
+    expected_evidence = {
+        "r6_policy": _identity(source["policy_raw"], revision=P4R6_POLICY_SCHEMA_VERSION, identity_kind="raw_bytes"),
+        "pilot_outcome": _identity(source["outcome_raw"], revision=OUTCOME_SCHEMA_VERSION, identity_kind="raw_bytes"),
+        "supervisor_receipt": _identity(source["supervisor_raw"], revision=SUPERVISOR_RECEIPT_SCHEMA_VERSION, identity_kind="raw_bytes"),
+        "ledger": _identity(source["ledger_raw"], revision=LEDGER_SCHEMA_VERSION, identity_kind="raw_bytes"),
+        "attempt_result": _identity(source["attempt_raw"], revision=ATTEMPT_RESULT_SCHEMA_VERSION, identity_kind="raw_bytes"),
+        "load_receipt": _identity(source["load_receipt_raw"], revision=LOAD_RECEIPT_SCHEMA_VERSION, identity_kind="raw_bytes"),
+        "prior_aggregate": _identity(aggregate_snapshot, revision=P4R6_AGGREGATE_LEDGER_SCHEMA_VERSION, identity_kind="raw_bytes"),
+    }
+    if receipt.source["evidence_identities"] != expected_evidence:
+        raise Phase4LocalQwenContractError("prepared R6 continuation live evidence binding drifted")
+    return {**source, "continuation_receipt": receipt, "continuation_receipt_raw": receipt_raw}
 
 
 def _p4r6_build_checkpoint_seed(*, model_root: Path, b_input: Mapping[str, object]) -> dict[str, object]:
@@ -4193,6 +4385,33 @@ class AttemptLedger(_CanonicalRecord):
         return cls._from_payload(root)  # type: ignore[return-value]
 
     @classmethod
+    def create_r6_timeout_continuation(
+        cls, *, pilot: PilotBinding, prior_attempt: AttemptResult
+    ) -> "AttemptLedger":
+        """Create the running cumulative ledger for R6 F3 attempt index 2."""
+
+        pilot.validate()
+        _validate_p4r6_timeout_prior_attempt(prior_attempt)
+        if pilot.pilot_id != P4R6_PILOT_ID or pilot.case_binding["case_id"] != prior_attempt.case_id or pilot.case_binding["request_id"] != prior_attempt.request_id:
+            raise Phase4LocalQwenContractError("R6 continuation ledger scope drifted")
+        root = {
+            "schema_version": cls.SCHEMA_VERSION,
+            "ledger_id": "pending",
+            "pilot_id": pilot.pilot_id,
+            "case_id": pilot.case_binding["case_id"],
+            "request_id": pilot.case_binding["request_id"],
+            "node_total_counts": {"F1": 0, "F2": 0, "F3": 1, "F4": 0},
+            "node_local_counts": {"F1": 0, "F2": 0, "F3": 1, "F4": 0},
+            "integrated_run_count": 0,
+            "attempt_result_ids": [prior_attempt.result_id],
+            "prior_failure_ids": [prior_attempt.failure_identity["sha256"]],
+            "status": "running",
+            "stop_reason": None,
+        }
+        root["ledger_id"] = _sha256(_canonical_bytes({key: value for key, value in root.items() if key != "ledger_id"}))
+        return cls._from_payload(root)  # type: ignore[return-value]
+
+    @classmethod
     def _validate_payload(cls, data: Mapping[str, object]) -> None:
         _common_record(data, schema=cls.SCHEMA_VERSION, name="AttemptLedger")
         _sha(data["ledger_id"], "AttemptLedger.ledger_id")
@@ -4477,6 +4696,191 @@ class PilotOutcome(_CanonicalRecord):
         expected_id = _sha256(_canonical_bytes({key: data[key] for key in data if key != "outcome_id"}))
         if data["outcome_id"] != expected_id:
             raise Phase4LocalQwenContractError("PilotOutcome identity drifted")
+
+
+def _p4r6_timeout_source_identities() -> dict[str, dict[str, object]]:
+    return {
+        "r6_policy": {"identity_kind": "raw_bytes", "sha256": "sha256:aac8749b73d9a974ea03c4b452843d51fbfa42be121bcf1729015e4cd2d4a974", "byte_length": 6183, "revision": P4R6_POLICY_SCHEMA_VERSION},
+        "pilot_outcome": {"identity_kind": "raw_bytes", "sha256": P4R6_TIMEOUT_OUTCOME_SHA256, "byte_length": P4R6_TIMEOUT_OUTCOME_BYTE_LENGTH, "revision": OUTCOME_SCHEMA_VERSION},
+        "supervisor_receipt": {"identity_kind": "raw_bytes", "sha256": P4R6_TIMEOUT_SUPERVISOR_SHA256, "byte_length": P4R6_TIMEOUT_SUPERVISOR_BYTE_LENGTH, "revision": SUPERVISOR_RECEIPT_SCHEMA_VERSION},
+        "ledger": {"identity_kind": "raw_bytes", "sha256": P4R6_TIMEOUT_LEDGER_SHA256, "byte_length": P4R6_TIMEOUT_LEDGER_BYTE_LENGTH, "revision": LEDGER_SCHEMA_VERSION},
+        "attempt_result": {"identity_kind": "raw_bytes", "sha256": P4R6_TIMEOUT_ATTEMPT_SHA256, "byte_length": P4R6_TIMEOUT_ATTEMPT_BYTE_LENGTH, "revision": ATTEMPT_RESULT_SCHEMA_VERSION},
+        "load_receipt": {"identity_kind": "raw_bytes", "sha256": P4R6_TIMEOUT_LOAD_RECEIPT_SHA256, "byte_length": P4R6_TIMEOUT_LOAD_RECEIPT_BYTE_LENGTH, "revision": LOAD_RECEIPT_SCHEMA_VERSION},
+        "prior_aggregate": {"identity_kind": "raw_bytes", "sha256": P4R6_TIMEOUT_AGGREGATE_SHA256, "byte_length": P4R6_TIMEOUT_AGGREGATE_BYTE_LENGTH, "revision": P4R6_AGGREGATE_LEDGER_SCHEMA_VERSION},
+    }
+
+
+def _validate_p4r6_timeout_prior_attempt(attempt: AttemptResult) -> AttemptResult:
+    if type(attempt) is not AttemptResult:
+        raise Phase4LocalQwenContractError("R6 continuation prior attempt type drifted")
+    attempt.validate()
+    failure = attempt.failure_identity
+    if (
+        attempt.pilot_id != P4R6_PILOT_ID
+        or attempt.run_id != f"{P4R6_PILOT_ID}-node-local"
+        or attempt.case_id != "path3-commerce-checkout"
+        or attempt.request_id != "p4-02a-synthetic-request-001"
+        or attempt.node_id != "F3"
+        or attempt.attempt_index != 1
+        or attempt.call_kind != "node_local"
+        or attempt.generate_started is not True
+        or attempt.call_count != 1
+        or attempt.retry_count != 0
+        or attempt.raw_status != "not_captured"
+        or attempt.raw_sha256 is not None
+        or attempt.raw_byte_length != 0
+        or attempt.parse_status != "failed"
+        or attempt.node_contract_status != "not_run"
+        or attempt.registry_status != "not_run"
+        or attempt.composition_status != "not_executed"
+        or attempt.assembler_status != "not_executed"
+        or attempt.integrated_success is not False
+        or attempt.failure_code != "generation_timeout"
+        or not isinstance(failure, Mapping)
+        or failure.get("sha256") != P4R6_TIMEOUT_FAILURE_SHA256
+        or attempt.result_id != P4R6_TIMEOUT_ATTEMPT_RESULT_ID
+        or attempt.terminal is not True
+        or attempt.source_kind != "real_local_qwen"
+    ):
+        raise Phase4LocalQwenContractError("R6 continuation prior attempt semantics drifted")
+    return attempt
+
+
+class R6AttemptContinuationReceipt(_CanonicalRecord):
+    """No-action binding for a cross-worker second independent R6 attempt."""
+
+    KEYS = (
+        "schema_version", "receipt_id", "status", "tracked_summary_identity",
+        "source", "target", "continuation", "worker_link", "action_state",
+    )
+    SCHEMA_VERSION = P4R6_ATTEMPT_CONTINUATION_RECEIPT_SCHEMA_VERSION
+
+    @classmethod
+    def create(
+        cls,
+        *,
+        pilot: PilotBinding,
+        profile: LocalQwenProfile,
+        manifest: "PreCallManifest",
+        prior_attempt: AttemptResult,
+    ) -> "R6AttemptContinuationReceipt":
+        _validate_p4r6_timeout_prior_attempt(prior_attempt)
+        pilot.validate()
+        profile.validate()
+        manifest.validate()
+        root = {
+            "schema_version": cls.SCHEMA_VERSION,
+            "receipt_id": "pending",
+            "status": "prepared_cross_worker_attempt_continuation_no_action",
+            "tracked_summary_identity": {
+                "identity_kind": "raw_bytes",
+                "sha256": P4R6_TIMEOUT_RESULT_SUMMARY_SHA256,
+                "byte_length": P4R6_TIMEOUT_RESULT_SUMMARY_BYTE_LENGTH,
+                "revision": P4R6_TIMEOUT_RESULT_SUMMARY_SCHEMA_VERSION,
+            },
+            "source": {
+                "source_commit": P4R6_TIMEOUT_SOURCE_COMMIT,
+                "result_root_leaf": P4R6_TIMEOUT_RESULT_ROOT_LEAF,
+                "pilot_id": P4R6_PILOT_ID,
+                "case_id": "path3-commerce-checkout",
+                "request_id": "p4-02a-synthetic-request-001",
+                "model_id": QWEN_MODEL_ID,
+                "model_revision": QWEN_MODEL_REVISION,
+                "evidence_identities": _p4r6_timeout_source_identities(),
+            },
+            "target": {
+                "pilot_id": pilot.pilot_id,
+                "case_id": pilot.case_binding["case_id"],
+                "request_id": pilot.case_binding["request_id"],
+                "model_id": profile.model_id,
+                "model_revision": profile.model_revision,
+                "result_root_marker": pilot.result_root_marker,
+                "pilot_identity": _identity(pilot.to_dict(), revision=PILOT_BINDING_SCHEMA_VERSION),
+                "profile_identity": _identity(profile.to_dict(), revision=LOCAL_QWEN_PROFILE_SCHEMA_VERSION),
+                "manifest_identity": _identity(manifest.to_dict(), revision=MANIFEST_SCHEMA_VERSION),
+            },
+            "continuation": {
+                "continuation_kind": "cross_worker_second_independent_attempt",
+                "continuation_node": "F3",
+                "next_attempt_index": 2,
+                "change_reason": "output_schema_clarification",
+                "prior_result_id": prior_attempt.result_id,
+                "prior_failure_id": prior_attempt.failure_identity["sha256"],
+                "retry_count": 0,
+                "automatic_retry": False,
+                "graph_resume": False,
+            },
+            "worker_link": {
+                "prior_worker_id": P4R6_TIMEOUT_WORKER_ID,
+                "prior_worker_pid": P4R6_TIMEOUT_WORKER_PID,
+                "prior_worker_exit_verified": True,
+                "new_worker_not_loaded_at_prepare": True,
+                "gpu_driver_level_recovery_claimed": False,
+            },
+            "action_state": _make_action_state(model_action=False, graph_runtime_execution=False),
+        }
+        root["receipt_id"] = _sha256(_canonical_bytes({key: value for key, value in root.items() if key != "receipt_id"}))
+        return cls._from_payload(root)  # type: ignore[return-value]
+
+    @classmethod
+    def _validate_payload(cls, data: Mapping[str, object]) -> None:
+        _common_record(data, schema=cls.SCHEMA_VERSION, name="R6AttemptContinuationReceipt")
+        _sha(data["receipt_id"], "R6AttemptContinuationReceipt.receipt_id")
+        if data["status"] != "prepared_cross_worker_attempt_continuation_no_action":
+            raise Phase4LocalQwenContractError("R6 continuation receipt status drifted")
+        summary = _validate_identity(data["tracked_summary_identity"], "R6AttemptContinuationReceipt.tracked_summary_identity")
+        if summary != {"identity_kind": "raw_bytes", "sha256": P4R6_TIMEOUT_RESULT_SUMMARY_SHA256, "byte_length": P4R6_TIMEOUT_RESULT_SUMMARY_BYTE_LENGTH, "revision": P4R6_TIMEOUT_RESULT_SUMMARY_SCHEMA_VERSION}:
+            raise Phase4LocalQwenContractError("R6 continuation tracked summary identity drifted")
+        source = _exact(data["source"], ("source_commit", "result_root_leaf", "pilot_id", "case_id", "request_id", "model_id", "model_revision", "evidence_identities"), "R6AttemptContinuationReceipt.source")
+        if source["source_commit"] != P4R6_TIMEOUT_SOURCE_COMMIT or source["result_root_leaf"] != P4R6_TIMEOUT_RESULT_ROOT_LEAF or source["pilot_id"] != P4R6_PILOT_ID or source["case_id"] != "path3-commerce-checkout" or source["request_id"] != "p4-02a-synthetic-request-001" or source["model_id"] != QWEN_MODEL_ID or source["model_revision"] != QWEN_MODEL_REVISION:
+            raise Phase4LocalQwenContractError("R6 continuation source scope drifted")
+        evidence = _exact(source["evidence_identities"], ("r6_policy", "pilot_outcome", "supervisor_receipt", "ledger", "attempt_result", "load_receipt", "prior_aggregate"), "R6AttemptContinuationReceipt.source.evidence_identities")
+        if {key: _validate_identity(evidence[key], f"R6AttemptContinuationReceipt.source.{key}") for key in evidence} != _p4r6_timeout_source_identities():
+            raise Phase4LocalQwenContractError("R6 continuation source evidence identity drifted")
+        target = _exact(data["target"], ("pilot_id", "case_id", "request_id", "model_id", "model_revision", "result_root_marker", "pilot_identity", "profile_identity", "manifest_identity"), "R6AttemptContinuationReceipt.target")
+        _validate_id_scope(target, "R6AttemptContinuationReceipt.target", "pilot_id", "case_id", "request_id")
+        _text(target["result_root_marker"], "R6AttemptContinuationReceipt.target.result_root_marker", pattern=_ID_RE)
+        for key in ("pilot_identity", "profile_identity", "manifest_identity"):
+            _validate_identity(target[key], f"R6AttemptContinuationReceipt.target.{key}")
+        if target["pilot_id"] != P4R6_PILOT_ID or target["case_id"] != source["case_id"] or target["request_id"] != source["request_id"] or target["model_id"] != QWEN_MODEL_ID or target["model_revision"] != QWEN_MODEL_REVISION:
+            raise Phase4LocalQwenContractError("R6 continuation target scope drifted")
+        continuation = _exact(data["continuation"], ("continuation_kind", "continuation_node", "next_attempt_index", "change_reason", "prior_result_id", "prior_failure_id", "retry_count", "automatic_retry", "graph_resume"), "R6AttemptContinuationReceipt.continuation")
+        if continuation["continuation_kind"] != "cross_worker_second_independent_attempt" or continuation["continuation_node"] != "F3" or _integer(continuation["next_attempt_index"], "R6AttemptContinuationReceipt.continuation.next_attempt_index", minimum=1) != 2 or continuation["change_reason"] != "output_schema_clarification" or continuation["prior_result_id"] != P4R6_TIMEOUT_ATTEMPT_RESULT_ID or continuation["prior_failure_id"] != P4R6_TIMEOUT_FAILURE_SHA256 or _integer(continuation["retry_count"], "R6AttemptContinuationReceipt.continuation.retry_count", minimum=0) != 0 or _bool(continuation["automatic_retry"], "R6AttemptContinuationReceipt.continuation.automatic_retry") is not False or _bool(continuation["graph_resume"], "R6AttemptContinuationReceipt.continuation.graph_resume") is not False:
+            raise Phase4LocalQwenContractError("R6 continuation semantics drifted")
+        worker = _exact(data["worker_link"], ("prior_worker_id", "prior_worker_pid", "prior_worker_exit_verified", "new_worker_not_loaded_at_prepare", "gpu_driver_level_recovery_claimed"), "R6AttemptContinuationReceipt.worker_link")
+        if worker["prior_worker_id"] != P4R6_TIMEOUT_WORKER_ID or _integer(worker["prior_worker_pid"], "R6AttemptContinuationReceipt.worker_link.prior_worker_pid", minimum=1) != P4R6_TIMEOUT_WORKER_PID or _bool(worker["prior_worker_exit_verified"], "R6AttemptContinuationReceipt.worker_link.prior_worker_exit_verified") is not True or _bool(worker["new_worker_not_loaded_at_prepare"], "R6AttemptContinuationReceipt.worker_link.new_worker_not_loaded_at_prepare") is not True or _bool(worker["gpu_driver_level_recovery_claimed"], "R6AttemptContinuationReceipt.worker_link.gpu_driver_level_recovery_claimed") is not False:
+            raise Phase4LocalQwenContractError("R6 continuation worker link drifted")
+        _action_flags(data["action_state"], "R6AttemptContinuationReceipt.action_state", model_action=False, graph_runtime_execution=False)
+        expected_id = _sha256(_canonical_bytes({key: data[key] for key in data if key != "receipt_id"}))
+        if data["receipt_id"] != expected_id:
+            raise Phase4LocalQwenContractError("R6 continuation receipt identity drifted")
+
+    def validate_against(
+        self,
+        *,
+        pilot: PilotBinding,
+        profile: LocalQwenProfile,
+        manifest: "PreCallManifest",
+        prior_attempt: AttemptResult,
+    ) -> None:
+        self.validate()
+        _validate_p4r6_timeout_prior_attempt(prior_attempt)
+        pilot.validate()
+        profile.validate()
+        manifest.validate()
+        expected_target = {
+            "pilot_id": pilot.pilot_id,
+            "case_id": pilot.case_binding["case_id"],
+            "request_id": pilot.case_binding["request_id"],
+            "model_id": profile.model_id,
+            "model_revision": profile.model_revision,
+            "result_root_marker": pilot.result_root_marker,
+            "pilot_identity": _identity(pilot.to_dict(), revision=PILOT_BINDING_SCHEMA_VERSION),
+            "profile_identity": _identity(profile.to_dict(), revision=LOCAL_QWEN_PROFILE_SCHEMA_VERSION),
+            "manifest_identity": _identity(manifest.to_dict(), revision=MANIFEST_SCHEMA_VERSION),
+        }
+        if self.target != expected_target or manifest.pilot_binding != pilot.to_dict() or self.continuation["prior_result_id"] != prior_attempt.result_id or self.continuation["prior_failure_id"] != prior_attempt.failure_identity["sha256"]:
+            raise Phase4LocalQwenContractError("R6 continuation live target binding drifted")
 
 
 class PreCallManifest(_CanonicalRecord):
@@ -5418,6 +5822,7 @@ def prepare_local_qwen_pilot(
     r5_policy: P4R5Policy | None = None,
     r6_policy: P4R6Policy | None = None,
     checkpoint_b_input: Mapping[str, object] | None = None,
+    r6_timeout_continuation: bool = False,
 ) -> tuple[PilotBinding, tuple[NodeProjectionPolicy, ...], LocalQwenProfile, PreCallManifest]:
     """Prepare and persist the no-run manifest; never imports or loads a model."""
 
@@ -5426,6 +5831,8 @@ def prepare_local_qwen_pilot(
     checked_policies = tuple(NodeProjectionPolicy.from_dict(policy.to_dict()) for policy in policies)
     if sum(policy is not None for policy in (r2_policy, r3_policy, r4_policy, r5_policy, r6_policy)) > 1:
         raise Phase4LocalQwenContractError("prepare cannot combine R2, R3, R4, R5, and R6 policy revisions")
+    if type(r6_timeout_continuation) is not bool or (r6_timeout_continuation and r6_policy is None):
+        raise Phase4LocalQwenContractError("R6 timeout continuation prepare requires only the R6 policy")
     r2_policy_raw: bytes | None = None
     predecessor_ledger_raw: bytes | None = None
     r2_summary_raw: bytes | None = None
@@ -5438,6 +5845,7 @@ def prepare_local_qwen_pilot(
     r6_policy_raw: bytes | None = None
     r6_r5_policy_raw: bytes | None = None
     r6_r5_summary_raw: bytes | None = None
+    r6_timeout_source: dict[str, object] | None = None
     r4_summary_raw: bytes | None = None
     profile_max_new_tokens = 512
     if r2_policy is not None:
@@ -5493,6 +5901,8 @@ def prepare_local_qwen_pilot(
         _validate_p4r6_policy_against_policies(tracked_policy, checked_policies)
         if checkpoint_b_input is None:
             raise Phase4LocalQwenContractError("P4R6 prepare requires the R5 checkpoint B input")
+        if r6_timeout_continuation:
+            r6_timeout_source = _p4r6_load_timeout_source(model_root=model_root)
     if gpu_facts is None or gpu_facts.get("executed") is not True:
         raise Phase4LocalQwenContractError("prepare requires a live local GPU fact record")
     for key in ("device_index", "total_vram_bytes", "free_vram_bytes"):
@@ -5648,6 +6058,23 @@ def prepare_local_qwen_pilot(
         _write_once(result_root, P4R6_RESULT_R5_POLICY_NAME, r6_r5_policy_raw)
         _write_once(result_root, P4R6_RESULT_R5_PACKET_NAME, checkpoint["packet_raw"])
         _write_once(result_root, P4R6_RESULT_R5_RECEIPT_NAME, checkpoint["receipt_raw"])
+        if r6_timeout_source is not None:
+            receipt = R6AttemptContinuationReceipt.create(
+                pilot=binding,
+                profile=profile,
+                manifest=manifest,
+                prior_attempt=r6_timeout_source["attempt"],
+            )
+            _write_once(result_root, P4R6_TIMEOUT_SUMMARY_COPY_NAME, r6_timeout_source["summary_raw"])
+            _write_once(result_root, P4R6_TIMEOUT_AGGREGATE_SNAPSHOT_NAME, r6_timeout_source["aggregate_raw"])
+            _write_once(result_root, P4R6_ATTEMPT_CONTINUATION_RECEIPT_NAME, receipt.canonical_bytes())
+            validate_p4r6_attempt_continuation(
+                model_root=model_root,
+                result_root=result_root,
+                pilot=binding,
+                profile=profile,
+                manifest=manifest,
+            )
     return binding, checked_policies, profile, manifest
 
 
@@ -5663,6 +6090,7 @@ def load_prepared_local_qwen_pilot(
     r4_policy: P4R4Policy | None = None,
     r5_policy: P4R5Policy | None = None,
     r6_policy: P4R6Policy | None = None,
+    r6_timeout_continuation: bool = False,
 ) -> tuple[PilotBinding, tuple[NodeProjectionPolicy, ...], LocalQwenProfile, PreCallManifest]:
     """Revalidate the canonical prepare artifact and live model before load."""
 
@@ -5687,6 +6115,8 @@ def load_prepared_local_qwen_pilot(
         raise Phase4LocalQwenContractError("prepared synthetic case binding drifted")
     if sum(policy is not None for policy in (r2_policy, r3_policy, r4_policy, r5_policy, r6_policy)) > 1:
         raise Phase4LocalQwenContractError("prepared pilot cannot combine R2, R3, R4, R5, and R6 policy revisions")
+    if type(r6_timeout_continuation) is not bool or (r6_timeout_continuation and r6_policy is None):
+        raise Phase4LocalQwenContractError("prepared R6 timeout continuation requires only the R6 policy")
     r2_policy_raw: bytes | None = None
     r3_policy_raw: bytes | None = None
     r4_policy_raw: bytes | None = None
@@ -5761,6 +6191,23 @@ def load_prepared_local_qwen_pilot(
         )
         if profile.max_new_tokens != 512 or binding.integrated_run_cap != 0:
             raise Phase4LocalQwenContractError("prepared R6 profile/budget cap drifted")
+        continuation_paths = (
+            result_root / P4R6_TIMEOUT_SUMMARY_COPY_NAME,
+            result_root / P4R6_TIMEOUT_AGGREGATE_SNAPSHOT_NAME,
+            result_root / P4R6_ATTEMPT_CONTINUATION_RECEIPT_NAME,
+        )
+        if r6_timeout_continuation:
+            if not all(path.is_file() and not path.is_symlink() for path in continuation_paths):
+                raise Phase4LocalQwenContractError("prepared R6 continuation evidence is incomplete")
+            validate_p4r6_attempt_continuation(
+                model_root=model_root,
+                result_root=result_root,
+                pilot=binding,
+                profile=profile,
+                manifest=manifest,
+            )
+        elif any(path.exists() or path.is_symlink() for path in continuation_paths):
+            raise Phase4LocalQwenContractError("prepared R6 continuation requires the explicit continuation mode")
     inventory = validate_model_inventory_metadata(
         model_root=model_root,
         integrity_evidence=integrity_evidence,
@@ -6631,6 +7078,7 @@ def start_supervised_local_qwen_runtime(
     integrity_evidence: Path,
     result_root: Path,
     load_timeout_seconds: int = 600,
+    r6_timeout_continuation: bool = False,
 ) -> SupervisedLocalQwenRuntime:
     """Live-revalidate persisted prepare evidence, then start one worker."""
 
@@ -6659,6 +7107,7 @@ def start_supervised_local_qwen_runtime(
             integrity_evidence=integrity_evidence,
             result_root=result_root,
             b_input=b_input,
+            r6_timeout_continuation=r6_timeout_continuation,
             **policy_kwargs,
         )
     except OSError as exc:
@@ -6998,6 +7447,7 @@ class Phase4LocalQwenPilotRunner:
         runtime_start_claim: PilotRuntimeStartClaim | None = None,
         assembler_context: object | None = None,
         assembler_guidance: object | None = None,
+        r6_attempt_continuation: tuple[R6AttemptContinuationReceipt, AttemptResult] | None = None,
     ) -> None:
         pilot.validate()
         profile.validate()
@@ -7006,6 +7456,14 @@ class Phase4LocalQwenPilotRunner:
             raise Phase4LocalQwenContractError("runner policies must be ordered F1-F4")
         if source_kind not in SOURCE_KINDS:
             raise Phase4LocalQwenContractError("runner source kind is invalid")
+        if r6_attempt_continuation is not None and (
+            type(r6_attempt_continuation) is not tuple
+            or len(r6_attempt_continuation) != 2
+            or type(r6_attempt_continuation[0]) is not R6AttemptContinuationReceipt
+            or type(r6_attempt_continuation[1]) is not AttemptResult
+            or pilot.pilot_id != P4R6_PILOT_ID
+        ):
+            raise Phase4LocalQwenContractError("runner R6 continuation binding is invalid")
         if source_kind == "real_local_qwen":
             if (
                 not isinstance(model_root, Path)
@@ -7154,6 +7612,7 @@ class Phase4LocalQwenPilotRunner:
         self._candidate_record: dict[str, object] | None = None
         self._candidate_bytes: bytes | None = None
         self._checkpoint_seed: dict[str, object] | None = None
+        self._r6_attempt_continuation: tuple[R6AttemptContinuationReceipt, AttemptResult] | None = None
         if self._real_pilot_revision == "r5":
             self._checkpoint_seed = validate_p4r5_live_binding(
                 model_root=self._model_root,
@@ -7180,6 +7639,41 @@ class Phase4LocalQwenPilotRunner:
             self._node_local_status["F2"] = "passed"
             self._node_local_outputs = dict(self._checkpoint_seed["outputs"])
             self._node_local_refs = copy.deepcopy(self._checkpoint_seed["refs"])
+        continuation_path = self._result_root / P4R6_ATTEMPT_CONTINUATION_RECEIPT_NAME
+        if self._source_kind == "real_local_qwen" and self._pilot.pilot_id == P4R6_PILOT_ID:
+            if (continuation_path.is_file() and not continuation_path.is_symlink()) != (r6_attempt_continuation is not None):
+                raise Phase4LocalQwenContractError("real R6 runner continuation mode drifted")
+        if r6_attempt_continuation is not None:
+            receipt, prior_attempt = r6_attempt_continuation
+            receipt.validate_against(
+                pilot=self._pilot,
+                profile=self._profile,
+                manifest=self._manifest,
+                prior_attempt=prior_attempt,
+            )
+            if self._source_kind == "real_local_qwen":
+                if self._model_root is None:
+                    raise Phase4LocalQwenContractError("real R6 continuation model root is missing")
+                live = validate_p4r6_attempt_continuation(
+                    model_root=self._model_root,
+                    result_root=self._result_root,
+                    pilot=self._pilot,
+                    profile=self._profile,
+                    manifest=self._manifest,
+                )
+                if live["continuation_receipt"] != receipt or live["attempt"] != prior_attempt:
+                    raise Phase4LocalQwenContractError("real R6 continuation source drifted")
+            self._ledger = AttemptLedger.create_r6_timeout_continuation(
+                pilot=self._pilot,
+                prior_attempt=prior_attempt,
+            )
+            self._node_local_status["F3"] = "failed_once"
+            self._node_local_failures["F3"] = AttemptResult.from_dict(prior_attempt.to_dict())
+            self._model_calls = 1
+            self._r6_attempt_continuation = (
+                R6AttemptContinuationReceipt.from_dict(receipt.to_dict()),
+                AttemptResult.from_dict(prior_attempt.to_dict()),
+            )
 
     @property
     def ledger(self) -> AttemptLedger:
@@ -7346,6 +7840,32 @@ class Phase4LocalQwenPilotRunner:
             prior_failure = None
             if prompt_version != 1 or change_reason is not None:
                 raise Phase4LocalQwenContractError("integrated run must use fresh prompt v1")
+        if (
+            self._source_kind == "real_local_qwen"
+            and self._real_pilot_revision == "r6"
+            and node_id == "F3"
+            and call_kind == "node_local"
+            and attempt_index == 2
+            and self._r6_attempt_continuation is not None
+        ):
+            if self._model_root is None:
+                raise Phase4LocalQwenContractError("real R6 continuation model root is missing")
+            live_continuation = validate_p4r6_attempt_continuation(
+                model_root=self._model_root,
+                result_root=self._result_root,
+                pilot=self._pilot,
+                profile=self._profile,
+                manifest=self._manifest,
+            )
+            if (
+                live_continuation["continuation_receipt"]
+                != self._r6_attempt_continuation[0]
+                or live_continuation["attempt"]
+                != self._r6_attempt_continuation[1]
+            ):
+                raise Phase4LocalQwenContractError(
+                    "real R6 continuation changed before attempt 2"
+                )
         upstream_refs, upstream_outputs = self._upstream_for(node_id)
         if self._active_authority_state is None:
             raise Phase4LocalQwenContractError("authority state is missing before input projection")
@@ -7941,6 +8461,15 @@ __all__ = [
     "P4R5_PROMPT_V2_REVISION",
     "P4R5_RESULT_POLICY_NAME",
     "P4R5_RESULT_R4_SUMMARY_NAME",
+    "P4R6_AGGREGATE_LEDGER_SCHEMA_VERSION",
+    "P4R6_ATTEMPT_CONTINUATION_RECEIPT_NAME",
+    "P4R6_ATTEMPT_CONTINUATION_RECEIPT_SCHEMA_VERSION",
+    "P4R6_PILOT_ID",
+    "P4R6_POLICY_SCHEMA_VERSION",
+    "P4R6_PROMPT_REVISION",
+    "P4R6_PROMPT_V2_REVISION",
+    "P4R6_PROJECTION_REVISION",
+    "P4R6_TIMEOUT_RESULT_SUMMARY_SCHEMA_VERSION",
     "P4R3_RESULT_BINDING_NAME",
     "P4R3_RESULT_POLICY_NAME",
     "P4R3_RESULT_R2_SUMMARY_NAME",
@@ -7976,6 +8505,10 @@ __all__ = [
     "P4R5CheckpointPacket",
     "P4R5CheckpointReceipt",
     "P4R5Policy",
+    "P4R6AggregateBudgetLedger",
+    "P4R6Policy",
+    "P4R6TimeoutResultSummary",
+    "R6AttemptContinuationReceipt",
     "Phase4LocalQwenContractError",
     "Phase4LocalQwenPilotRunner",
     "PreCallManifest",
@@ -8005,6 +8538,9 @@ __all__ = [
     "load_p4r4_policy_revision",
     "load_p4r4_result_summary",
     "load_p4r5_policy_revision",
+    "load_p4r5_result_summary",
+    "load_p4r6_policy_revision",
+    "load_p4r6_timeout_result_summary",
     "make_canonical_identity",
     "persist_pilot_outcome",
     "persist_local_qwen_load_receipt",
@@ -8019,4 +8555,6 @@ __all__ = [
     "validate_p4r3_live_binding",
     "validate_p4r4_live_binding",
     "validate_p4r5_live_binding",
+    "validate_p4r6_attempt_continuation",
+    "validate_p4r6_live_binding",
 ]

@@ -45,6 +45,7 @@ from req2web_runtime.phase4_local_qwen import (
     prepare_local_qwen_pilot,
     probe_local_gpu_facts,
     start_supervised_local_qwen_runtime,
+    validate_p4r6_attempt_continuation,
 )
 
 
@@ -149,7 +150,19 @@ def build_parser() -> argparse.ArgumentParser:
             default="r6",
             help="Explicit pilot revision; the default is prompt-order recovery R6.",
         )
+        command.add_argument(
+            "--resume-r6-timeout",
+            action="store_true",
+            help="Continue the fixed R6 generation-timeout as independent F3 attempt 2; this is not graph resume.",
+        )
     return parser
+
+
+def _validate_cli_combination(args: argparse.Namespace) -> None:
+    if args.resume_r6_timeout and args.pilot != "r6":
+        raise Phase4LocalQwenContractError("--resume-r6-timeout is only valid with --pilot r6")
+    if args.resume_r6_timeout and args.command == "run" and args.second_attempt_change_reason != "output_schema_clarification":
+        raise Phase4LocalQwenContractError("R6 timeout continuation requires --second-attempt-change-reason=output_schema_clarification")
 
 
 def _summary(outcome) -> dict[str, object]:
@@ -170,6 +183,7 @@ def _summary(outcome) -> dict[str, object]:
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
+    _validate_cli_combination(args)
     _offline_process()
     b_input = synthetic_commerce_b_input()
     try:
@@ -192,6 +206,7 @@ def main(argv: list[str] | None = None) -> int:
                 result_root=args.result_root,
                 case_binding=build_synthetic_case_binding(b_input),
                 gpu_facts=probe_local_gpu_facts(),
+                r6_timeout_continuation=args.resume_r6_timeout,
                 **policy_kwargs,
             )
             print(json.dumps({
@@ -225,6 +240,7 @@ def main(argv: list[str] | None = None) -> int:
             integrity_evidence=args.integrity_evidence,
             result_root=args.result_root,
             b_input=b_input,
+            r6_timeout_continuation=args.resume_r6_timeout,
             **policy_kwargs,
         )
         lease = acquire_pilot_execution_lease(
@@ -247,8 +263,22 @@ def main(argv: list[str] | None = None) -> int:
                 model_root=args.model_root,
                 integrity_evidence=args.integrity_evidence,
                 result_root=args.result_root,
+                r6_timeout_continuation=args.resume_r6_timeout,
             )
             backend = runtime.backend
+            continuation = None
+            if args.resume_r6_timeout:
+                continuation_source = validate_p4r6_attempt_continuation(
+                    model_root=args.model_root,
+                    result_root=args.result_root,
+                    pilot=runtime.pilot,
+                    profile=runtime.profile,
+                    manifest=runtime.manifest,
+                )
+                continuation = (
+                    continuation_source["continuation_receipt"],
+                    continuation_source["attempt"],
+                )
             runner = Phase4LocalQwenPilotRunner(
                 pilot=runtime.pilot,
                 policies=runtime.policies,
@@ -262,8 +292,23 @@ def main(argv: list[str] | None = None) -> int:
                 load_receipt=runtime.load_receipt,
                 execution_lease=runtime.execution_lease,
                 runtime_start_claim=runtime.runtime_start_claim,
+                r6_attempt_continuation=continuation,
             )
+            if args.resume_r6_timeout:
+                continued_f3 = runner.run_node_local(
+                    node_id="F3",
+                    prompt_version=2,
+                    change_reason="output_schema_clarification",
+                )
+                if continued_f3.failure_code is not None:
+                    outcome = runner.outcome(
+                        stop_reason=str(
+                            runner.ledger.stop_reason or "node_budget_exhausted"
+                        )
+                    )
             node_order = ("F3", "F4") if args.pilot in {"r5", "r6"} else ("F1", "F2", "F3", "F4")
+            if args.resume_r6_timeout:
+                node_order = () if outcome is not None else ("F4",)
             for node_id in node_order:
                 first = runner.run_node_local(node_id=node_id)
                 if first.failure_code is None:

@@ -446,6 +446,92 @@ def _r6_fixture_binding_manifest(root_marker: str = "r6-test-result-root"):
     return b_input, policies, profile, binding, manifest
 
 
+def _r6_timeout_prior_attempt() -> AttemptResult:
+    """Reconstruct the exact immutable attempt result bound by the summary."""
+
+    return AttemptResult.from_dict(
+        {
+            "action_record_id": "sha256:b0c64d95ca463274e5e1f5c6593b37c9012d142724372e1820f08e14742ba5ce",
+            "action_state": {
+                "action_state_version": "req2web.phase4.p4_03.action_state.v1",
+                "dependency_installation": False,
+                "graph_runtime_execution": False,
+                "local_files_only": True,
+                "model_action": True,
+                "network": False,
+                "remote_action": False,
+                "runtime_kind": "local_qwen_langgraph",
+                "telemetry": False,
+                "tracing": False,
+                "training": False,
+            },
+            "assembler_status": "not_executed",
+            "attempt_index": 1,
+            "call_count": 1,
+            "call_kind": "node_local",
+            "case_id": "path3-commerce-checkout",
+            "composition_status": "not_executed",
+            "failure_code": "generation_timeout",
+            "failure_identity": {
+                "byte_length": 181,
+                "identity_kind": "canonical_json",
+                "revision": "req2web.phase4.p4_03.failure.v1",
+                "sha256": p4q.P4R6_TIMEOUT_FAILURE_SHA256,
+            },
+            "generate_started": True,
+            "integrated_success": False,
+            "node_contract_status": "not_run",
+            "node_id": "F3",
+            "parse_status": "failed",
+            "pilot_id": P4R6_PILOT_ID,
+            "pre_call_id": "sha256:9ce81a634a5931997545d09a894de556f3c878e23c2e42e4c611a509454af354",
+            "raw_byte_length": 0,
+            "raw_response_relative_path": "runs/p4-03r6-local-qwen-9b-node-local/F3/attempt-01/raw_response.bin",
+            "raw_sha256": None,
+            "raw_status": "not_captured",
+            "registry_status": "not_run",
+            "request_id": "p4-02a-synthetic-request-001",
+            "result_id": p4q.P4R6_TIMEOUT_ATTEMPT_RESULT_ID,
+            "retry_count": 0,
+            "run_id": "p4-03r6-local-qwen-9b-node-local",
+            "schema_version": p4q.ATTEMPT_RESULT_SCHEMA_VERSION,
+            "source_kind": "real_local_qwen",
+            "terminal": True,
+        }
+    )
+
+
+def _seed_r6_fixture_runner(
+    runner: Phase4LocalQwenPilotRunner,
+    *,
+    b_input: dict[str, object],
+    outputs: list[bytes],
+) -> None:
+    state = phase4_create_authority_state(b_input)
+    refs = {}
+    for node_id, raw in zip(("F1", "F2"), outputs[:2], strict=True):
+        state = phase4_register_node_output(state, node_id, json.loads(raw))
+        identity = make_identity(
+            {"node_id": node_id, "raw": raw.decode("utf-8")},
+            revision="test.r6.continuation.seed.ref.v1",
+        )
+        refs[node_id] = {
+            "ref_type": "node_output",
+            "ref_id": identity["sha256"],
+            "ref_sha256": identity["sha256"],
+            "ref_revision": (
+                f"{p4q.P4_03_SCHEMA_PREFIX}.node_output.{P4R5_PILOT_ID}."
+                f"{p4q.P4R5_CHECKPOINT_RUN_ID}.{b_input['case_id']}."
+                f"{b_input['request_id']}.{node_id}"
+            ),
+        }
+    runner._node_local_status["F1"] = "passed"
+    runner._node_local_status["F2"] = "passed"
+    runner._node_local_outputs = {"F1": outputs[0], "F2": outputs[1]}
+    runner._node_local_refs = refs
+    runner._checkpoint_seed = {"authority_state": state}
+
+
 def FakeBackend(
     outputs: list[bytes], *, result_root: Path | None = None
 ):
@@ -3461,10 +3547,264 @@ class Phase4LocalQwenTests(unittest.TestCase):
         self.assertIn(exact_f4, f4_guidance)
         self.assertIn("does not change the validator, registry, or global node schema", f4_guidance)
 
+    def test_r6_timeout_summary_and_live_source_are_exact_and_tamper_rejected(self):
+        summary, summary_raw = p4q.load_p4r6_timeout_result_summary()
+        self.assertEqual(summary.source_commit, p4q.P4R6_TIMEOUT_SOURCE_COMMIT)
+        self.assertEqual(summary.result_root_leaf, p4q.P4R6_TIMEOUT_RESULT_ROOT_LEAF)
+        self.assertEqual(summary.aggregate_budget["node_total_generate_entry_reservations"]["F3"], 1)
+        self.assertEqual(summary.historical_claims["raw_response_absent"], True)
+        self.assertEqual(summary.historical_claims["model_success"], False)
+        self.assertEqual(summary.historical_claims["integrated_executed"], False)
+        self.assertEqual(p4q._canonical_bytes(summary.to_dict()), summary_raw)
+        tampered = summary.to_dict()
+        tampered["source_commit"] = "0" * 40
+        with self.assertRaises(Phase4LocalQwenContractError):
+            p4q.P4R6TimeoutResultSummary.from_dict(tampered)
+
+        model_root = Path(r"D:\Models\Req2Web\Qwen3.5-9B-c202236235762e1c871ad0ccb60c8ee5ba337b9a")
+        if not model_root.is_dir():
+            self.skipTest("fixed R6 timeout source model root is not present")
+        source = p4q._p4r6_load_timeout_source(model_root=model_root)
+        self.assertEqual(source["summary_raw"], summary_raw)
+        self.assertEqual(source["attempt"], _r6_timeout_prior_attempt())
+        self.assertEqual(source["aggregate"].node_total_generate_entry_reservations, {"F1": 0, "F2": 0, "F3": 1, "F4": 0})
+        self.assertFalse((source["root"] / source["attempt"].raw_response_relative_path).exists())
+
+    def test_r6_timeout_continuation_receipt_live_binding_and_cli_fail_closed(self):
+        b_input, policies, profile, binding, manifest = _r6_fixture_binding_manifest(
+            "r6-timeout-continuation-receipt"
+        )
+        prior = _r6_timeout_prior_attempt()
+        receipt = p4q.R6AttemptContinuationReceipt.create(
+            pilot=binding,
+            profile=profile,
+            manifest=manifest,
+            prior_attempt=prior,
+        )
+        receipt.validate_against(
+            pilot=binding,
+            profile=profile,
+            manifest=manifest,
+            prior_attempt=prior,
+        )
+        self.assertEqual(receipt.continuation["next_attempt_index"], 2)
+        self.assertEqual(receipt.continuation["automatic_retry"], False)
+        self.assertEqual(receipt.continuation["graph_resume"], False)
+        self.assertFalse(receipt.action_state["model_action"])
+        self.assertFalse(receipt.action_state["graph_runtime_execution"])
+        tampered = receipt.to_dict()
+        tampered["continuation"]["graph_resume"] = True
+        tampered["receipt_id"] = p4q._sha256(
+            p4q._canonical_bytes(
+                {key: value for key, value in tampered.items() if key != "receipt_id"}
+            )
+        )
+        with self.assertRaises(Phase4LocalQwenContractError):
+            p4q.R6AttemptContinuationReceipt.from_dict(tampered)
+
+        model_root = Path(r"D:\Models\Req2Web\Qwen3.5-9B-c202236235762e1c871ad0ccb60c8ee5ba337b9a")
+        if model_root.is_dir():
+            root = Path.cwd() / ".p4-03-test-results" / "r6-timeout-continuation-live"
+            root.mkdir(parents=True, exist_ok=False)
+            self._test_roots.append(root)
+            source = p4q._p4r6_load_timeout_source(model_root=model_root)
+            (root / p4q.P4R6_TIMEOUT_SUMMARY_COPY_NAME).write_bytes(source["summary_raw"])
+            (root / p4q.P4R6_TIMEOUT_AGGREGATE_SNAPSHOT_NAME).write_bytes(source["aggregate_raw"])
+            (root / p4q.P4R6_ATTEMPT_CONTINUATION_RECEIPT_NAME).write_bytes(receipt.canonical_bytes())
+            live = p4q.validate_p4r6_attempt_continuation(
+                model_root=model_root,
+                result_root=root,
+                pilot=binding,
+                profile=profile,
+                manifest=manifest,
+            )
+            self.assertEqual(live["continuation_receipt"], receipt)
+            self.assertEqual(live["attempt"], prior)
+
+        invalid_argv = (
+            ["prepare", "--model-root", "m", "--integrity-evidence", "i", "--result-root", "r", "--pilot", "r5", "--resume-r6-timeout"],
+            ["run", "--model-root", "m", "--integrity-evidence", "i", "--result-root", "r", "--pilot", "r6", "--resume-r6-timeout"],
+            ["run", "--model-root", "m", "--integrity-evidence", "i", "--result-root", "r", "--pilot", "r6", "--resume-r6-timeout", "--second-attempt-change-reason", "prompt_contract_clarification"],
+        )
+        with patch.object(p4q.subprocess, "Popen") as popen:
+            for argv in invalid_argv:
+                with self.subTest(argv=argv), self.assertRaises(Phase4LocalQwenContractError):
+                    pilot_script.main(argv)
+            popen.assert_not_called()
+        valid = pilot_script.build_parser().parse_args(
+            ["run", "--model-root", "m", "--integrity-evidence", "i", "--result-root", "r", "--pilot", "r6", "--resume-r6-timeout", "--second-attempt-change-reason", "output_schema_clarification"]
+        )
+        pilot_script._validate_cli_combination(valid)
+
+    def test_r6_timeout_continuation_runs_attempt_two_then_f4_with_seeded_zero_calls(self):
+        b_input, policies, profile, binding, manifest = _r6_fixture_binding_manifest(
+            "r6-timeout-continuation-success"
+        )
+        root = Path.cwd() / ".p4-03-test-results" / "r6-timeout-continuation-success"
+        root.mkdir(parents=True, exist_ok=False)
+        self._test_roots.append(root)
+        (root / p4q.RESULT_ROOT_MARKER_NAME).write_text(
+            binding.result_root_marker + "\n", encoding="ascii"
+        )
+        prior = _r6_timeout_prior_attempt()
+        receipt = p4q.R6AttemptContinuationReceipt.create(
+            pilot=binding,
+            profile=profile,
+            manifest=manifest,
+            prior_attempt=prior,
+        )
+        outputs = _fixture_bytes(b_input)
+        backend = FakeBackend(outputs[2:], result_root=root)
+        runner = Phase4LocalQwenPilotRunner(
+            pilot=binding,
+            policies=policies,
+            profile=profile,
+            manifest=manifest,
+            result_root=root,
+            b_input=b_input,
+            backend=backend,
+            r6_attempt_continuation=(receipt, prior),
+        )
+        _seed_r6_fixture_runner(runner, b_input=b_input, outputs=outputs)
+        self.assertEqual(runner.ledger.node_total_counts, {"F1": 0, "F2": 0, "F3": 1, "F4": 0})
+        self.assertEqual(runner.ledger.node_local_counts, {"F1": 0, "F2": 0, "F3": 1, "F4": 0})
+        self.assertEqual(runner.ledger.attempt_result_ids, [prior.result_id])
+        self.assertEqual(runner.ledger.prior_failure_ids, [prior.failure_identity["sha256"]])
+        self.assertEqual(runner._node_local_status["F3"], "failed_once")
+        self.assertEqual(runner._model_calls, 1)
+        for node_id in ("F1", "F2"):
+            with self.assertRaises(Phase4LocalQwenContractError):
+                runner.run_node_local(node_id=node_id)
+        self.assertEqual(backend.calls, [])
+        with self.assertRaises(Phase4LocalQwenContractError):
+            runner.run_node_local(node_id="F3")
+
+        f3_result = runner.run_node_local(
+            node_id="F3",
+            prompt_version=2,
+            change_reason="output_schema_clarification",
+        )
+        self.assertIsNone(f3_result.failure_code)
+        self.assertEqual(f3_result.attempt_index, 2)
+        self.assertEqual(f3_result.retry_count, 0)
+        f3_action = p4q.NodeD17ActionRecord.from_bytes(
+            (root / "runs" / f"{P4R6_PILOT_ID}-node-local" / "F3" / "attempt-02" / "node_d17_action.json").read_bytes()
+        )
+        self.assertEqual(f3_action.prompt_revision, P4R6_PROMPT_V2_REVISION)
+        self.assertEqual(f3_action.retry_count, 0)
+        self.assertEqual(f3_action.prompt_change["prior_result_id"], prior.result_id)
+        self.assertEqual(f3_action.prompt_change["change_reason"], "output_schema_clarification")
+        self.assertEqual(
+            f3_action.prompt_change["prior_failure_identity"],
+            make_identity(prior.to_dict(), revision=p4q.ATTEMPT_RESULT_SCHEMA_VERSION),
+        )
+        prompt = json.loads(backend.prompts[0])
+        self.assertEqual(prompt["template_revision"], P4R6_PROMPT_V2_REVISION)
+        self.assertEqual(prompt["change_reason"], "output_schema_clarification")
+        self.assertIn("failure_code=generation_timeout", "\n".join(prompt["instructions"]))
+        self.assertTrue(backend.raw_seen_before_return)
+
+        self.assertIsNone(runner.run_node_local(node_id="F4").failure_code)
+        self.assertEqual(backend.calls, ["F3", "F4"])
+        with self.assertRaises(Phase4LocalQwenContractError):
+            runner.run_integrated()
+        outcome = runner.stop_for_report(reason="checkpoint_node_local_complete")
+        self.assertEqual(outcome.node_total_counts, {"F1": 0, "F2": 0, "F3": 2, "F4": 1})
+        self.assertEqual(outcome.node_local_statuses, {"F1": "passed", "F2": "passed", "F3": "passed", "F4": "passed"})
+        self.assertEqual(outcome.integrated_outcome, "not_started")
+        self.assertEqual(outcome.composition_status, "not_executed")
+        self.assertEqual(outcome.assembler_status, "not_executed")
+
+    def test_r6_timeout_attempt_two_failure_exhausts_and_shared_aggregate_moves_one_to_two(self):
+        b_input, policies, profile, binding, manifest = _r6_fixture_binding_manifest(
+            "r6-timeout-continuation-failure"
+        )
+        root = Path.cwd() / ".p4-03-test-results" / "r6-timeout-continuation-failure"
+        root.mkdir(parents=True, exist_ok=False)
+        self._test_roots.append(root)
+        (root / p4q.RESULT_ROOT_MARKER_NAME).write_text(
+            binding.result_root_marker + "\n", encoding="ascii"
+        )
+        prior = _r6_timeout_prior_attempt()
+        receipt = p4q.R6AttemptContinuationReceipt.create(
+            pilot=binding,
+            profile=profile,
+            manifest=manifest,
+            prior_attempt=prior,
+        )
+        outputs = _fixture_bytes(b_input)
+        runner = Phase4LocalQwenPilotRunner(
+            pilot=binding,
+            policies=policies,
+            profile=profile,
+            manifest=manifest,
+            result_root=root,
+            b_input=b_input,
+            backend=FakeBackend([b"not-json"]),
+            r6_attempt_continuation=(receipt, prior),
+        )
+        _seed_r6_fixture_runner(runner, b_input=b_input, outputs=outputs)
+        failed = runner.run_node_local(
+            node_id="F3",
+            prompt_version=2,
+            change_reason="output_schema_clarification",
+        )
+        self.assertEqual(failed.attempt_index, 2)
+        self.assertEqual(failed.failure_code, "node_contract_invalid")
+        self.assertTrue(failed.terminal)
+        self.assertTrue(runner.stopped)
+        self.assertEqual(runner.ledger.node_total_counts, {"F1": 0, "F2": 0, "F3": 2, "F4": 0})
+        self.assertEqual(runner.ledger.stop_reason, "node_budget_exhausted")
+        with self.assertRaises(Phase4LocalQwenContractError):
+            runner.run_node_local(node_id="F4")
+
+        aggregate_root = Path.cwd() / ".p4-03-test-results" / "r6-aggregate-one-to-two"
+        aggregate_root.mkdir(parents=True, exist_ok=False)
+        self._test_roots.append(aggregate_root)
+        model_root = aggregate_root / "model"
+        model_root.mkdir()
+        _, policy_raw = p4q.load_p4r6_policy_revision()
+        aggregate = p4q.P4R6AggregateBudgetLedger.create(
+            policy_raw=policy_raw,
+            pilot=binding,
+            profile=profile,
+        ).reserve(
+            node_id="F3",
+            call_kind="node_local",
+            run_id=f"{P4R6_PILOT_ID}-node-local",
+            result_root_marker="r6-timeout-prior-root",
+        )
+        run_root, filename, _ = p4q._p4r6_aggregate_budget_paths(model_root)
+        (run_root / filename).write_bytes(aggregate.canonical_bytes())
+        updated = p4q._reserve_p4r6_aggregate_generate_entry(
+            model_root=model_root,
+            policy_raw=policy_raw,
+            pilot=binding,
+            profile=profile,
+            node_id="F3",
+            call_kind="node_local",
+            run_id=f"{P4R6_PILOT_ID}-node-local",
+        )
+        self.assertEqual(aggregate.node_local_generate_entry_reservations["F3"], 1)
+        self.assertEqual(updated.node_local_generate_entry_reservations["F3"], 2)
+        self.assertEqual(updated.generate_entry_reservation_total, 2)
+        self.assertEqual(updated.integrated_run_reservations, 0)
+        with self.assertRaises(Phase4LocalQwenContractError):
+            p4q._reserve_p4r6_aggregate_generate_entry(
+                model_root=model_root,
+                policy_raw=policy_raw,
+                pilot=binding,
+                profile=profile,
+                node_id="F3",
+                call_kind="node_local",
+                run_id=f"{P4R6_PILOT_ID}-node-local",
+            )
+
     def test_r5_dispatch_has_explicit_r2_r3_r4_paths_and_rejects_unknown(self):
         for pilot in ("r2", "r3", "r4", "r5", "r6"):
             args = pilot_script.build_parser().parse_args(["run", "--model-root", "m", "--integrity-evidence", "i", "--result-root", "r", "--pilot", pilot])
             self.assertEqual(args.pilot, pilot)
+            self.assertFalse(args.resume_r6_timeout)
         args = pilot_script.build_parser().parse_args(["run", "--model-root", "m", "--integrity-evidence", "i", "--result-root", "r"])
         self.assertEqual(args.pilot, "r6")
         with self.assertRaises(SystemExit):
