@@ -20,6 +20,9 @@ from req2web_runtime.phase4_local_qwen import (
     P4R3_PROMPT_REVISION,
     P4R4_PILOT_ID,
     P4R4_PROMPT_REVISION,
+    P4R5_PILOT_ID,
+    P4R5_PROMPT_REVISION,
+    P4R5_PROJECTION_REVISION,
     PilotSupervisorReceipt,
     Phase4LocalQwenContractError,
     Phase4LocalQwenPilotRunner,
@@ -30,6 +33,7 @@ from req2web_runtime.phase4_local_qwen import (
     load_p4r2_policy_revision,
     load_p4r3_policy_revision,
     load_p4r4_policy_revision,
+    load_p4r5_policy_revision,
     make_canonical_identity,
     persist_pilot_outcome,
     persist_supervisor_receipt,
@@ -40,7 +44,7 @@ from req2web_runtime.phase4_local_qwen import (
 )
 
 
-def _policies(*, prompt_revision: str, config_revision: str) -> tuple[NodeProjectionPolicy, ...]:
+def _policies(*, prompt_revision: str, config_revision: str, projection_revision: str = P4R2_PROJECTION_REVISION) -> tuple[NodeProjectionPolicy, ...]:
     caps = {
         "input_bytes": 131072,
         "output_bytes": 65536,
@@ -67,7 +71,7 @@ def _policies(*, prompt_revision: str, config_revision: str) -> tuple[NodeProjec
             prohibited_categories=prohibited,
             field_caps=caps,
             upstream_required_node_ids=upstream[node_id],
-            projection_revision=P4R2_PROJECTION_REVISION,
+            projection_revision=projection_revision,
             prompt_template_revision=prompt_revision,
             config_revision=config_revision,
         )
@@ -89,6 +93,14 @@ def _r3_policies() -> tuple[NodeProjectionPolicy, ...]:
 
 def _r4_policies() -> tuple[NodeProjectionPolicy, ...]:
     return _policies(prompt_revision=P4R4_PROMPT_REVISION, config_revision="p4-03r4-config-v1")
+
+
+def _r5_policies() -> tuple[NodeProjectionPolicy, ...]:
+    return _policies(
+        prompt_revision=P4R5_PROMPT_REVISION,
+        config_revision="p4-03r5-config-v1",
+        projection_revision=P4R5_PROJECTION_REVISION,
+    )
 
 
 def _offline_process() -> None:
@@ -121,9 +133,9 @@ def build_parser() -> argparse.ArgumentParser:
     for command in (prepare, run):
         command.add_argument(
             "--pilot",
-            choices=("r2", "r3", "r4"),
-            default="r4",
-            help="Explicit pilot revision; the default is the independent R4 pilot.",
+            choices=("r2", "r3", "r4", "r5"),
+            default="r5",
+            help="Explicit pilot revision; the default is checkpoint node-local R5.",
         )
     return parser
 
@@ -154,8 +166,12 @@ def main(argv: list[str] | None = None) -> int:
                 policy_kwargs = {"r2_policy": load_p4r2_policy_revision()[0], "pilot_id": P4R2_PILOT_ID, "policies": _r2_historical_policies()}
             elif args.pilot == "r3":
                 policy_kwargs = {"r3_policy": load_p4r3_policy_revision()[0], "pilot_id": P4R3_PILOT_ID, "policies": _r3_policies()}
-            else:
+            elif args.pilot == "r4":
                 policy_kwargs = {"r4_policy": load_p4r4_policy_revision()[0], "pilot_id": P4R4_PILOT_ID, "policies": _r4_policies()}
+            elif args.pilot == "r5":
+                policy_kwargs = {"r5_policy": load_p4r5_policy_revision()[0], "pilot_id": P4R5_PILOT_ID, "policies": _r5_policies(), "checkpoint_b_input": b_input}
+            else:
+                raise Phase4LocalQwenContractError("unknown pilot revision before prepare")
             binding, policies, profile, manifest = prepare_local_qwen_pilot(
                 model_root=args.model_root,
                 integrity_evidence=args.integrity_evidence,
@@ -182,8 +198,12 @@ def main(argv: list[str] | None = None) -> int:
             policy_kwargs = {"r2_policy": load_p4r2_policy_revision()[0]}
         elif args.pilot == "r3":
             policy_kwargs = {"r3_policy": load_p4r3_policy_revision()[0]}
-        else:
+        elif args.pilot == "r4":
             policy_kwargs = {"r4_policy": load_p4r4_policy_revision()[0]}
+        elif args.pilot == "r5":
+            policy_kwargs = {"r5_policy": load_p4r5_policy_revision()[0]}
+        else:
+            raise Phase4LocalQwenContractError("unknown pilot revision before Popen")
         binding, policies, profile, manifest = load_prepared_local_qwen_pilot(
             model_root=args.model_root,
             integrity_evidence=args.integrity_evidence,
@@ -227,7 +247,8 @@ def main(argv: list[str] | None = None) -> int:
                 execution_lease=runtime.execution_lease,
                 runtime_start_claim=runtime.runtime_start_claim,
             )
-            for node_id in ("F1", "F2", "F3", "F4"):
+            node_order = ("F3", "F4") if args.pilot == "r5" else ("F1", "F2", "F3", "F4")
+            for node_id in node_order:
                 first = runner.run_node_local(node_id=node_id)
                 if first.failure_code is None:
                     continue
@@ -250,7 +271,12 @@ def main(argv: list[str] | None = None) -> int:
                     outcome = runner.outcome(stop_reason="node_budget_exhausted")
                     break
             if outcome is None:
-                outcome = runner.run_integrated()
+                if args.pilot == "r5":
+                    outcome = runner.stop_for_report(
+                        reason="checkpoint_node_local_complete"
+                    )
+                else:
+                    outcome = runner.run_integrated()
             try:
                 persist_pilot_outcome(result_root=args.result_root, outcome=outcome)
                 outcome_persisted = True

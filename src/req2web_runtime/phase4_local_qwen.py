@@ -119,6 +119,75 @@ P4R4_RESULT_R3_SUMMARY_NAME = "p4_03r4_predecessor_r3_result.json"
 P4R4_RESULT_BINDING_NAME = "p4_03r4_result_root_binding.json"
 P4R4_POLICY_PATH = Path(__file__).resolve().parents[2] / P4R4_POLICY_RELATIVE_PATH
 P4R3_RESULT_PATH = Path(__file__).resolve().parents[2] / P4R3_RESULT_RELATIVE_PATH
+P4R4_RESULT_SUMMARY_SCHEMA_VERSION = f"{P4_03_SCHEMA_PREFIX}.r4.result_summary.v1"
+P4R4_RESULT_RELATIVE_PATH = "docs/phase4_local_qwen_r4_result.json"
+P4R4_SOURCE_COMMIT = "e1c0d1361a155e14652f50726d06930b0d0ad0fa"
+P4R4_RESULT_ROOT_LEAF = "p4-03r4-local-qwen-9b-e1c0d1361a-20260803-b"
+P4R4_POLICY_CANONICAL_SHA256 = "sha256:be3d510f4bc6572df7a4644949ded11d08985984dea8a71672c4966ce7ef7352"
+P4R4_POLICY_CANONICAL_BYTE_LENGTH = 3332
+P4R4_OUTCOME_SHA256 = "sha256:fab2e86715614b335afb3235da5acec2b79bc31393a8d2c702f898888fcb3b26"
+P4R4_OUTCOME_BYTE_LENGTH = 1178
+P4R4_SUPERVISOR_SHA256 = "sha256:137b2ad2d208ba119baf433ff8e9a0bfc135f2196706191711f0cf1b27de89da"
+P4R4_SUPERVISOR_BYTE_LENGTH = 1786
+P4R4_AGGREGATE_FILENAME = "p4_03r4_2488d97575b1024236db4111_aggregate_budget.json"
+P4R4_AGGREGATE_SHA256 = "sha256:71f922b17f8468d2a30cf133299cb84bc05e049445a51d4c694e32b3baa94879"
+P4R4_AGGREGATE_BYTE_LENGTH = 1290
+P4R4_F1_ATTEMPT_RESULT_SHA256 = "sha256:cee2ec815f22bce0c175d2f5d3679d50821f4b3eefbe59ec3b73c85587cdf8c2"
+P4R4_F1_ATTEMPT_RESULT_BYTE_LENGTH = 1428
+P4R4_F1_RAW_SHA256 = "sha256:c6a7b012d3ce7bc9e5001f064fee366d45ea470a808365c29b2693ef2c671d14"
+P4R4_F1_RAW_BYTE_LENGTH = 1449
+P4R4_F2_ATTEMPT_RESULT_SHA256 = "sha256:3b9797da189f78e4802154e16e4dfbcfb988c48dc2f5c012abb17da134c3d27b"
+P4R4_F2_ATTEMPT_RESULT_BYTE_LENGTH = 1427
+P4R4_F2_RAW_SHA256 = "sha256:3b6d685c0a635286a443f37546467b237a56b95d036e032c54ab1eec4dbf50db"
+P4R4_F2_RAW_BYTE_LENGTH = 871
+P4R4_F1_ATTEMPT_RESULT_RELATIVE_PATH = "runs/p4-03r4-local-qwen-9b-node-local/F1/attempt-01/attempt_result.json"
+P4R4_F2_ATTEMPT_RESULT_RELATIVE_PATH = "runs/p4-03r4-local-qwen-9b-node-local/F2/attempt-01/attempt_result.json"
+P4R4_F1_RAW_RELATIVE_PATH = "runs/p4-03r4-local-qwen-9b-node-local/F1/attempt-01/raw_response.bin"
+P4R4_F2_RAW_RELATIVE_PATH = "runs/p4-03r4-local-qwen-9b-node-local/F2/attempt-01/raw_response.bin"
+P4R4_RESULT_PATH = Path(__file__).resolve().parents[2] / P4R4_RESULT_RELATIVE_PATH
+P4R5_POLICY_SCHEMA_VERSION = f"{P4_03_SCHEMA_PREFIX}.r5.policy.v1"
+P4R5_AGGREGATE_LEDGER_SCHEMA_VERSION = f"{P4_03_SCHEMA_PREFIX}.r5.aggregate_budget_ledger.v1"
+P4R5_CHECKPOINT_RECEIPT_SCHEMA_VERSION = f"{P4_03_SCHEMA_PREFIX}.r5.checkpoint_receipt.v1"
+P4R5_CHECKPOINT_PACKET_SCHEMA_VERSION = f"{P4_03_SCHEMA_PREFIX}.r5.checkpoint_packet.v1"
+P4R5_CHECKPOINT_RAW_IDENTITY_REVISION = f"{P4_03_SCHEMA_PREFIX}.r5.checkpoint_raw_response.v1"
+P4R5_PILOT_ID = "p4-03r5-local-qwen-9b"
+P4R5_PROMPT_REVISION = "p4-03r5-prompt-v1"
+P4R5_PROMPT_V2_REVISION = "p4-03r5-prompt-v2"
+P4R5_PROJECTION_REVISION = f"{P4_03_SCHEMA_PREFIX}.r5.node_input.compact.v1"
+P4R5_POLICY_RELATIVE_PATH = "docs/phase4_local_qwen_r5_policy.json"
+P4R5_RESULT_POLICY_NAME = "p4_03r5_policy.json"
+P4R5_RESULT_R4_SUMMARY_NAME = "p4_03r5_predecessor_r4_result.json"
+P4R5_CHECKPOINT_RECEIPT_NAME = "checkpoint_receipt.json"
+P4R5_CHECKPOINT_PACKET_NAME = "checkpoint_packet.json"
+P4R5_CHECKPOINT_RUN_ID = "p4-03r5-local-qwen-9b-node-local"
+P4R5_POLICY_PATH = Path(__file__).resolve().parents[2] / P4R5_POLICY_RELATIVE_PATH
+P4R5_R4_RESULT_RELATIVE_PATH = P4R4_RESULT_RELATIVE_PATH
+P4R5_R4_RESULT_ROOT_LEAF = P4R4_RESULT_ROOT_LEAF
+P4R5_R4_ACTION_EVIDENCE = {
+    "pilot_outcome": ("pilot_outcome.json", P4R4_OUTCOME_SHA256, P4R4_OUTCOME_BYTE_LENGTH),
+    "supervisor": ("supervisor_receipt.json", P4R4_SUPERVISOR_SHA256, P4R4_SUPERVISOR_BYTE_LENGTH),
+    "aggregate": (P4R4_AGGREGATE_FILENAME, P4R4_AGGREGATE_SHA256, P4R4_AGGREGATE_BYTE_LENGTH),
+}
+P4R5_R4_ATTEMPTS = {
+    "F1": {
+        "attempt_result_relative_path": P4R4_F1_ATTEMPT_RESULT_RELATIVE_PATH,
+        "attempt_result_sha256": P4R4_F1_ATTEMPT_RESULT_SHA256,
+        "attempt_result_byte_length": P4R4_F1_ATTEMPT_RESULT_BYTE_LENGTH,
+        "raw_relative_path": P4R4_F1_RAW_RELATIVE_PATH,
+        "raw_sha256": P4R4_F1_RAW_SHA256,
+        "raw_byte_length": P4R4_F1_RAW_BYTE_LENGTH,
+    },
+    "F2": {
+        "attempt_result_relative_path": P4R4_F2_ATTEMPT_RESULT_RELATIVE_PATH,
+        "attempt_result_sha256": P4R4_F2_ATTEMPT_RESULT_SHA256,
+        "attempt_result_byte_length": P4R4_F2_ATTEMPT_RESULT_BYTE_LENGTH,
+        "raw_relative_path": P4R4_F2_RAW_RELATIVE_PATH,
+        "raw_sha256": P4R4_F2_RAW_SHA256,
+        "raw_byte_length": P4R4_F2_RAW_BYTE_LENGTH,
+    },
+}
+P4R5_RESULT_SUMMARY_SHA256 = "sha256:83bcf1a0dd176db0b6dd5a16c3c749ecc55198ce33b1f911d83345b25301771d"
+P4R5_RESULT_SUMMARY_BYTE_LENGTH = 3015
 P4R2_POLICY_RELATIVE_PATH = "docs/phase4_local_qwen_r2_policy.json"
 P4R2_RESULT_POLICY_NAME = "p4_03r2_policy.json"
 P4R2_RESULT_LEDGER_NAME = "p4_03r2_predecessor_aggregate_ledger.json"
@@ -152,6 +221,8 @@ PROMPT_REVISIONS = (
     P4R3_PROMPT_V2_REVISION,
     P4R4_PROMPT_REVISION,
     P4R4_PROMPT_V2_REVISION,
+    P4R5_PROMPT_REVISION,
+    P4R5_PROMPT_V2_REVISION,
 )
 CHANGE_REASONS = (
     "projection_cap_tightening",
@@ -907,6 +978,296 @@ class P4R4Policy(_CanonicalRecord):
         return str(self.prompt["retry_revision"])
 
 
+class P4R4ResultSummary(_CanonicalRecord):
+    """Tracked summary of the immutable R4 action-time root used by R5."""
+
+    KEYS = (
+        "schema_version", "status", "source_commit", "pilot_id",
+        "result_root_leaf", "case", "r4_policy", "pilot_outcome",
+        "supervisor_receipt", "aggregate_budget", "attempts",
+        "historical_claims",
+    )
+    SCHEMA_VERSION = P4R4_RESULT_SUMMARY_SCHEMA_VERSION
+
+    @classmethod
+    def _validate_payload(cls, data: Mapping[str, object]) -> None:
+        _common_record(data, schema=cls.SCHEMA_VERSION, name="P4R4ResultSummary")
+        if data["status"] != "tracked_r4_terminal_result" or data["source_commit"] != P4R4_SOURCE_COMMIT or data["pilot_id"] != P4R4_PILOT_ID or data["result_root_leaf"] != P4R4_RESULT_ROOT_LEAF:
+            raise Phase4LocalQwenContractError("tracked R4 result summary identity drifted")
+        case = _exact(data["case"], ("case_id", "request_id", "model_id", "model_revision"), "P4R4ResultSummary.case")
+        if case != {"case_id": "path3-commerce-checkout", "request_id": "p4-02a-synthetic-request-001", "model_id": QWEN_MODEL_ID, "model_revision": QWEN_MODEL_REVISION}:
+            raise Phase4LocalQwenContractError("tracked R4 result case drifted")
+        policy = _exact(data["r4_policy"], ("path", "raw_sha256", "raw_byte_length"), "P4R4ResultSummary.r4_policy")
+        if policy["path"] != P4R4_POLICY_RELATIVE_PATH or policy["raw_sha256"] != P4R4_POLICY_CANONICAL_SHA256 or _integer(policy["raw_byte_length"], "P4R4ResultSummary.r4_policy.raw_byte_length", minimum=1) != P4R4_POLICY_CANONICAL_BYTE_LENGTH:
+            raise Phase4LocalQwenContractError("tracked R4 policy identity drifted")
+        outcome = _exact(data["pilot_outcome"], ("filename", "raw_sha256", "raw_byte_length", "status", "model_calls_performed", "node_local_statuses", "node_total_counts"), "P4R4ResultSummary.pilot_outcome")
+        if outcome["filename"] != "pilot_outcome.json" or outcome["raw_sha256"] != P4R4_OUTCOME_SHA256 or _integer(outcome["raw_byte_length"], "P4R4ResultSummary.pilot_outcome.raw_byte_length", minimum=1) != P4R4_OUTCOME_BYTE_LENGTH or outcome["status"] != "stopped_after_first_failure" or _integer(outcome["model_calls_performed"], "P4R4ResultSummary.pilot_outcome.model_calls_performed", minimum=0) != 3:
+            raise Phase4LocalQwenContractError("tracked R4 pilot outcome drifted")
+        if _exact(outcome["node_local_statuses"], NODE_ORDER, "P4R4ResultSummary.pilot_outcome.node_local_statuses") != {"F1": "passed", "F2": "passed", "F3": "failed_once", "F4": "not_started"} or _exact(outcome["node_total_counts"], NODE_ORDER, "P4R4ResultSummary.pilot_outcome.node_total_counts") != {"F1": 1, "F2": 1, "F3": 1, "F4": 0}:
+            raise Phase4LocalQwenContractError("tracked R4 pilot outcome counts drifted")
+        supervisor = _exact(data["supervisor_receipt"], ("filename", "raw_sha256", "raw_byte_length", "terminal_status", "worker_exit_verified", "generation_started", "raw_status"), "P4R4ResultSummary.supervisor_receipt")
+        if supervisor["filename"] != "supervisor_receipt.json" or supervisor["raw_sha256"] != P4R4_SUPERVISOR_SHA256 or _integer(supervisor["raw_byte_length"], "P4R4ResultSummary.supervisor_receipt.raw_byte_length", minimum=1) != P4R4_SUPERVISOR_BYTE_LENGTH or supervisor["terminal_status"] != "worker_failed" or _bool(supervisor["worker_exit_verified"], "P4R4ResultSummary.supervisor_receipt.worker_exit_verified") is not True or _bool(supervisor["generation_started"], "P4R4ResultSummary.supervisor_receipt.generation_started") is not True or supervisor["raw_status"] != "not_captured":
+            raise Phase4LocalQwenContractError("tracked R4 supervisor receipt drifted")
+        aggregate = _exact(data["aggregate_budget"], ("filename", "raw_sha256", "raw_byte_length", "node_total_generate_entry_reservations", "node_local_generate_entry_reservations", "integrated_run_reservations", "generate_entry_reservation_total"), "P4R4ResultSummary.aggregate_budget")
+        if aggregate["filename"] != P4R4_AGGREGATE_FILENAME or aggregate["raw_sha256"] != P4R4_AGGREGATE_SHA256 or _integer(aggregate["raw_byte_length"], "P4R4ResultSummary.aggregate_budget.raw_byte_length", minimum=1) != P4R4_AGGREGATE_BYTE_LENGTH or _exact(aggregate["node_total_generate_entry_reservations"], NODE_ORDER, "P4R4ResultSummary.aggregate_budget.total") != {"F1": 1, "F2": 1, "F3": 1, "F4": 0} or _exact(aggregate["node_local_generate_entry_reservations"], NODE_ORDER, "P4R4ResultSummary.aggregate_budget.local") != {"F1": 1, "F2": 1, "F3": 1, "F4": 0} or _integer(aggregate["integrated_run_reservations"], "P4R4ResultSummary.aggregate_budget.integrated_run_reservations", minimum=0) != 0 or _integer(aggregate["generate_entry_reservation_total"], "P4R4ResultSummary.aggregate_budget.generate_entry_reservation_total", minimum=0) != 3:
+            raise Phase4LocalQwenContractError("tracked R4 aggregate drifted")
+        attempts = data["attempts"]
+        if type(attempts) is not list or len(attempts) != 2:
+            raise Phase4LocalQwenContractError("tracked R4 checkpoint attempt inventory drifted")
+        for row, node_id in zip(attempts, ("F1", "F2"), strict=True):
+            item = _exact(row, ("attempt_index", "node_id", "attempt_result_relative_path", "attempt_result_raw_sha256", "attempt_result_raw_byte_length", "raw_response_relative_path", "raw_sha256", "raw_byte_length", "call_count", "parse_status", "node_contract_status", "registry_status"), f"P4R4ResultSummary.{node_id}.attempt")
+            expected = P4R5_R4_ATTEMPTS[node_id]
+            if _integer(item["attempt_index"], f"P4R4ResultSummary.{node_id}.attempt_index", minimum=1, maximum=1) != 1 or item["node_id"] != node_id or item["attempt_result_relative_path"] != expected["attempt_result_relative_path"] or item["attempt_result_raw_sha256"] != expected["attempt_result_sha256"] or _integer(item["attempt_result_raw_byte_length"], f"P4R4ResultSummary.{node_id}.attempt_result_raw_byte_length", minimum=1) != expected["attempt_result_byte_length"] or item["raw_response_relative_path"] != expected["raw_relative_path"] or item["raw_sha256"] != expected["raw_sha256"] or _integer(item["raw_byte_length"], f"P4R4ResultSummary.{node_id}.raw_byte_length", minimum=1) != expected["raw_byte_length"] or _integer(item["call_count"], f"P4R4ResultSummary.{node_id}.call_count", minimum=1) != 1 or item["parse_status"] != "passed" or item["node_contract_status"] != "passed" or item["registry_status"] != "passed":
+                raise Phase4LocalQwenContractError(f"tracked R4 {node_id} attempt identity drifted")
+        claims = _exact(data["historical_claims"], ("r2_immutable", "r3_immutable", "r4_is_not_h1", "historical_strict_result", "f1_f2_checkpoint_eligible"), "P4R4ResultSummary.historical_claims")
+        if any(_bool(claims[key], f"P4R4ResultSummary.historical_claims.{key}") is not True for key in ("r2_immutable", "r3_immutable", "r4_is_not_h1", "f1_f2_checkpoint_eligible")) or claims["historical_strict_result"] != "0/2_unchanged":
+            raise Phase4LocalQwenContractError("tracked R4 historical claims drifted")
+
+
+class P4R5Policy(_CanonicalRecord):
+    """Independent checkpoint node-local recovery policy for R5."""
+
+    KEYS = (
+        "schema_version", "status", "owner_authorization_source", "current_date",
+        "authority_semantics", "authorized_actions", "pilot_id", "case",
+        "predecessor_r4_result", "separate_budget", "stop_policy",
+        "action_boundaries", "historical_claims", "projection", "prompt",
+        "runtime", "checkpoint",
+    )
+    SCHEMA_VERSION = P4R5_POLICY_SCHEMA_VERSION
+
+    @classmethod
+    def _validate_payload(cls, data: Mapping[str, object]) -> None:
+        _common_record(data, schema=cls.SCHEMA_VERSION, name="P4R5Policy")
+        if data["status"] != "owner_approved_checkpoint_node_local_recovery" or data["owner_authorization_source"] != "current_project_owner_instruction_2026-08-03" or data["current_date"] != "2026-08-03" or data["authority_semantics"] != "frozen_owner_approval_record_not_live_self_authority" or data["pilot_id"] != P4R5_PILOT_ID:
+            raise Phase4LocalQwenContractError("P4R5 frozen authority identity drifted")
+        actions = _exact(data["authorized_actions"], ("existing_local_model_load_and_generate", "local_langgraph_runtime"), "P4R5Policy.authorized_actions")
+        if any(_bool(actions[key], f"P4R5Policy.authorized_actions.{key}") is not True for key in actions):
+            raise Phase4LocalQwenContractError("P4R5 authorized actions drifted")
+        case = _exact(data["case"], ("case_id", "request_id", "model_id", "model_revision"), "P4R5Policy.case")
+        if case != {"case_id": "path3-commerce-checkout", "request_id": "p4-02a-synthetic-request-001", "model_id": QWEN_MODEL_ID, "model_revision": QWEN_MODEL_REVISION}:
+            raise Phase4LocalQwenContractError("P4R5 case/model binding drifted")
+        predecessor = _exact(data["predecessor_r4_result"], ("summary_path", "summary_raw_sha256", "summary_raw_byte_length", "source_commit", "result_root_leaf", "r4_policy", "pilot_outcome", "supervisor_receipt", "aggregate_budget", "attempts"), "P4R5Policy.predecessor_r4_result")
+        if predecessor["summary_path"] != P4R4_RESULT_RELATIVE_PATH or predecessor["summary_raw_sha256"] != P4R5_RESULT_SUMMARY_SHA256 or _integer(predecessor["summary_raw_byte_length"], "P4R5Policy.predecessor.summary_raw_byte_length", minimum=1) != P4R5_RESULT_SUMMARY_BYTE_LENGTH or predecessor["source_commit"] != P4R4_SOURCE_COMMIT or predecessor["result_root_leaf"] != P4R4_RESULT_ROOT_LEAF:
+            raise Phase4LocalQwenContractError("P4R5 tracked R4 summary binding drifted")
+        r4_policy = _exact(predecessor["r4_policy"], ("path", "raw_sha256", "raw_byte_length"), "P4R5Policy.predecessor.r4_policy")
+        if r4_policy != {"path": P4R4_POLICY_RELATIVE_PATH, "raw_sha256": P4R4_POLICY_CANONICAL_SHA256, "raw_byte_length": P4R4_POLICY_CANONICAL_BYTE_LENGTH}:
+            raise Phase4LocalQwenContractError("P4R5 predecessor R4 policy drifted")
+        for name, predecessor_name in (("pilot_outcome", "pilot_outcome"), ("supervisor", "supervisor_receipt"), ("aggregate", "aggregate_budget")):
+            expected = P4R5_R4_ACTION_EVIDENCE[name]
+            item = _exact(predecessor[predecessor_name], ("filename", "raw_sha256", "raw_byte_length"), f"P4R5Policy.predecessor.{predecessor_name}")
+            if item != {"filename": expected[0], "raw_sha256": expected[1], "raw_byte_length": expected[2]}:
+                raise Phase4LocalQwenContractError("P4R5 action-time R4 identity drifted")
+        attempts = predecessor["attempts"]
+        if type(attempts) is not list or len(attempts) != 2:
+            raise Phase4LocalQwenContractError("P4R5 predecessor attempt inventory drifted")
+        for row, node_id in zip(attempts, ("F1", "F2"), strict=True):
+            item = _exact(row, ("node_id", "attempt_result_raw_sha256", "attempt_result_raw_byte_length", "raw_sha256", "raw_byte_length"), f"P4R5Policy.predecessor.{node_id}")
+            expected = P4R5_R4_ATTEMPTS[node_id]
+            if item != {"node_id": node_id, "attempt_result_raw_sha256": expected["attempt_result_sha256"], "attempt_result_raw_byte_length": expected["attempt_result_byte_length"], "raw_sha256": expected["raw_sha256"], "raw_byte_length": expected["raw_byte_length"]}:
+                raise Phase4LocalQwenContractError("P4R5 predecessor node identity drifted")
+        budget = _exact(data["separate_budget"], ("node_total_call_cap", "node_local_call_cap", "integrated_run_cap", "retry_count_cap", "b_aux_call_cap"), "P4R5Policy.separate_budget")
+        for key, expected in (("node_total_call_cap", 3), ("node_local_call_cap", 2), ("integrated_run_cap", 0), ("retry_count_cap", 0), ("b_aux_call_cap", 0)):
+            if _integer(budget[key], f"P4R5Policy.separate_budget.{key}", minimum=0) != expected:
+                raise Phase4LocalQwenContractError("P4R5 separate budget drifted")
+        stop = _exact(data["stop_policy"], ("node_local_second_attempt_requires_explicit_reason", "integrated_run", "stop_on_any_binding_or_ledger_drift", "automatic_retry"), "P4R5Policy.stop_policy")
+        if _bool(stop["node_local_second_attempt_requires_explicit_reason"], "P4R5Policy.stop_policy.node_local_second_attempt_requires_explicit_reason") is not True or stop["integrated_run"] != "forbidden_not_executed" or _bool(stop["stop_on_any_binding_or_ledger_drift"], "P4R5Policy.stop_policy.stop_on_any_binding_or_ledger_drift") is not True or _bool(stop["automatic_retry"], "P4R5Policy.stop_policy.automatic_retry") is not False:
+            raise Phase4LocalQwenContractError("P4R5 stop policy drifted")
+        boundaries = _exact(data["action_boundaries"], ("model_download", "model_switch", "training", "data_authoring", "network", "remote", "gpu_autodl_external_resource", "h1_or_gold", "formal_quality"), "P4R5Policy.action_boundaries")
+        if any(_bool(boundaries[key], f"P4R5Policy.action_boundaries.{key}") is not False for key in boundaries):
+            raise Phase4LocalQwenContractError("P4R5 action boundary drifted")
+        claims = _exact(data["historical_claims"], ("r2_immutable", "r3_immutable", "r4_immutable", "historical_strict_result", "r5_is_not_integrated_success", "checkpoint_nodes_are_not_r5_model_success"), "P4R5Policy.historical_claims")
+        if any(_bool(claims[key], f"P4R5Policy.historical_claims.{key}") is not True for key in ("r2_immutable", "r3_immutable", "r4_immutable", "r5_is_not_integrated_success", "checkpoint_nodes_are_not_r5_model_success")) or claims["historical_strict_result"] != "0/2_unchanged":
+            raise Phase4LocalQwenContractError("P4R5 historical claims drifted")
+        projection = _exact(data["projection"], ("revision", "allowed_categories_unchanged", "direct_json_object_fields", "canonical_identity_fields", "canonical_identity_revision", "removed_provider_payload_fields", "raw_bytes_retained_local_checkpoint"), "P4R5Policy.projection")
+        if projection["revision"] != P4R5_PROJECTION_REVISION or _bool(projection["allowed_categories_unchanged"], "P4R5Policy.projection.allowed_categories_unchanged") is not True or projection["direct_json_object_fields"] != ["canonical_b_input", "upstream.output"] or projection["canonical_identity_fields"] != ["canonical_b_input_identity", "upstream.canonical_identity"] or projection["canonical_identity_revision"] != P4R2_READABLE_JSON_IDENTITY_REVISION or projection["removed_provider_payload_fields"] != ["canonical_b_input_b64", "upstream.raw_b64"] or _bool(projection["raw_bytes_retained_local_checkpoint"], "P4R5Policy.projection.raw_bytes_retained_local_checkpoint") is not True:
+            raise Phase4LocalQwenContractError("P4R5 projection drifted")
+        prompt = _exact(data["prompt"], ("revision", "retry_revision", "f3_semantics", "f4_semantics", "owning_validator_unchanged", "deterministic_repair"), "P4R5Policy.prompt")
+        if prompt["revision"] != P4R5_PROMPT_REVISION or prompt["retry_revision"] != P4R5_PROMPT_V2_REVISION or prompt["f3_semantics"] != "existing_r4_contract" or prompt["f4_semantics"] != "existing_r4_contract" or _bool(prompt["owning_validator_unchanged"], "P4R5Policy.prompt.owning_validator_unchanged") is not True or _bool(prompt["deterministic_repair"], "P4R5Policy.prompt.deterministic_repair") is not False:
+            raise Phase4LocalQwenContractError("P4R5 prompt drifted")
+        runtime = _exact(data["runtime"], ("max_new_tokens", "context_expansion", "profile_scope"), "P4R5Policy.runtime")
+        if _integer(runtime["max_new_tokens"], "P4R5Policy.runtime.max_new_tokens", minimum=1) != 512 or _bool(runtime["context_expansion"], "P4R5Policy.runtime.context_expansion") is not False or runtime["profile_scope"] != "R5_checkpoint_node_local_only_not_global_contract":
+            raise Phase4LocalQwenContractError("P4R5 runtime boundary drifted")
+        checkpoint = _exact(data["checkpoint"], ("receipt_filename", "packet_filename", "receipt_schema_version", "packet_schema_version", "seed_node_ids", "replay_order", "replay_authority", "action_state"), "P4R5Policy.checkpoint")
+        if checkpoint["receipt_filename"] != P4R5_CHECKPOINT_RECEIPT_NAME or checkpoint["packet_filename"] != P4R5_CHECKPOINT_PACKET_NAME or checkpoint["receipt_schema_version"] != P4R5_CHECKPOINT_RECEIPT_SCHEMA_VERSION or checkpoint["packet_schema_version"] != P4R5_CHECKPOINT_PACKET_SCHEMA_VERSION or checkpoint["seed_node_ids"] != ["F1", "F2"] or checkpoint["replay_order"] != ["F1", "F2"] or checkpoint["replay_authority"] != "phase4_validate_node_output_then_phase4_register_node_output" :
+            raise Phase4LocalQwenContractError("P4R5 checkpoint contract drifted")
+        _action_flags(checkpoint["action_state"], "P4R5Policy.checkpoint.action_state", model_action=False, graph_runtime_execution=False)
+
+    @property
+    def projection_revision(self) -> str:
+        return str(self.projection["revision"])
+
+    @property
+    def prompt_revision(self) -> str:
+        return str(self.prompt["revision"])
+
+    @property
+    def prompt_v2_revision(self) -> str:
+        return str(self.prompt["retry_revision"])
+
+
+class P4R5CheckpointPacket(_CanonicalRecord):
+    """Local packet carrying R4 F1/F2 raw bytes for validated replay."""
+
+    KEYS = (
+        "schema_version", "packet_id", "pilot_id", "case_id", "request_id",
+        "model_id", "model_revision", "policy_identity", "r4_summary_identity",
+        "r4_action_evidence", "seed_nodes", "nodes", "authority_state_identity",
+        "action_state",
+    )
+    SCHEMA_VERSION = P4R5_CHECKPOINT_PACKET_SCHEMA_VERSION
+
+    @classmethod
+    def create(
+        cls,
+        *,
+        pilot: "PilotBinding",
+        profile: "LocalQwenProfile",
+        policy_raw: bytes,
+        summary_raw: bytes,
+        action_evidence: Mapping[str, object],
+        nodes: Sequence[Mapping[str, object]],
+        authority_state: Mapping[str, object],
+    ) -> "P4R5CheckpointPacket":
+        pilot.validate()
+        profile.validate()
+        if pilot.pilot_id != P4R5_PILOT_ID:
+            raise Phase4LocalQwenContractError("P4R5 checkpoint pilot binding is invalid")
+        if [item.get("node_id") for item in nodes] != ["F1", "F2"]:
+            raise Phase4LocalQwenContractError("P4R5 checkpoint nodes must be F1 then F2")
+        packet_nodes: list[dict[str, object]] = []
+        for item in nodes:
+            node_id = _text(item["node_id"], "P4R5CheckpointPacket.node_id", pattern=_ID_RE)
+            attempt_raw = item.get("attempt_result_raw")
+            raw = item.get("raw")
+            if type(attempt_raw) is not bytes or not attempt_raw or type(raw) is not bytes or not raw:
+                raise Phase4LocalQwenContractError("P4R5 checkpoint packet bytes are invalid")
+            ref = _ref(item["ref"], "P4R5CheckpointPacket.ref", "node_output")
+            packet_nodes.append(
+                {
+                    "node_id": node_id,
+                    "attempt_result_identity": _identity(attempt_raw, revision=ATTEMPT_RESULT_SCHEMA_VERSION, identity_kind="raw_bytes"),
+                    "raw_identity": _identity(raw, revision=P4R5_CHECKPOINT_RAW_IDENTITY_REVISION, identity_kind="raw_bytes"),
+                    "raw_b64": _b64(raw, f"P4R5CheckpointPacket.{node_id}.raw"),
+                    "ref": ref,
+                }
+            )
+        root: dict[str, object] = {
+            "schema_version": cls.SCHEMA_VERSION,
+            "packet_id": "pending",
+            "pilot_id": pilot.pilot_id,
+            "case_id": pilot.case_binding["case_id"],
+            "request_id": pilot.case_binding["request_id"],
+            "model_id": profile.model_id,
+            "model_revision": profile.model_revision,
+            "policy_identity": _identity(policy_raw, revision=P4R5_POLICY_SCHEMA_VERSION, identity_kind="raw_bytes"),
+            "r4_summary_identity": _identity(summary_raw, revision=P4R4_RESULT_SUMMARY_SCHEMA_VERSION, identity_kind="raw_bytes"),
+            "r4_action_evidence": {key: dict(value) for key, value in action_evidence.items()},
+            "seed_nodes": ["F1", "F2"],
+            "nodes": packet_nodes,
+            "authority_state_identity": _identity(authority_state, revision=f"{P4_03_SCHEMA_PREFIX}.r5.checkpoint_authority_state.v1"),
+            "action_state": _make_action_state(model_action=False, graph_runtime_execution=False),
+        }
+        root["packet_id"] = _sha256(_canonical_bytes({key: value for key, value in root.items() if key != "packet_id"}))
+        return cls._from_payload(root)  # type: ignore[return-value]
+
+    @classmethod
+    def _validate_payload(cls, data: Mapping[str, object]) -> None:
+        _common_record(data, schema=cls.SCHEMA_VERSION, name="P4R5CheckpointPacket")
+        _sha(data["packet_id"], "P4R5CheckpointPacket.packet_id")
+        _validate_id_scope(data, "P4R5CheckpointPacket", "pilot_id", "case_id", "request_id")
+        if data["pilot_id"] != P4R5_PILOT_ID or data["model_id"] != QWEN_MODEL_ID or data["model_revision"] != QWEN_MODEL_REVISION or data["seed_nodes"] != ["F1", "F2"]:
+            raise Phase4LocalQwenContractError("P4R5 checkpoint packet scope drifted")
+        _validate_identity(data["policy_identity"], "P4R5CheckpointPacket.policy_identity")
+        _validate_identity(data["r4_summary_identity"], "P4R5CheckpointPacket.r4_summary_identity")
+        action = _exact(data["r4_action_evidence"], ("pilot_outcome_identity", "supervisor_identity", "aggregate_identity"), "P4R5CheckpointPacket.r4_action_evidence")
+        for key in action:
+            _validate_identity(action[key], f"P4R5CheckpointPacket.r4_action_evidence.{key}")
+        nodes = data["nodes"]
+        if type(nodes) is not list or len(nodes) != 2:
+            raise Phase4LocalQwenContractError("P4R5 checkpoint packet node inventory is invalid")
+        for row, expected_node in zip(nodes, ("F1", "F2"), strict=True):
+            item = _exact(row, ("node_id", "attempt_result_identity", "raw_identity", "raw_b64", "ref"), f"P4R5CheckpointPacket.{expected_node}")
+            if item["node_id"] != expected_node:
+                raise Phase4LocalQwenContractError("P4R5 checkpoint packet node order drifted")
+            _validate_identity(item["attempt_result_identity"], f"P4R5CheckpointPacket.{expected_node}.attempt_result_identity")
+            raw_identity = _validate_identity(item["raw_identity"], f"P4R5CheckpointPacket.{expected_node}.raw_identity")
+            raw = _decode_b64(item["raw_b64"], f"P4R5CheckpointPacket.{expected_node}.raw_b64")
+            if raw_identity["revision"] != P4R5_CHECKPOINT_RAW_IDENTITY_REVISION or raw_identity["sha256"] != _sha256(raw) or raw_identity["byte_length"] != len(raw):
+                raise Phase4LocalQwenContractError("P4R5 checkpoint raw identity drifted")
+            _ref(item["ref"], f"P4R5CheckpointPacket.{expected_node}.ref", "node_output")
+        _validate_identity(data["authority_state_identity"], "P4R5CheckpointPacket.authority_state_identity")
+        _action_flags(data["action_state"], "P4R5CheckpointPacket.action_state", model_action=False, graph_runtime_execution=False)
+        expected = _sha256(_canonical_bytes({key: data[key] for key in data if key != "packet_id"}))
+        if data["packet_id"] != expected:
+            raise Phase4LocalQwenContractError("P4R5 checkpoint packet identity drifted")
+
+
+class P4R5CheckpointReceipt(_CanonicalRecord):
+    """Independent receipt explaining checkpoint-seeded F1/F2 passes."""
+
+    KEYS = (
+        "schema_version", "receipt_id", "pilot_id", "case_id", "request_id",
+        "model_id", "model_revision", "packet_identity", "r4_summary_identity",
+        "r4_action_evidence", "seeded_node_ids", "node_attempt_identities",
+        "node_raw_identities", "node_refs", "authority_state_identity", "status",
+        "action_state",
+    )
+    SCHEMA_VERSION = P4R5_CHECKPOINT_RECEIPT_SCHEMA_VERSION
+
+    @classmethod
+    def create(cls, *, packet: P4R5CheckpointPacket) -> "P4R5CheckpointReceipt":
+        packet.validate()
+        payload = packet.to_dict()
+        nodes = payload["nodes"]
+        root: dict[str, object] = {
+            "schema_version": cls.SCHEMA_VERSION,
+            "receipt_id": "pending",
+            "pilot_id": payload["pilot_id"],
+            "case_id": payload["case_id"],
+            "request_id": payload["request_id"],
+            "model_id": payload["model_id"],
+            "model_revision": payload["model_revision"],
+            "packet_identity": _identity(payload, revision=P4R5_CHECKPOINT_PACKET_SCHEMA_VERSION),
+            "r4_summary_identity": dict(payload["r4_summary_identity"]),
+            "r4_action_evidence": copy.deepcopy(payload["r4_action_evidence"]),
+            "seeded_node_ids": ["F1", "F2"],
+            "node_attempt_identities": {item["node_id"]: dict(item["attempt_result_identity"]) for item in nodes},
+            "node_raw_identities": {item["node_id"]: dict(item["raw_identity"]) for item in nodes},
+            "node_refs": {item["node_id"]: dict(item["ref"]) for item in nodes},
+            "authority_state_identity": dict(payload["authority_state_identity"]),
+            "status": "checkpoint_validated_f1_f2_no_r5_calls",
+            "action_state": _make_action_state(model_action=False, graph_runtime_execution=False),
+        }
+        root["receipt_id"] = _sha256(_canonical_bytes({key: value for key, value in root.items() if key != "receipt_id"}))
+        return cls._from_payload(root)  # type: ignore[return-value]
+
+    @classmethod
+    def _validate_payload(cls, data: Mapping[str, object]) -> None:
+        _common_record(data, schema=cls.SCHEMA_VERSION, name="P4R5CheckpointReceipt")
+        _sha(data["receipt_id"], "P4R5CheckpointReceipt.receipt_id")
+        _validate_id_scope(data, "P4R5CheckpointReceipt", "pilot_id", "case_id", "request_id")
+        if data["pilot_id"] != P4R5_PILOT_ID or data["model_id"] != QWEN_MODEL_ID or data["model_revision"] != QWEN_MODEL_REVISION or data["seeded_node_ids"] != ["F1", "F2"] or data["status"] != "checkpoint_validated_f1_f2_no_r5_calls":
+            raise Phase4LocalQwenContractError("P4R5 checkpoint receipt scope drifted")
+        _validate_identity(data["packet_identity"], "P4R5CheckpointReceipt.packet_identity")
+        _validate_identity(data["r4_summary_identity"], "P4R5CheckpointReceipt.r4_summary_identity")
+        action = _exact(data["r4_action_evidence"], ("pilot_outcome_identity", "supervisor_identity", "aggregate_identity"), "P4R5CheckpointReceipt.r4_action_evidence")
+        for key in action:
+            _validate_identity(action[key], f"P4R5CheckpointReceipt.r4_action_evidence.{key}")
+        attempts = _exact(data["node_attempt_identities"], ("F1", "F2"), "P4R5CheckpointReceipt.node_attempt_identities")
+        raws = _exact(data["node_raw_identities"], ("F1", "F2"), "P4R5CheckpointReceipt.node_raw_identities")
+        refs = _exact(data["node_refs"], ("F1", "F2"), "P4R5CheckpointReceipt.node_refs")
+        for node_id in ("F1", "F2"):
+            _validate_identity(attempts[node_id], f"P4R5CheckpointReceipt.{node_id}.attempt_identity")
+            _validate_identity(raws[node_id], f"P4R5CheckpointReceipt.{node_id}.raw_identity")
+            _ref(refs[node_id], f"P4R5CheckpointReceipt.{node_id}.ref", "node_output")
+        _validate_identity(data["authority_state_identity"], "P4R5CheckpointReceipt.authority_state_identity")
+        _action_flags(data["action_state"], "P4R5CheckpointReceipt.action_state", model_action=False, graph_runtime_execution=False)
+        expected = _sha256(_canonical_bytes({key: data[key] for key in data if key != "receipt_id"}))
+        if data["receipt_id"] != expected:
+            raise Phase4LocalQwenContractError("P4R5 checkpoint receipt identity drifted")
+
+
 class P4R3ResultRootBinding(_CanonicalRecord):
     """R3 result-root binding to tracked and live R2 terminal evidence."""
 
@@ -1071,6 +1432,11 @@ class P4R2AggregateBudgetLedger(_CanonicalRecord):
     POLICY_SCHEMA_VERSION = P4R2_POLICY_SCHEMA_VERSION
     PILOT_ID = P4R2_PILOT_ID
     STATUS = "r2_aggregate_budget_live"
+    NODE_TOTAL_CALL_CAP = 3
+    NODE_LOCAL_CALL_CAP = 2
+    INTEGRATED_RUN_CAP = 1
+    RETRY_COUNT_CAP = 0
+    B_AUX_CALL_CAP = 0
 
     @classmethod
     def create(cls, *, policy_raw: bytes, pilot: "PilotBinding", profile: "LocalQwenProfile") -> "P4R2AggregateBudgetLedger":
@@ -1084,7 +1450,13 @@ class P4R2AggregateBudgetLedger(_CanonicalRecord):
             "model_revision": profile.model_revision,
             "model_root_identity": profile.model_root_identity,
             "policy_identity": _identity(policy_raw, revision=cls.POLICY_SCHEMA_VERSION, identity_kind="raw_bytes"),
-            "budget": {"node_total_call_cap": 3, "node_local_call_cap": 2, "integrated_run_cap": 1, "retry_count_cap": 0, "b_aux_call_cap": 0},
+            "budget": {
+                "node_total_call_cap": cls.NODE_TOTAL_CALL_CAP,
+                "node_local_call_cap": cls.NODE_LOCAL_CALL_CAP,
+                "integrated_run_cap": cls.INTEGRATED_RUN_CAP,
+                "retry_count_cap": cls.RETRY_COUNT_CAP,
+                "b_aux_call_cap": cls.B_AUX_CALL_CAP,
+            },
             "node_total_generate_entry_reservations": {node_id: 0 for node_id in NODE_ORDER},
             "node_local_generate_entry_reservations": {node_id: 0 for node_id in NODE_ORDER},
             "integrated_run_reservations": 0,
@@ -1108,22 +1480,22 @@ class P4R2AggregateBudgetLedger(_CanonicalRecord):
         _validate_identity(data["model_root_identity"], "P4R2AggregateBudgetLedger.model_root_identity")
         _validate_identity(data["policy_identity"], "P4R2AggregateBudgetLedger.policy_identity")
         budget = _exact(data["budget"], ("node_total_call_cap", "node_local_call_cap", "integrated_run_cap", "retry_count_cap", "b_aux_call_cap"), "P4R2AggregateBudgetLedger.budget")
-        for key, expected in (("node_total_call_cap", 3), ("node_local_call_cap", 2), ("integrated_run_cap", 1), ("retry_count_cap", 0), ("b_aux_call_cap", 0)):
+        for key, expected in (("node_total_call_cap", cls.NODE_TOTAL_CALL_CAP), ("node_local_call_cap", cls.NODE_LOCAL_CALL_CAP), ("integrated_run_cap", cls.INTEGRATED_RUN_CAP), ("retry_count_cap", cls.RETRY_COUNT_CAP), ("b_aux_call_cap", cls.B_AUX_CALL_CAP)):
             if _integer(budget[key], f"P4R2AggregateBudgetLedger.budget.{key}", minimum=0) != expected:
                 raise Phase4LocalQwenContractError("P4R2 aggregate budget drifted")
         total = _exact(data["node_total_generate_entry_reservations"], NODE_ORDER, "P4R2AggregateBudgetLedger.node_total_generate_entry_reservations")
         local = _exact(data["node_local_generate_entry_reservations"], NODE_ORDER, "P4R2AggregateBudgetLedger.node_local_generate_entry_reservations")
         integrated_deltas: list[int] = []
         for node_id in NODE_ORDER:
-            total_count = _integer(total[node_id], f"P4R2AggregateBudgetLedger.total.{node_id}", minimum=0, maximum=3)
-            local_count = _integer(local[node_id], f"P4R2AggregateBudgetLedger.local.{node_id}", minimum=0, maximum=2)
+            total_count = _integer(total[node_id], f"P4R2AggregateBudgetLedger.total.{node_id}", minimum=0, maximum=cls.NODE_TOTAL_CALL_CAP)
+            local_count = _integer(local[node_id], f"P4R2AggregateBudgetLedger.local.{node_id}", minimum=0, maximum=cls.NODE_LOCAL_CALL_CAP)
             if local_count > total_count:
                 raise Phase4LocalQwenContractError("P4R2 aggregate local count exceeds total")
             delta = total_count - local_count
             if delta not in (0, 1):
                 raise Phase4LocalQwenContractError("P4R2 aggregate per-node integrated delta is invalid")
             integrated_deltas.append(delta)
-        integrated_count = _integer(data["integrated_run_reservations"], "P4R2AggregateBudgetLedger.integrated_run_reservations", minimum=0, maximum=1)
+        integrated_count = _integer(data["integrated_run_reservations"], "P4R2AggregateBudgetLedger.integrated_run_reservations", minimum=0, maximum=cls.INTEGRATED_RUN_CAP)
         if integrated_count == 0:
             if data["integrated_run_owner"] is not None:
                 raise Phase4LocalQwenContractError("P4R2 aggregate integrated owner is premature")
@@ -1155,13 +1527,15 @@ class P4R2AggregateBudgetLedger(_CanonicalRecord):
         payload = self.to_dict()
         total = payload["node_total_generate_entry_reservations"]
         local = payload["node_local_generate_entry_reservations"]
-        if total[node_id] >= 3:
+        if total[node_id] >= type(self).NODE_TOTAL_CALL_CAP:
             raise Phase4LocalQwenContractError("P4R2 shared node total budget is exhausted")
         if call_kind == "node_local":
-            if local[node_id] >= 2:
+            if local[node_id] >= type(self).NODE_LOCAL_CALL_CAP:
                 raise Phase4LocalQwenContractError("P4R2 shared node-local budget is exhausted")
             local[node_id] += 1
         else:
+            if type(self).INTEGRATED_RUN_CAP == 0:
+                raise Phase4LocalQwenContractError("integrated run is forbidden for this aggregate")
             owner = {"run_id": _text(run_id, "aggregate.run_id", pattern=_ID_RE), "result_root_marker": _text(result_root_marker, "aggregate.result_root_marker", pattern=_ID_RE)}
             if payload["integrated_run_reservations"] == 0:
                 payload["integrated_run_reservations"] = 1
@@ -1190,6 +1564,16 @@ class P4R4AggregateBudgetLedger(P4R2AggregateBudgetLedger):
     POLICY_SCHEMA_VERSION = P4R4_POLICY_SCHEMA_VERSION
     PILOT_ID = P4R4_PILOT_ID
     STATUS = "r4_aggregate_budget_live"
+
+
+class P4R5AggregateBudgetLedger(P4R2AggregateBudgetLedger):
+    """R5-only aggregate budget; integrated execution is not in this slice."""
+
+    SCHEMA_VERSION = P4R5_AGGREGATE_LEDGER_SCHEMA_VERSION
+    POLICY_SCHEMA_VERSION = P4R5_POLICY_SCHEMA_VERSION
+    PILOT_ID = P4R5_PILOT_ID
+    STATUS = "r5_aggregate_budget_live"
+    INTEGRATED_RUN_CAP = 0
 
 
 def _p4r2_aggregate_budget_paths(model_root: Path) -> tuple[Path, str, Path]:
@@ -1437,6 +1821,90 @@ def _reserve_p4r4_aggregate_generate_entry(*, model_root: Path, policy_raw: byte
         _release_p4r4_aggregate_lock(lock_path)
 
 
+def _p4r5_aggregate_budget_paths(model_root: Path) -> tuple[Path, str, Path]:
+    if not isinstance(model_root, Path) or not model_root.is_absolute() or not model_root.is_dir():
+        raise Phase4LocalQwenContractError("P4R5 aggregate model root is invalid")
+    resolved = model_root.resolve(strict=True)
+    run_root = resolved.parent / "phase4_runs"
+    if run_root.exists() and (not run_root.is_dir() or run_root.is_symlink()):
+        raise Phase4LocalQwenContractError("P4R5 aggregate run root is unsafe")
+    run_root.mkdir(parents=False, exist_ok=True)
+    locator = _hex_sha256(_canonical_bytes({"pilot_id": P4R5_PILOT_ID, "resolved_model_root": str(resolved)}))[:24]
+    filename = f"p4_03r5_{locator}_aggregate_budget.json"
+    return run_root, filename, run_root / f"{filename}.lock"
+
+
+def _acquire_p4r5_aggregate_lock(lock_path: Path) -> None:
+    try:
+        descriptor = os.open(lock_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+    except FileExistsError as exc:
+        raise Phase4LocalQwenContractError("P4R5 aggregate budget lock conflict") from exc
+    try:
+        with os.fdopen(descriptor, "wb") as handle:
+            handle.write(_canonical_bytes({"pilot_id": P4R5_PILOT_ID, "lock_semantics": "exclusive_fail_closed"}))
+            handle.flush()
+            os.fsync(handle.fileno())
+    except Exception:
+        try:
+            lock_path.unlink()
+        except OSError:
+            pass
+        raise
+
+
+def _release_p4r5_aggregate_lock(lock_path: Path) -> None:
+    try:
+        lock_path.unlink()
+    except OSError as exc:
+        raise Phase4LocalQwenContractError("P4R5 aggregate budget lock release failed") from exc
+
+
+def _initialize_or_validate_p4r5_aggregate_budget(*, model_root: Path, policy_raw: bytes, pilot: "PilotBinding", profile: "LocalQwenProfile") -> P4R5AggregateBudgetLedger:
+    run_root, filename, lock_path = _p4r5_aggregate_budget_paths(model_root)
+    _acquire_p4r5_aggregate_lock(lock_path)
+    try:
+        ledger_path = run_root / filename
+        if ledger_path.exists():
+            ledger = P4R5AggregateBudgetLedger.from_bytes(ledger_path.read_bytes())
+        else:
+            ledger = P4R5AggregateBudgetLedger.create(policy_raw=policy_raw, pilot=pilot, profile=profile)
+            _write_atomic(run_root, filename, ledger.canonical_bytes())
+        ledger.validate_against(policy_raw=policy_raw, pilot=pilot, profile=profile)
+        return ledger
+    finally:
+        _release_p4r5_aggregate_lock(lock_path)
+
+
+def _validate_p4r5_aggregate_budget(*, model_root: Path, policy_raw: bytes, pilot: "PilotBinding", profile: "LocalQwenProfile") -> P4R5AggregateBudgetLedger:
+    run_root, filename, lock_path = _p4r5_aggregate_budget_paths(model_root)
+    _acquire_p4r5_aggregate_lock(lock_path)
+    try:
+        ledger_path = run_root / filename
+        if not ledger_path.is_file():
+            raise Phase4LocalQwenContractError("P4R5 aggregate budget ledger is unavailable")
+        ledger = P4R5AggregateBudgetLedger.from_bytes(ledger_path.read_bytes())
+        ledger.validate_against(policy_raw=policy_raw, pilot=pilot, profile=profile)
+        return ledger
+    finally:
+        _release_p4r5_aggregate_lock(lock_path)
+
+
+def _reserve_p4r5_aggregate_generate_entry(*, model_root: Path, policy_raw: bytes, pilot: "PilotBinding", profile: "LocalQwenProfile", node_id: str, call_kind: str, run_id: str) -> P4R5AggregateBudgetLedger:
+    run_root, filename, lock_path = _p4r5_aggregate_budget_paths(model_root)
+    _acquire_p4r5_aggregate_lock(lock_path)
+    try:
+        ledger_path = run_root / filename
+        if not ledger_path.is_file():
+            raise Phase4LocalQwenContractError("P4R5 aggregate budget ledger is unavailable")
+        ledger = P4R5AggregateBudgetLedger.from_bytes(ledger_path.read_bytes())
+        ledger.validate_against(policy_raw=policy_raw, pilot=pilot, profile=profile)
+        updated = ledger.reserve(node_id=node_id, call_kind=call_kind, run_id=run_id, result_root_marker=pilot.result_root_marker)
+        _write_atomic(run_root, filename, updated.canonical_bytes())
+        return updated
+    finally:
+        _release_p4r5_aggregate_lock(lock_path)
+
+
 def load_p4r2_policy_revision() -> tuple[P4R2Policy, bytes]:
     """Read the tracked R2 policy as canonical bytes without changing it."""
 
@@ -1508,6 +1976,23 @@ def load_p4r4_policy_revision() -> tuple[P4R4Policy, bytes]:
     return policy, raw
 
 
+def load_p4r4_result_summary() -> tuple[P4R4ResultSummary, bytes]:
+    raw = _read_tracked_canonical_record(P4R4_RESULT_PATH, "P4R4 result summary")
+    if P4R5_RESULT_SUMMARY_SHA256 and (_sha256(raw) != P4R5_RESULT_SUMMARY_SHA256 or len(raw) != P4R5_RESULT_SUMMARY_BYTE_LENGTH):
+        raise Phase4LocalQwenContractError("tracked P4R4 result summary raw identity drifted")
+    return P4R4ResultSummary.from_bytes(raw), raw
+
+
+def load_p4r5_policy_revision() -> tuple[P4R5Policy, bytes]:
+    raw = _read_tracked_canonical_record(P4R5_POLICY_PATH, "P4R5 policy")
+    policy = P4R5Policy.from_bytes(raw)
+    summary, summary_raw = load_p4r4_result_summary()
+    predecessor = policy.predecessor_r4_result
+    if summary.source_commit != predecessor["source_commit"] or summary.result_root_leaf != predecessor["result_root_leaf"] or _sha256(summary_raw) != predecessor["summary_raw_sha256"] or len(summary_raw) != predecessor["summary_raw_byte_length"]:
+        raise Phase4LocalQwenContractError("P4R5 policy/tracked R4 result binding drifted")
+    return policy, raw
+
+
 def _p4r3_expected_action_evidence() -> dict[str, object]:
     return {
         "pilot_outcome_identity": {"identity_kind": "raw_bytes", "sha256": P4R3_R2_OUTCOME_SHA256, "byte_length": P4R3_R2_OUTCOME_BYTE_LENGTH, "revision": OUTCOME_SCHEMA_VERSION},
@@ -1567,6 +2052,14 @@ def _p4r4_expected_action_evidence() -> dict[str, object]:
     }
 
 
+def _p4r5_expected_r4_action_evidence() -> dict[str, object]:
+    return {
+        "pilot_outcome_identity": {"identity_kind": "raw_bytes", "sha256": P4R4_OUTCOME_SHA256, "byte_length": P4R4_OUTCOME_BYTE_LENGTH, "revision": OUTCOME_SCHEMA_VERSION},
+        "supervisor_identity": {"identity_kind": "raw_bytes", "sha256": P4R4_SUPERVISOR_SHA256, "byte_length": P4R4_SUPERVISOR_BYTE_LENGTH, "revision": SUPERVISOR_RECEIPT_SCHEMA_VERSION},
+        "aggregate_identity": {"identity_kind": "raw_bytes", "sha256": P4R4_AGGREGATE_SHA256, "byte_length": P4R4_AGGREGATE_BYTE_LENGTH, "revision": P4R4_AGGREGATE_LEDGER_SCHEMA_VERSION},
+    }
+
+
 def _load_p4r4_r3_action_time_evidence(model_root: Path) -> dict[str, object]:
     if not isinstance(model_root, Path) or not model_root.is_absolute() or not model_root.is_dir():
         raise Phase4LocalQwenContractError("P4R4 predecessor model root is invalid")
@@ -1604,6 +2097,103 @@ def _load_p4r4_r3_action_time_evidence(model_root: Path) -> dict[str, object]:
     return actual
 
 
+def _p4r5_r4_action_root(model_root: Path) -> Path:
+    if not isinstance(model_root, Path) or not model_root.is_absolute() or not model_root.is_dir():
+        raise Phase4LocalQwenContractError("P4R5 R4 action model root is invalid")
+    run_root = model_root.resolve(strict=True).parent / "phase4_runs"
+    result_root = run_root / P4R5_R4_RESULT_ROOT_LEAF
+    if not run_root.is_dir() or run_root.is_symlink() or not result_root.is_dir() or result_root.is_symlink():
+        raise Phase4LocalQwenContractError("P4R5 R4 action root is unavailable")
+    return result_root
+
+
+def _p4r5_read_expected_file(path: Path, *, expected_sha256: str, expected_byte_length: int, name: str) -> bytes:
+    if not path.is_file() or path.is_symlink():
+        raise Phase4LocalQwenContractError(f"P4R5 {name} is unavailable")
+    try:
+        raw = path.read_bytes()
+    except OSError as exc:
+        raise Phase4LocalQwenContractError(f"P4R5 {name} read failed") from exc
+    if _sha256(raw) != expected_sha256 or len(raw) != expected_byte_length:
+        raise Phase4LocalQwenContractError(f"P4R5 {name} raw identity drifted")
+    return raw
+
+
+def _p4r5_load_r4_action_evidence(*, model_root: Path, profile: "LocalQwenProfile", b_input: Mapping[str, object]) -> tuple[dict[str, object], list[dict[str, object]], Mapping[str, object]]:
+    root = _p4r5_r4_action_root(model_root)
+    run_root = root.parent
+    _, r4_policy_raw = load_p4r4_policy_revision()
+    root_policy_raw = _p4r5_read_expected_file(root / P4R4_RESULT_POLICY_NAME, expected_sha256=P4R4_POLICY_CANONICAL_SHA256, expected_byte_length=P4R4_POLICY_CANONICAL_BYTE_LENGTH, name="R4 policy copy")
+    if root_policy_raw != r4_policy_raw:
+        raise Phase4LocalQwenContractError("P4R5 R4 policy copy drifted")
+    action_paths = {
+        "pilot_outcome": root / "pilot_outcome.json",
+        "supervisor": root / "supervisor_receipt.json",
+        "aggregate": run_root / P4R4_AGGREGATE_FILENAME,
+    }
+    action_raw = {
+        key: _p4r5_read_expected_file(path, expected_sha256=P4R5_R4_ACTION_EVIDENCE[key][1], expected_byte_length=P4R5_R4_ACTION_EVIDENCE[key][2], name=f"R4 {key}")
+        for key, path in action_paths.items()
+    }
+    action_evidence = {
+        "pilot_outcome_identity": _identity(action_raw["pilot_outcome"], revision=OUTCOME_SCHEMA_VERSION, identity_kind="raw_bytes"),
+        "supervisor_identity": _identity(action_raw["supervisor"], revision=SUPERVISOR_RECEIPT_SCHEMA_VERSION, identity_kind="raw_bytes"),
+        "aggregate_identity": _identity(action_raw["aggregate"], revision=P4R4_AGGREGATE_LEDGER_SCHEMA_VERSION, identity_kind="raw_bytes"),
+    }
+    if action_evidence != _p4r5_expected_r4_action_evidence():
+        raise Phase4LocalQwenContractError("P4R5 R4 action evidence identity drifted")
+    outcome = _strict_json(action_raw["pilot_outcome"], require_canonical=False)
+    supervisor = _strict_json(action_raw["supervisor"], require_canonical=False)
+    aggregate = P4R4AggregateBudgetLedger.from_bytes(action_raw["aggregate"])
+    if outcome.get("pilot_id") != P4R4_PILOT_ID or outcome.get("case_id") != "path3-commerce-checkout" or outcome.get("request_id") != "p4-02a-synthetic-request-001" or outcome.get("status") != "stopped_after_first_failure" or outcome.get("model_calls_performed") != 3 or outcome.get("node_local_statuses") != {"F1": "passed", "F2": "passed", "F3": "failed_once", "F4": "not_started"} or outcome.get("node_total_counts") != {"F1": 1, "F2": 1, "F3": 1, "F4": 0}:
+        raise Phase4LocalQwenContractError("P4R5 R4 outcome semantics drifted")
+    if supervisor.get("pilot_id") != P4R4_PILOT_ID or supervisor.get("case_id") != "path3-commerce-checkout" or supervisor.get("request_id") != "p4-02a-synthetic-request-001" or supervisor.get("terminal_status") != "worker_failed" or supervisor.get("worker_exit_verified") is not True or supervisor.get("generation_started") is not True or supervisor.get("raw_status") != "not_captured":
+        raise Phase4LocalQwenContractError("P4R5 R4 supervisor semantics drifted")
+    if aggregate.pilot_id != P4R4_PILOT_ID or aggregate.case_id != "path3-commerce-checkout" or aggregate.request_id != "p4-02a-synthetic-request-001" or aggregate.model_id != QWEN_MODEL_ID or aggregate.model_revision != QWEN_MODEL_REVISION or aggregate.model_root_identity != profile.model_root_identity or aggregate.node_total_generate_entry_reservations != {"F1": 1, "F2": 1, "F3": 1, "F4": 0} or aggregate.node_local_generate_entry_reservations != {"F1": 1, "F2": 1, "F3": 1, "F4": 0} or aggregate.integrated_run_reservations != 0 or aggregate.generate_entry_reservation_total != 3:
+        raise Phase4LocalQwenContractError("P4R5 R4 aggregate semantics drifted")
+    from req2web_orchestration.phase4_graph import phase4_create_authority_state, phase4_register_node_output, phase4_validate_node_output, validate_b_input
+
+    checked_b = validate_b_input(dict(b_input))
+    authority_state: Mapping[str, object] = phase4_create_authority_state(checked_b)
+    nodes: list[dict[str, object]] = []
+    for node_id in ("F1", "F2"):
+        expected = P4R5_R4_ATTEMPTS[node_id]
+        attempt_path = root / expected["attempt_result_relative_path"]
+        raw_path = root / expected["raw_relative_path"]
+        attempt_raw = _p4r5_read_expected_file(attempt_path, expected_sha256=expected["attempt_result_sha256"], expected_byte_length=expected["attempt_result_byte_length"], name=f"R4 {node_id} attempt result")
+        raw = _p4r5_read_expected_file(raw_path, expected_sha256=expected["raw_sha256"], expected_byte_length=expected["raw_byte_length"], name=f"R4 {node_id} raw response")
+        attempt = AttemptResult.from_bytes(attempt_raw)
+        if attempt.pilot_id != P4R4_PILOT_ID or attempt.case_id != checked_b["case_id"] or attempt.request_id != checked_b["request_id"] or attempt.node_id != node_id or attempt.attempt_index != 1 or attempt.call_kind != "node_local" or attempt.generate_started is not True or attempt.call_count != 1 or attempt.retry_count != 0 or attempt.raw_status != "captured_nonempty" or attempt.raw_response_relative_path != expected["raw_relative_path"] or attempt.raw_sha256 != expected["raw_sha256"] or attempt.raw_byte_length != expected["raw_byte_length"] or attempt.parse_status != "passed" or attempt.node_contract_status != "passed" or attempt.registry_status != "passed" or attempt.failure_code is not None or attempt.source_kind != "real_local_qwen":
+            raise Phase4LocalQwenContractError(f"P4R5 R4 {node_id} attempt result semantics drifted")
+        output = _strict_json(raw, require_canonical=False)
+        validated = phase4_validate_node_output(node_id, output, authority_state)
+        authority_state = phase4_register_node_output(authority_state, node_id, validated)
+        ref = {
+            "ref_type": "node_output",
+            "ref_id": attempt.result_id,
+            "ref_sha256": attempt.result_id,
+            "ref_revision": f"{P4_03_SCHEMA_PREFIX}.node_output.{P4R5_PILOT_ID}.{P4R5_CHECKPOINT_RUN_ID}.{checked_b['case_id']}.{checked_b['request_id']}.{node_id}",
+        }
+        _ref(ref, f"P4R5 {node_id} checkpoint ref", "node_output")
+        nodes.append({"node_id": node_id, "attempt_result_raw": attempt_raw, "raw": raw, "ref": ref})
+    return action_evidence, nodes, authority_state
+
+
+def _p4r5_build_checkpoint_seed(*, model_root: Path, profile: "LocalQwenProfile", pilot: "PilotBinding", policies: Sequence["NodeProjectionPolicy"], policy_raw: bytes, summary_raw: bytes, b_input: Mapping[str, object]) -> dict[str, object]:
+    action_evidence, nodes, authority_state = _p4r5_load_r4_action_evidence(model_root=model_root, profile=profile, b_input=b_input)
+    packet = P4R5CheckpointPacket.create(pilot=pilot, profile=profile, policy_raw=policy_raw, summary_raw=summary_raw, action_evidence=action_evidence, nodes=nodes, authority_state=authority_state)
+    receipt = P4R5CheckpointReceipt.create(packet=packet)
+    if policies and [policy.node_id for policy in policies] != list(NODE_ORDER):
+        raise Phase4LocalQwenContractError("P4R5 checkpoint policies are not ordered")
+    return {
+        "packet": packet,
+        "receipt": receipt,
+        "authority_state": authority_state,
+        "outputs": {item["node_id"]: bytes(item["raw"]) for item in nodes},
+        "refs": {item["node_id"]: dict(item["ref"]) for item in nodes},
+    }
+
+
 def _validate_p4r2_policy_against_policies(policy: P4R2Policy, policies: Sequence["NodeProjectionPolicy"]) -> None:
     if [item.node_id for item in policies] != list(NODE_ORDER):
         raise Phase4LocalQwenContractError("P4R2 policy node order is invalid")
@@ -1626,6 +2216,43 @@ def _validate_p4r4_policy_against_policies(policy: P4R4Policy, policies: Sequenc
     for item in policies:
         if item.projection_revision != policy.projection_revision or item.prompt_template_revision != policy.prompt_revision:
             raise Phase4LocalQwenContractError("P4R4 policy/node revision binding drifted")
+
+
+def _validate_p4r5_policy_against_policies(policy: P4R5Policy, policies: Sequence["NodeProjectionPolicy"]) -> None:
+    if [item.node_id for item in policies] != list(NODE_ORDER):
+        raise Phase4LocalQwenContractError("P4R5 policy node order is invalid")
+    for item in policies:
+        if item.projection_revision != policy.projection_revision or item.prompt_template_revision != policy.prompt_revision:
+            raise Phase4LocalQwenContractError("P4R5 policy/node revision binding drifted")
+
+
+def validate_p4r5_live_binding(*, model_root: Path, result_root: Path, b_input: Mapping[str, object], pilot: "PilotBinding", profile: "LocalQwenProfile", policies: Sequence["NodeProjectionPolicy"] | None = None) -> dict[str, object]:
+    """Re-read R5 sources and rebuild the checkpoint from R4 raw bytes."""
+
+    policy, policy_raw = load_p4r5_policy_revision()
+    summary, summary_raw = load_p4r4_result_summary()
+    if pilot.pilot_id != P4R5_PILOT_ID or profile.max_new_tokens != 512 or summary.case["case_id"] != pilot.case_binding["case_id"] or summary.case["request_id"] != pilot.case_binding["request_id"] or summary.case["model_id"] != profile.model_id or summary.case["model_revision"] != profile.model_revision:
+        raise Phase4LocalQwenContractError("P4R5 live case/model binding drifted")
+    try:
+        root_policy_raw = (result_root / P4R5_RESULT_POLICY_NAME).read_bytes()
+        root_summary_raw = (result_root / P4R5_RESULT_R4_SUMMARY_NAME).read_bytes()
+        root_packet_raw = (result_root / P4R5_CHECKPOINT_PACKET_NAME).read_bytes()
+        root_receipt_raw = (result_root / P4R5_CHECKPOINT_RECEIPT_NAME).read_bytes()
+    except OSError as exc:
+        raise Phase4LocalQwenContractError("P4R5 live checkpoint evidence is unavailable") from exc
+    if root_policy_raw != policy_raw or root_summary_raw != summary_raw:
+        raise Phase4LocalQwenContractError("P4R5 tracked/result-root source copy drifted")
+    packet = P4R5CheckpointPacket.from_bytes(root_packet_raw)
+    receipt = P4R5CheckpointReceipt.from_bytes(root_receipt_raw)
+    expected = _p4r5_build_checkpoint_seed(model_root=model_root, profile=profile, pilot=pilot, policies=tuple(policies or ()), policy_raw=policy_raw, summary_raw=summary_raw, b_input=b_input)
+    if packet != expected["packet"] or receipt != expected["receipt"]:
+        raise Phase4LocalQwenContractError("P4R5 checkpoint packet/receipt live replay drifted")
+    if receipt.packet_identity != _identity(packet.to_dict(), revision=P4R5_CHECKPOINT_PACKET_SCHEMA_VERSION) or receipt.action_state != _make_action_state(model_action=False, graph_runtime_execution=False):
+        raise Phase4LocalQwenContractError("P4R5 checkpoint receipt does not bind the packet")
+    if policies is not None:
+        _validate_p4r5_policy_against_policies(policy, policies)
+    _validate_p4r5_aggregate_budget(model_root=model_root, policy_raw=policy_raw, pilot=pilot, profile=profile)
+    return expected
 
 
 def validate_p4r2_live_binding(*, result_root: Path, pilot: "PilotBinding", policies: Sequence["NodeProjectionPolicy"] | None = None) -> P4R2Policy:
@@ -2040,7 +2667,10 @@ class PilotBinding(_CanonicalRecord):
         decode_config: Mapping[str, object] | None = None,
         retention_policy: str = "dedicated_result_root_only_no_cleanup_interface",
         stop_policy: str = "first_terminal_or_node_budget_exhaustion",
+        integrated_run_cap: int = 1,
     ) -> "PilotBinding":
+        if type(integrated_run_cap) is not int or integrated_run_cap not in {0, 1}:
+            raise Phase4LocalQwenContractError("integrated_run_cap must be 0 or 1")
         payload = {
             "schema_version": cls.SCHEMA_VERSION,
             "pilot_id": pilot_id,
@@ -2051,7 +2681,7 @@ class PilotBinding(_CanonicalRecord):
             "b_aux_disposition": "absent/not_requested",
             "node_total_call_cap": 3,
             "node_local_call_cap": 2,
-            "integrated_run_cap": 1,
+            "integrated_run_cap": integrated_run_cap,
             "retry_count_cap": 0,
             "model_id": QWEN_MODEL_ID,
             "model_revision": QWEN_MODEL_REVISION,
@@ -2126,7 +2756,8 @@ class PilotBinding(_CanonicalRecord):
             raise Phase4LocalQwenContractError("PilotBinding.policy_id does not bind the contract")
         if data["b_aux_disposition"] != "absent/not_requested":
             raise Phase4LocalQwenContractError("B-Aux must be absent/not_requested")
-        for key, expected in (("node_total_call_cap", 3), ("node_local_call_cap", 2), ("integrated_run_cap", 1), ("retry_count_cap", 0)):
+        expected_integrated_cap = 0 if data["pilot_id"] == P4R5_PILOT_ID else 1
+        for key, expected in (("node_total_call_cap", 3), ("node_local_call_cap", 2), ("integrated_run_cap", expected_integrated_cap), ("retry_count_cap", 0)):
             if _integer(data[key], f"PilotBinding.{key}", minimum=0) != expected:
                 raise Phase4LocalQwenContractError(f"PilotBinding.{key} is not frozen")
         if data["model_id"] != QWEN_MODEL_ID or data["model_revision"] != QWEN_MODEL_REVISION:
@@ -2718,14 +3349,14 @@ class NodeD17ActionRecord(_CanonicalRecord):
                 raise Phase4LocalQwenContractError(f"NodeD17ActionRecord.{prefix} cannot be empty")
         prompt_revision = _text(data["prompt_revision"], "NodeD17ActionRecord.prompt_revision")
         prompt_payload = _strict_json(decoded["prompt"])
-        if prompt_revision in {"p4-03-prompt-v1", P4R2_PROMPT_REVISION, P4R3_PROMPT_REVISION, P4R4_PROMPT_REVISION}:
+        if prompt_revision in {"p4-03-prompt-v1", P4R2_PROMPT_REVISION, P4R3_PROMPT_REVISION, P4R4_PROMPT_REVISION, P4R5_PROMPT_REVISION}:
             if (
                 data["prompt_change"] is not None
                 or prompt_payload.get("prompt_schema_version") != f"{P4_03_SCHEMA_PREFIX}.prompt.v1"
                 or prompt_payload.get("template_revision") != prompt_revision
             ):
                 raise Phase4LocalQwenContractError("initial prompt action binding drifted")
-        elif prompt_revision in {"p4-03-prompt-v2", P4R2_PROMPT_V2_REVISION, P4R3_PROMPT_V2_REVISION, P4R4_PROMPT_V2_REVISION}:
+        elif prompt_revision in {"p4-03-prompt-v2", P4R2_PROMPT_V2_REVISION, P4R3_PROMPT_V2_REVISION, P4R4_PROMPT_V2_REVISION, P4R5_PROMPT_V2_REVISION}:
             change = _exact(
                 data["prompt_change"],
                 ("prior_result_id", "prior_failure_identity", "change_reason"),
@@ -3285,7 +3916,11 @@ class PilotOutcome(_CanonicalRecord):
                 "production_route": "not_executed_p4_03",
             },
             "historical_strict_result": "0/2_unchanged",
-            "claim_boundary": "phase4_local_qwen_node_or_integrated_pilot_only",
+            "claim_boundary": (
+                "phase4_local_qwen_checkpoint_seeded_f1_f2_r5_node_local_only"
+                if pilot.pilot_id == P4R5_PILOT_ID
+                else "phase4_local_qwen_node_or_integrated_pilot_only"
+            ),
             "model_calls_performed": model_calls_performed,
             "model_action_occurred": model_action_occurred,
             "source_kind": source_kind,
@@ -3327,7 +3962,7 @@ class PilotOutcome(_CanonicalRecord):
         downstream = _exact(data["downstream_execution"], ("consistency", "acceptance", "a07", "repair", "g0", "package", "production_route"), "PilotOutcome.downstream_execution")
         if any(value != "not_executed_p4_03" for value in downstream.values()):
             raise Phase4LocalQwenContractError("P4-03 downstream execution drifted")
-        if data["historical_strict_result"] != "0/2_unchanged" or data["claim_boundary"] != "phase4_local_qwen_node_or_integrated_pilot_only":
+        if data["historical_strict_result"] != "0/2_unchanged" or data["claim_boundary"] not in {"phase4_local_qwen_node_or_integrated_pilot_only", "phase4_local_qwen_checkpoint_seeded_f1_f2_r5_node_local_only"}:
             raise Phase4LocalQwenContractError("PilotOutcome claim boundary drifted")
         _integer(data["model_calls_performed"], "PilotOutcome.model_calls_performed", minimum=0, maximum=12)
         _bool(data["model_action_occurred"], "PilotOutcome.model_action_occurred")
@@ -3478,7 +4113,7 @@ def _validate_json_bytes(raw: bytes, name: str, *, max_bytes: int | None = None)
 
 
 def _node_prompt_instructions(
-    node_id: str, *, prior_failure_code: str | None = None, r2_family: bool = False, r3: bool = False, r4: bool = False
+    node_id: str, *, prior_failure_code: str | None = None, r2_family: bool = False, r3: bool = False, r4: bool = False, r5: bool = False
 ) -> list[str]:
     instructions = [
         "Read the separately supplied ACTUAL_NODE_INPUT_JSON bytes.",
@@ -3521,6 +4156,16 @@ def _node_prompt_instructions(
                 "These are pilot-local size guards for this fixed case, not global F1 schema rules. Do not add deterministic repair or extra context; close the complete JSON within max_new_tokens=640.",
             )
         )
+    if r5 and node_id == "F1":
+        instructions.extend(
+            (
+                "Generate static structure only: error, loading, visibility, and recovery semantics belong to F2 or F3 and must not become static F1 sections.",
+                "Every section must contain exactly local_id, entity_type, title, purpose, component_local_ids, and refs; every component must contain exactly local_id, entity_type, component_type, section_local_id, label, purpose, and refs; every refs value must be [].",
+                "In section order, component_local_ids must exactly partition the components array: every component appears once, no component is omitted or repeated, and each component.section_local_id equals its owning section.local_id.",
+                "For this fixed synthetic commerce pilot, preserve a search input, a product or cart display, a delivery input, and a submit trigger without redundant controls.",
+                "Keep every title, purpose, label, and component_type value short and non-redundant; return one complete compact JSON object within max_new_tokens=512.",
+            )
+        )
     if r2_family and node_id == "F3":
         instructions.extend(
             (
@@ -3552,6 +4197,8 @@ def _prompt_v2_revision(prompt_v1_revision: str) -> str:
         return P4R3_PROMPT_V2_REVISION
     if prompt_v1_revision == P4R4_PROMPT_REVISION:
         return P4R4_PROMPT_V2_REVISION
+    if prompt_v1_revision == P4R5_PROMPT_REVISION:
+        return P4R5_PROMPT_V2_REVISION
     return "p4-03-prompt-v2"
 
 
@@ -3574,9 +4221,10 @@ def build_prompt_v1(*, node_id: str, input_bytes: bytes, policy: NodeProjectionP
         "input_byte_length": len(input_bytes),
         "instructions": _node_prompt_instructions(
             node_id,
-            r2_family=policy.prompt_template_revision in {P4R2_PROMPT_REVISION, P4R3_PROMPT_REVISION, P4R4_PROMPT_REVISION},
+            r2_family=policy.prompt_template_revision in {P4R2_PROMPT_REVISION, P4R3_PROMPT_REVISION, P4R4_PROMPT_REVISION, P4R5_PROMPT_REVISION},
             r3=policy.prompt_template_revision == P4R3_PROMPT_REVISION,
             r4=policy.prompt_template_revision == P4R4_PROMPT_REVISION,
+            r5=policy.prompt_template_revision == P4R5_PROMPT_REVISION,
         ),
         "output_contract": _NODE_OUTPUT_CONTRACTS[node_id],
         "model_id": profile.model_id,
@@ -3613,9 +4261,10 @@ def build_prompt_v2(*, node_id: str, input_bytes: bytes, policy: NodeProjectionP
         "instructions": _node_prompt_instructions(
             node_id,
             prior_failure_code=prior_failure.failure_code,
-            r2_family=policy.prompt_template_revision in {P4R2_PROMPT_REVISION, P4R3_PROMPT_REVISION, P4R4_PROMPT_REVISION},
+            r2_family=policy.prompt_template_revision in {P4R2_PROMPT_REVISION, P4R3_PROMPT_REVISION, P4R4_PROMPT_REVISION, P4R5_PROMPT_REVISION},
             r3=policy.prompt_template_revision == P4R3_PROMPT_REVISION,
             r4=policy.prompt_template_revision == P4R4_PROMPT_REVISION,
+            r5=policy.prompt_template_revision == P4R5_PROMPT_REVISION,
         ),
         "output_contract": _NODE_OUTPUT_CONTRACTS[node_id],
         "model_id": profile.model_id,
@@ -3716,14 +4365,17 @@ def derive_node_input(
         raise Phase4LocalQwenContractError("upstream input order or completeness drifted")
     if node_id == "F1" and upstream_outputs:
         raise Phase4LocalQwenContractError("F1 cannot have upstream outputs")
+    compact_projection = policy.projection_revision == P4R5_PROJECTION_REVISION
     rows = []
     for upstream_node in required:
         raw = upstream_outputs[upstream_node]
         if type(raw) is not bytes or not raw:
             raise Phase4LocalQwenContractError("upstream output bytes are not valid")
         parsed = _strict_json(raw, require_canonical=False)
-        row = {"node_id": upstream_node, "raw_sha256": _sha256(raw), "raw_byte_length": len(raw), "raw_b64": _b64(raw, "upstream.raw")}
-        if policy.projection_revision == P4R2_PROJECTION_REVISION:
+        row = {"node_id": upstream_node, "raw_sha256": _sha256(raw), "raw_byte_length": len(raw)}
+        if not compact_projection:
+            row["raw_b64"] = _b64(raw, "upstream.raw")
+        if policy.projection_revision in {P4R2_PROJECTION_REVISION, P4R5_PROJECTION_REVISION}:
             parsed, canonical_identity = _p4r2_readable_json_projection(raw, "upstream.output")
             row["output"] = parsed
             row["canonical_identity"] = canonical_identity
@@ -3742,20 +4394,25 @@ def derive_node_input(
         "input_schema_version": (
             P4R2_NODE_INPUT_SCHEMA_VERSION
             if policy.projection_revision == P4R2_PROJECTION_REVISION
-            else f"{P4_03_SCHEMA_PREFIX}.node_input.v1"
+            else (
+                P4R5_PROJECTION_REVISION
+                if compact_projection
+                else f"{P4_03_SCHEMA_PREFIX}.node_input.v1"
+            )
         ),
         "node_id": node_id,
         "canonical_b_input_sha256": _sha256(b_input_bytes),
-        "canonical_b_input_b64": _b64(b_input_bytes, "canonical_b_input"),
         "upstream": rows,
         "authority_bindings": authority_projection,
         "allowed_categories": list(policy.allowed_categories),
         "prohibited_categories": list(policy.prohibited_categories),
     }
-    if policy.projection_revision == P4R2_PROJECTION_REVISION:
+    if policy.projection_revision in {P4R2_PROJECTION_REVISION, P4R5_PROJECTION_REVISION}:
         canonical_b, canonical_b_identity = _p4r2_readable_json_projection(b_input_bytes, "canonical_b_input")
         payload["canonical_b_input"] = canonical_b
         payload["canonical_b_input_identity"] = canonical_b_identity
+    else:
+        payload["canonical_b_input_b64"] = _b64(b_input_bytes, "canonical_b_input")
     caps = _node_policy_caps(policy.field_caps, "policy.field_caps")
     if _count_reference_objects(payload) > caps["ref_count"]:
         raise Phase4LocalQwenContractError("derived node input exceeds reference cap")
@@ -4240,14 +4897,16 @@ def prepare_local_qwen_pilot(
     r2_policy: P4R2Policy | None = None,
     r3_policy: P4R3Policy | None = None,
     r4_policy: P4R4Policy | None = None,
+    r5_policy: P4R5Policy | None = None,
+    checkpoint_b_input: Mapping[str, object] | None = None,
 ) -> tuple[PilotBinding, tuple[NodeProjectionPolicy, ...], LocalQwenProfile, PreCallManifest]:
     """Prepare and persist the no-run manifest; never imports or loads a model."""
 
     if [policy.node_id for policy in policies] != list(NODE_ORDER):
         raise Phase4LocalQwenContractError("prepare policies must be ordered F1-F4")
     checked_policies = tuple(NodeProjectionPolicy.from_dict(policy.to_dict()) for policy in policies)
-    if sum(policy is not None for policy in (r2_policy, r3_policy, r4_policy)) > 1:
-        raise Phase4LocalQwenContractError("prepare cannot combine R2, R3, and R4 policy revisions")
+    if sum(policy is not None for policy in (r2_policy, r3_policy, r4_policy, r5_policy)) > 1:
+        raise Phase4LocalQwenContractError("prepare cannot combine R2, R3, R4, and R5 policy revisions")
     r2_policy_raw: bytes | None = None
     predecessor_ledger_raw: bytes | None = None
     r2_summary_raw: bytes | None = None
@@ -4256,6 +4915,8 @@ def prepare_local_qwen_pilot(
     r3_summary_raw: bytes | None = None
     r3_action_evidence: dict[str, object] | None = None
     r4_policy_raw: bytes | None = None
+    r5_policy_raw: bytes | None = None
+    r4_summary_raw: bytes | None = None
     profile_max_new_tokens = 512
     if r2_policy is not None:
         tracked_policy, r2_policy_raw = load_p4r2_policy_revision()
@@ -4289,6 +4950,16 @@ def prepare_local_qwen_pilot(
         _validate_p4r4_policy_against_policies(tracked_policy, checked_policies)
         r3_action_evidence = _load_p4r4_r3_action_time_evidence(model_root)
         profile_max_new_tokens = 640
+    if r5_policy is not None:
+        tracked_policy, r5_policy_raw = load_p4r5_policy_revision()
+        _, r4_summary_raw = load_p4r4_result_summary()
+        if type(r5_policy) is not P4R5Policy or r5_policy.canonical_bytes() != tracked_policy.canonical_bytes():
+            raise Phase4LocalQwenContractError("prepare P4R5 policy is not the tracked revision")
+        if pilot_id != tracked_policy.pilot_id:
+            raise Phase4LocalQwenContractError("prepare cannot select an arbitrary P4R5 pilot id")
+        _validate_p4r5_policy_against_policies(tracked_policy, checked_policies)
+        if checkpoint_b_input is None:
+            raise Phase4LocalQwenContractError("P4R5 prepare requires the checkpoint B input")
     if gpu_facts is None or gpu_facts.get("executed") is not True:
         raise Phase4LocalQwenContractError("prepare requires a live local GPU fact record")
     for key in ("device_index", "total_vram_bytes", "free_vram_bytes"):
@@ -4348,6 +5019,7 @@ def prepare_local_qwen_pilot(
         node_policy_identities={policy.node_id: policy.sha256() for policy in checked_policies},
         profile_id=profile.profile_id,
         result_root_marker=marker,
+        integrated_run_cap=0 if r5_policy_raw is not None else 1,
     )
     manifest = PreCallManifest.create(
         pilot_binding=binding,
@@ -4410,6 +5082,26 @@ def prepare_local_qwen_pilot(
             pilot=binding,
         )
         _write_once(result_root, P4R4_RESULT_BINDING_NAME, binding_record.canonical_bytes())
+    if r5_policy_raw is not None and r4_summary_raw is not None and checkpoint_b_input is not None:
+        _initialize_or_validate_p4r5_aggregate_budget(
+            model_root=model_root,
+            policy_raw=r5_policy_raw,
+            pilot=binding,
+            profile=profile,
+        )
+        checkpoint = _p4r5_build_checkpoint_seed(
+            model_root=model_root,
+            profile=profile,
+            pilot=binding,
+            policies=checked_policies,
+            policy_raw=r5_policy_raw,
+            summary_raw=r4_summary_raw,
+            b_input=checkpoint_b_input,
+        )
+        _write_once(result_root, P4R5_RESULT_POLICY_NAME, r5_policy_raw)
+        _write_once(result_root, P4R5_RESULT_R4_SUMMARY_NAME, r4_summary_raw)
+        _write_once(result_root, P4R5_CHECKPOINT_PACKET_NAME, checkpoint["packet"].canonical_bytes())
+        _write_once(result_root, P4R5_CHECKPOINT_RECEIPT_NAME, checkpoint["receipt"].canonical_bytes())
     return binding, checked_policies, profile, manifest
 
 
@@ -4423,6 +5115,7 @@ def load_prepared_local_qwen_pilot(
     r2_policy: P4R2Policy | None = None,
     r3_policy: P4R3Policy | None = None,
     r4_policy: P4R4Policy | None = None,
+    r5_policy: P4R5Policy | None = None,
 ) -> tuple[PilotBinding, tuple[NodeProjectionPolicy, ...], LocalQwenProfile, PreCallManifest]:
     """Revalidate the canonical prepare artifact and live model before load."""
 
@@ -4445,11 +5138,12 @@ def load_prepared_local_qwen_pilot(
         raise Phase4LocalQwenContractError("prepared result-root marker drifted")
     if build_synthetic_case_binding(b_input) != binding.case_binding:
         raise Phase4LocalQwenContractError("prepared synthetic case binding drifted")
-    if sum(policy is not None for policy in (r2_policy, r3_policy, r4_policy)) > 1:
-        raise Phase4LocalQwenContractError("prepared pilot cannot combine R2, R3, and R4 policy revisions")
+    if sum(policy is not None for policy in (r2_policy, r3_policy, r4_policy, r5_policy)) > 1:
+        raise Phase4LocalQwenContractError("prepared pilot cannot combine R2, R3, R4, and R5 policy revisions")
     r2_policy_raw: bytes | None = None
     r3_policy_raw: bytes | None = None
     r4_policy_raw: bytes | None = None
+    r5_policy_raw: bytes | None = None
     if r2_policy is not None:
         tracked_policy, r2_policy_raw = load_p4r2_policy_revision()
         if type(r2_policy) is not P4R2Policy or r2_policy.canonical_bytes() != tracked_policy.canonical_bytes():
@@ -4487,6 +5181,22 @@ def load_prepared_local_qwen_pilot(
         )
         if profile.max_new_tokens != 640:
             raise Phase4LocalQwenContractError("prepared R4 profile token cap drifted")
+    if r5_policy is not None:
+        tracked_policy, r5_policy_raw = load_p4r5_policy_revision()
+        if type(r5_policy) is not P4R5Policy or r5_policy.canonical_bytes() != tracked_policy.canonical_bytes():
+            raise Phase4LocalQwenContractError("prepared P4R5 policy is not the tracked revision")
+        if binding.pilot_id != tracked_policy.pilot_id:
+            raise Phase4LocalQwenContractError("prepared P4R5 pilot identity drifted")
+        validate_p4r5_live_binding(
+            model_root=model_root,
+            result_root=result_root,
+            b_input=b_input,
+            pilot=binding,
+            profile=profile,
+            policies=policies,
+        )
+        if profile.max_new_tokens != 512 or binding.integrated_run_cap != 0:
+            raise Phase4LocalQwenContractError("prepared R5 profile/budget cap drifted")
     inventory = validate_model_inventory_metadata(
         model_root=model_root,
         integrity_evidence=integrity_evidence,
@@ -4528,6 +5238,13 @@ def load_prepared_local_qwen_pilot(
         _validate_p4r4_aggregate_budget(
             model_root=model_root,
             policy_raw=r4_policy_raw,
+            pilot=binding,
+            profile=profile,
+        )
+    if r5_policy_raw is not None:
+        _validate_p4r5_aggregate_budget(
+            model_root=model_root,
+            policy_raw=r5_policy_raw,
             pilot=binding,
             profile=profile,
         )
@@ -5360,6 +6077,8 @@ def start_supervised_local_qwen_runtime(
             policy_kwargs = {"r3_policy": load_p4r3_policy_revision()[0]}
         elif prepared_pilot_id == P4R4_PILOT_ID:
             policy_kwargs = {"r4_policy": load_p4r4_policy_revision()[0]}
+        elif prepared_pilot_id == P4R5_PILOT_ID:
+            policy_kwargs = {"r5_policy": load_p4r5_policy_revision()[0]}
         else:
             raise Phase4LocalQwenContractError("real runtime prepared pilot revision is unknown")
         pilot, policies, profile, manifest = load_prepared_local_qwen_pilot(
@@ -5394,6 +6113,15 @@ def start_supervised_local_qwen_runtime(
         or execution_lease.parent_pid != os.getpid()
     ):
         raise Phase4LocalQwenContractError("execution lease binding drifted")
+    if pilot.pilot_id == P4R5_PILOT_ID:
+        validate_p4r5_live_binding(
+            model_root=model_root,
+            result_root=result_root,
+            b_input=b_input,
+            pilot=pilot,
+            profile=profile,
+            policies=policies,
+        )
     _integer(load_timeout_seconds, "load_timeout_seconds", minimum=1, maximum=1800)
     runtime_claim = _acquire_runtime_start_claim(
         result_root=result_root,
@@ -5784,6 +6512,9 @@ class Phase4LocalQwenPilotRunner:
                 validate_p4r4_live_binding(model_root=model_root, result_root=result_root, pilot=pilot, policies=policies)
                 _validate_p4r4_aggregate_budget(model_root=model_root, policy_raw=policy_raw, pilot=pilot, profile=profile)
                 self._real_pilot_revision = "r4"
+            elif pilot.pilot_id == P4R5_PILOT_ID:
+                _, policy_raw = load_p4r5_policy_revision()
+                self._real_pilot_revision = "r5"
             else:
                 raise Phase4LocalQwenContractError("real runner pilot revision is unknown")
             self._model_root = model_root.resolve(strict=True)
@@ -5837,6 +6568,20 @@ class Phase4LocalQwenPilotRunner:
         self._mapping_record: dict[str, object] | None = None
         self._candidate_record: dict[str, object] | None = None
         self._candidate_bytes: bytes | None = None
+        self._checkpoint_seed: dict[str, object] | None = None
+        if self._real_pilot_revision == "r5":
+            self._checkpoint_seed = validate_p4r5_live_binding(
+                model_root=self._model_root,
+                result_root=self._result_root,
+                b_input=self._b_input,
+                pilot=self._pilot,
+                profile=self._profile,
+                policies=tuple(self._policies.values()),
+            )
+            self._node_local_status["F1"] = "passed"
+            self._node_local_status["F2"] = "passed"
+            self._node_local_outputs = dict(self._checkpoint_seed["outputs"])
+            self._node_local_refs = copy.deepcopy(self._checkpoint_seed["refs"])
 
     @property
     def ledger(self) -> AttemptLedger:
@@ -5871,7 +6616,7 @@ class Phase4LocalQwenPilotRunner:
         return {"ref_type": "d17_input_view", "ref_id": f"input-{_hex_sha256(actual_input)[:20]}", "ref_sha256": _sha256(actual_input), "ref_revision": f"{P4_03_SCHEMA_PREFIX}.input-view.{projection_revision}.{run_id}.{node_id}"}
 
     def _budget_identity(self) -> dict[str, object]:
-        return _identity({"pilot_id": self._pilot.pilot_id, "node_total_call_cap": 3, "node_local_call_cap": 2, "integrated_run_cap": 1, "retry_count_cap": 0}, revision=f"{P4_03_SCHEMA_PREFIX}.budget.v1")
+        return _identity({"pilot_id": self._pilot.pilot_id, "node_total_call_cap": self._pilot.node_total_call_cap, "node_local_call_cap": self._pilot.node_local_call_cap, "integrated_run_cap": self._pilot.integrated_run_cap, "retry_count_cap": self._pilot.retry_count_cap}, revision=f"{P4_03_SCHEMA_PREFIX}.budget.v1")
 
     def _run_paths(self, *, run_id: str, node_id: str, attempt_index: int) -> tuple[str, str]:
         attempt = f"runs/{run_id}/{node_id}/attempt-{attempt_index:02d}"
@@ -6056,6 +6801,9 @@ class Phase4LocalQwenPilotRunner:
             elif self._real_pilot_revision == "r4":
                 validate_p4r4_live_binding(model_root=self._model_root, result_root=self._result_root, pilot=self._pilot, policies=tuple(self._policies.values()))
                 _validate_p4r4_aggregate_budget(model_root=self._model_root, policy_raw=self._real_policy_raw, pilot=self._pilot, profile=self._profile)
+            elif self._real_pilot_revision == "r5":
+                validate_p4r5_live_binding(model_root=self._model_root, result_root=self._result_root, b_input=self._b_input, pilot=self._pilot, profile=self._profile, policies=tuple(self._policies.values()))
+                _validate_p4r5_aggregate_budget(model_root=self._model_root, policy_raw=self._real_policy_raw, pilot=self._pilot, profile=self._profile)
             else:
                 raise Phase4LocalQwenContractError("real runner pilot revision drifted")
 
@@ -6067,6 +6815,7 @@ class Phase4LocalQwenPilotRunner:
                 "r2": _reserve_p4r2_aggregate_generate_entry,
                 "r3": _reserve_p4r3_aggregate_generate_entry,
                 "r4": _reserve_p4r4_aggregate_generate_entry,
+                "r5": _reserve_p4r5_aggregate_generate_entry,
             }[self._real_pilot_revision]
             reserve(model_root=self._model_root, policy_raw=self._real_policy_raw, pilot=self._pilot, profile=self._profile, node_id=node_id, call_kind=call_kind, run_id=str(self._active_run_id))
         self._ledger = self._ledger.record_generate_started(node_id=node_id, call_kind=call_kind)
@@ -6200,6 +6949,8 @@ class Phase4LocalQwenPilotRunner:
             raise Phase4LocalQwenContractError("pilot is stopped")
         if node_id not in NODE_ORDER:
             raise Phase4LocalQwenContractError("unknown node-local node")
+        if self._pilot.pilot_id == P4R5_PILOT_ID and node_id in {"F1", "F2"}:
+            raise Phase4LocalQwenContractError("R5 checkpoint-seeded nodes cannot generate")
         if self._node_local_status[node_id] == "passed":
             raise Phase4LocalQwenContractError("node-local pass already reached")
         if self._active_call_kind != "node_local":
@@ -6207,18 +6958,23 @@ class Phase4LocalQwenPilotRunner:
             self._active_run_id = f"{self._pilot.pilot_id}-node-local"
             self._active_outputs = dict(self._node_local_outputs)
             self._active_refs = dict(self._node_local_refs)
-            self._active_authority_state = self._authority_new()
+            self._active_authority_state = (
+                copy.deepcopy(self._checkpoint_seed["authority_state"])
+                if self._real_pilot_revision == "r5" and self._checkpoint_seed is not None
+                else self._authority_new()
+            )
             # Rebuild the deterministic authority from passed node-local bytes
             # only; this is a live revalidation, not a second semantic source.
-            from req2web_orchestration.phase4_graph import phase4_register_node_output
+            if self._real_pilot_revision != "r5":
+                from req2web_orchestration.phase4_graph import phase4_register_node_output
 
-            for prior_node in NODE_ORDER:
-                if prior_node in self._active_outputs:
-                    self._active_authority_state = phase4_register_node_output(
-                        self._active_authority_state,
-                        prior_node,
-                        _strict_json(self._active_outputs[prior_node], require_canonical=False),
-                    )
+                for prior_node in NODE_ORDER:
+                    if prior_node in self._active_outputs:
+                        self._active_authority_state = phase4_register_node_output(
+                            self._active_authority_state,
+                            prior_node,
+                            _strict_json(self._active_outputs[prior_node], require_canonical=False),
+                        )
         return self._run_one(node_id=node_id, call_kind="node_local", prompt_version=prompt_version, change_reason=change_reason)
 
     def run_integrated(self) -> PilotOutcome:
@@ -6226,6 +6982,8 @@ class Phase4LocalQwenPilotRunner:
 
         if self._stopped:
             raise Phase4LocalQwenContractError("pilot is stopped")
+        if self._pilot.pilot_id == P4R5_PILOT_ID:
+            raise Phase4LocalQwenContractError("R5 integrated execution is forbidden")
         if any(self._node_local_status[node_id] != "passed" for node_id in NODE_ORDER):
             raise Phase4LocalQwenContractError("all node-local contracts must pass before integrated run")
         if self._ledger.integrated_run_count >= 1:
@@ -6553,6 +7311,22 @@ __all__ = [
     "P4R4_RESULT_BINDING_NAME",
     "P4R4_RESULT_POLICY_NAME",
     "P4R4_RESULT_R3_SUMMARY_NAME",
+    "P4R5_AGGREGATE_LEDGER_SCHEMA_VERSION",
+    "P4R5_CHECKPOINT_PACKET_NAME",
+    "P4R5_CHECKPOINT_PACKET_SCHEMA_VERSION",
+    "P4R5_CHECKPOINT_RAW_IDENTITY_REVISION",
+    "P4R5_CHECKPOINT_RECEIPT_NAME",
+    "P4R5_CHECKPOINT_RECEIPT_SCHEMA_VERSION",
+    "P4R5_CHECKPOINT_RUN_ID",
+    "P4R5_PILOT_ID",
+    "P4R5_POLICY_PATH",
+    "P4R5_POLICY_RELATIVE_PATH",
+    "P4R5_POLICY_SCHEMA_VERSION",
+    "P4R5_PROJECTION_REVISION",
+    "P4R5_PROMPT_REVISION",
+    "P4R5_PROMPT_V2_REVISION",
+    "P4R5_RESULT_POLICY_NAME",
+    "P4R5_RESULT_R4_SUMMARY_NAME",
     "P4R3_RESULT_BINDING_NAME",
     "P4R3_RESULT_POLICY_NAME",
     "P4R3_RESULT_R2_SUMMARY_NAME",
@@ -6584,6 +7358,10 @@ __all__ = [
     "P4R4AggregateBudgetLedger",
     "P4R4Policy",
     "P4R4ResultRootBinding",
+    "P4R5AggregateBudgetLedger",
+    "P4R5CheckpointPacket",
+    "P4R5CheckpointReceipt",
+    "P4R5Policy",
     "Phase4LocalQwenContractError",
     "Phase4LocalQwenPilotRunner",
     "PreCallManifest",
@@ -6611,6 +7389,8 @@ __all__ = [
     "load_p4r3_policy_revision",
     "load_p4r3_result_summary",
     "load_p4r4_policy_revision",
+    "load_p4r4_result_summary",
+    "load_p4r5_policy_revision",
     "make_canonical_identity",
     "persist_pilot_outcome",
     "persist_local_qwen_load_receipt",
@@ -6624,4 +7404,5 @@ __all__ = [
     "validate_p4r2_live_binding",
     "validate_p4r3_live_binding",
     "validate_p4r4_live_binding",
+    "validate_p4r5_live_binding",
 ]

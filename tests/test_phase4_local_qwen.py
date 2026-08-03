@@ -40,6 +40,10 @@ from req2web_runtime.phase4_local_qwen import (
     LocalQwenProfile,
     NodeProjectionPolicy,
     P4R2ResultRootBinding,
+    P4R5CheckpointPacket,
+    P4R5CheckpointReceipt,
+    P4R5_PILOT_ID,
+    P4R5_PROJECTION_REVISION,
     Phase4LocalQwenContractError,
     Phase4LocalQwenPilotRunner,
     PilotBinding,
@@ -56,6 +60,8 @@ from req2web_runtime.phase4_local_qwen import (
     derive_node_input,
     prepare_local_qwen_pilot,
     load_p4r2_policy_revision,
+    load_p4r4_result_summary,
+    load_p4r5_policy_revision,
     validate_model_inventory_metadata,
     validate_p4r2_live_binding,
 )
@@ -370,6 +376,38 @@ def _make_r4_action_record(
     )
 
 
+def _r5_fixture_binding_manifest(root_marker: str = "r5-test-result-root"):
+    b_input = synthetic_commerce_b_input()
+    policies = pilot_script._r5_policies()
+    model_root_identity = make_identity({"fake_model_root": "r5-metadata-only"}, revision="test.r5.model-root.v1")
+    inventory_identity = make_identity({"fake_inventory": ["config.json"]}, revision="test.r5.inventory.v1")
+    profile = LocalQwenProfile.create(
+        model_root_identity=model_root_identity,
+        model_inventory_identity=inventory_identity,
+        model_file_count=1,
+        max_new_tokens=512,
+    )
+    binding = PilotBinding.create(
+        pilot_id=P4R5_PILOT_ID,
+        policy_id="pending",
+        case_binding=build_synthetic_case_binding(b_input),
+        node_policy_identities={policy.node_id: policy.sha256() for policy in policies},
+        profile_id=profile.profile_id,
+        result_root_marker=root_marker,
+        integrated_run_cap=0,
+    )
+    manifest = PreCallManifest.create(
+        pilot_binding=binding,
+        policies=policies,
+        profile=profile,
+        model_root_identity=model_root_identity,
+        model_inventory_identity=inventory_identity,
+        inventory_file_count=1,
+        offline_environment={"local_files_only": True, "network": False, "telemetry": False, "tracing": False},
+    )
+    return b_input, policies, profile, binding, manifest
+
+
 def FakeBackend(
     outputs: list[bytes], *, result_root: Path | None = None
 ):
@@ -512,6 +550,8 @@ class Phase4LocalQwenTests(unittest.TestCase):
                     str(root / "integrity.json"),
                     "--result-root",
                     str(root),
+                    "--pilot",
+                    "r3",
                 ]
             )
         return return_code, captured_receipts[0], stderr_persist
@@ -2991,6 +3031,204 @@ class Phase4LocalQwenTests(unittest.TestCase):
         with self.assertRaises(Phase4LocalQwenContractError):
             backend.load()
         self.assertEqual(state["execution_counts"], {node_id: 0 for node_id in ("F1", "F2", "F3", "F4")})
+
+    def test_r5_policy_and_r4_summary_are_canonical_and_r4_identity_is_frozen(self):
+        summary, summary_raw = load_p4r4_result_summary()
+        policy, policy_raw = load_p4r5_policy_revision()
+        self.assertEqual(summary.source_commit, "e1c0d1361a155e14652f50726d06930b0d0ad0fa")
+        self.assertEqual(summary_raw, p4q._read_tracked_canonical_record(p4q.P4R4_RESULT_PATH, "r4 summary"))
+        self.assertEqual(policy.pilot_id, P4R5_PILOT_ID)
+        self.assertEqual(policy_raw, p4q._read_tracked_canonical_record(p4q.P4R5_POLICY_PATH, "r5 policy"))
+        self.assertEqual(policy.runtime["max_new_tokens"], 512)
+        self.assertEqual(policy.projection["removed_provider_payload_fields"], ["canonical_b_input_b64", "upstream.raw_b64"])
+
+    def test_r5_compact_projection_keeps_direct_json_and_removes_duplicate_base64(self):
+        b_input = synthetic_commerce_b_input()
+        policies = pilot_script._r5_policies()
+        outputs = _fixture_bytes(b_input)
+        state = phase4_create_authority_state(b_input)
+        for node_id, raw in zip(("F1", "F2"), outputs[:2], strict=True):
+            state = phase4_register_node_output(state, node_id, json.loads(raw))
+        projected = json.loads(
+            derive_node_input(
+                node_id="F3",
+                b_input_bytes=json.dumps(b_input, ensure_ascii=False, separators=(",", ":")).encode("utf-8"),
+                upstream_outputs={"F1": outputs[0], "F2": outputs[1]},
+                authority_state=state,
+                policy=policies[2],
+            )
+        )
+        keys = set()
+
+        def collect(value):
+            if isinstance(value, dict):
+                keys.update(value)
+                for child in value.values():
+                    collect(child)
+            elif isinstance(value, list):
+                for child in value:
+                    collect(child)
+
+        collect(projected)
+        self.assertNotIn("canonical_b_input_b64", keys)
+        self.assertNotIn("raw_b64", keys)
+        self.assertIsInstance(projected["canonical_b_input"], dict)
+        self.assertIn("canonical_b_input_identity", projected)
+        for row in projected["upstream"]:
+            self.assertIn("output", row)
+            self.assertIn("canonical_identity", row)
+            self.assertIn("raw_sha256", row)
+            self.assertIn("raw_byte_length", row)
+
+    def test_r5_checkpoint_nodes_fail_closed_without_generate_and_keep_zero_counts(self):
+        b_input, policies, profile, binding, manifest = _r5_fixture_binding_manifest()
+        root = Path.cwd() / ".p4-03-test-results" / "r5-checkpoint-generate-guard"
+        root.mkdir(parents=True, exist_ok=False)
+        self._test_roots.append(root)
+        (root / p4q.RESULT_ROOT_MARKER_NAME).write_text(binding.result_root_marker + "\n", encoding="ascii")
+        backend = FakeBackend([])
+        runner = Phase4LocalQwenPilotRunner(
+            pilot=binding,
+            policies=policies,
+            profile=profile,
+            manifest=manifest,
+            result_root=root,
+            b_input=b_input,
+            backend=backend,
+        )
+        for node_id in ("F1", "F2"):
+            with self.assertRaises(Phase4LocalQwenContractError):
+                runner.run_node_local(node_id=node_id)
+        self.assertEqual(backend.calls, [])
+        self.assertEqual(runner.ledger.node_total_counts, {"F1": 0, "F2": 0, "F3": 0, "F4": 0})
+        self.assertEqual(runner.ledger.node_local_counts, {"F1": 0, "F2": 0, "F3": 0, "F4": 0})
+
+    def test_r5_seeded_f3_f4_node_local_path_never_enters_integrated(self):
+        b_input, policies, profile, binding, manifest = _r5_fixture_binding_manifest("r5-seeded-result-root")
+        root = Path.cwd() / ".p4-03-test-results" / "r5-seeded-node-local"
+        root.mkdir(parents=True, exist_ok=False)
+        self._test_roots.append(root)
+        (root / p4q.RESULT_ROOT_MARKER_NAME).write_text(binding.result_root_marker + "\n", encoding="ascii")
+        outputs = _fixture_bytes(b_input)
+        state = phase4_create_authority_state(b_input)
+        refs = {}
+        for node_id, raw in zip(("F1", "F2"), outputs[:2], strict=True):
+            parsed = json.loads(raw)
+            state = phase4_register_node_output(state, node_id, parsed)
+            identity = make_identity({"node_id": node_id, "raw": raw.decode("utf-8")}, revision="test.r5.seed.ref.v1")
+            refs[node_id] = {
+                "ref_type": "node_output",
+                "ref_id": identity["sha256"],
+                "ref_sha256": identity["sha256"],
+                "ref_revision": f"{p4q.P4_03_SCHEMA_PREFIX}.node_output.{P4R5_PILOT_ID}.{p4q.P4R5_CHECKPOINT_RUN_ID}.{b_input['case_id']}.{b_input['request_id']}.{node_id}",
+            }
+        runner = Phase4LocalQwenPilotRunner(
+            pilot=binding,
+            policies=policies,
+            profile=profile,
+            manifest=manifest,
+            result_root=root,
+            b_input=b_input,
+            backend=FakeBackend(outputs[2:]),
+        )
+        runner._node_local_status["F1"] = "passed"
+        runner._node_local_status["F2"] = "passed"
+        runner._node_local_outputs = {"F1": outputs[0], "F2": outputs[1]}
+        runner._node_local_refs = refs
+        runner._checkpoint_seed = {"authority_state": state}
+        self.assertIsNone(runner.run_node_local(node_id="F3").failure_code)
+        self.assertIsNone(runner.run_node_local(node_id="F4").failure_code)
+        with self.assertRaises(Phase4LocalQwenContractError):
+            runner.run_integrated()
+        outcome = runner.stop_for_report(reason="checkpoint_node_local_complete")
+        self.assertEqual(outcome.claim_boundary, "phase4_local_qwen_checkpoint_seeded_f1_f2_r5_node_local_only")
+        self.assertEqual(outcome.node_total_counts, {"F1": 0, "F2": 0, "F3": 1, "F4": 1})
+        self.assertEqual(outcome.node_local_statuses, {"F1": "passed", "F2": "passed", "F3": "passed", "F4": "passed"})
+        self.assertEqual(outcome.integrated_outcome, "not_started")
+
+    def test_r5_live_checkpoint_replay_rejects_packet_tamper(self):
+        r4_root = Path(r"D:\Models\Req2Web\phase4_runs\p4-03r4-local-qwen-9b-e1c0d1361a-20260803-b")
+        model_root = Path(r"D:\Models\Req2Web\Qwen3.5-9B-c202236235762e1c871ad0ccb60c8ee5ba337b9a")
+        if not r4_root.is_dir() or not model_root.is_dir():
+            self.skipTest("action-time R4 root is not present")
+        r4_manifest = PreCallManifest.from_bytes((r4_root / "pre_call_manifest.json").read_bytes())
+        profile = LocalQwenProfile.from_dict(r4_manifest.profile)
+        profile_payload = profile.to_dict()
+        profile_payload["max_new_tokens"] = 512
+        profile_payload["profile_id"] = p4q._sha256(
+            p4q._canonical_bytes(
+                {key: value for key, value in profile_payload.items() if key != "profile_id"}
+            )
+        )
+        profile = LocalQwenProfile.from_dict(profile_payload)
+        b_input = synthetic_commerce_b_input()
+        policies = pilot_script._r5_policies()
+        binding = PilotBinding.create(
+            pilot_id=P4R5_PILOT_ID,
+            policy_id="pending",
+            case_binding=build_synthetic_case_binding(b_input),
+            node_policy_identities={policy.node_id: policy.sha256() for policy in policies},
+            profile_id=profile.profile_id,
+            result_root_marker="r5-live-replay-result-root",
+            integrated_run_cap=0,
+        )
+        root = Path.cwd() / ".p4-03-test-results" / "r5-live-replay"
+        root.mkdir(parents=True, exist_ok=False)
+        self._test_roots.append(root)
+        (root / p4q.RESULT_ROOT_MARKER_NAME).write_text(binding.result_root_marker + "\n", encoding="ascii")
+        policy, policy_raw = load_p4r5_policy_revision()
+        _, summary_raw = load_p4r4_result_summary()
+        seed = p4q._p4r5_build_checkpoint_seed(
+            model_root=model_root,
+            profile=profile,
+            pilot=binding,
+            policies=policies,
+            policy_raw=policy_raw,
+            summary_raw=summary_raw,
+            b_input=b_input,
+        )
+        (root / p4q.P4R5_RESULT_POLICY_NAME).write_bytes(policy_raw)
+        (root / p4q.P4R5_RESULT_R4_SUMMARY_NAME).write_bytes(summary_raw)
+        (root / p4q.P4R5_CHECKPOINT_PACKET_NAME).write_bytes(seed["packet"].canonical_bytes())
+        (root / p4q.P4R5_CHECKPOINT_RECEIPT_NAME).write_bytes(seed["receipt"].canonical_bytes())
+        with patch.object(p4q, "_validate_p4r5_aggregate_budget", return_value=None):
+            replay = p4q.validate_p4r5_live_binding(
+                model_root=model_root,
+                result_root=root,
+                b_input=b_input,
+                pilot=binding,
+                profile=profile,
+                policies=policies,
+            )
+        self.assertEqual(replay["packet"], P4R5CheckpointPacket.from_bytes((root / p4q.P4R5_CHECKPOINT_PACKET_NAME).read_bytes()))
+        self.assertEqual(replay["receipt"], P4R5CheckpointReceipt.from_bytes((root / p4q.P4R5_CHECKPOINT_RECEIPT_NAME).read_bytes()))
+        tampered = seed["packet"].to_dict()
+        tampered["nodes"][0]["raw_b64"] = "eA=="
+        (root / p4q.P4R5_CHECKPOINT_PACKET_NAME).write_bytes(json.dumps(tampered, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8"))
+        with patch.object(p4q, "_validate_p4r5_aggregate_budget", return_value=None), self.assertRaises(Phase4LocalQwenContractError):
+            p4q.validate_p4r5_live_binding(
+                model_root=model_root,
+                result_root=root,
+                b_input=b_input,
+                pilot=binding,
+                profile=profile,
+                policies=policies,
+            )
+
+    def test_r5_dispatch_has_explicit_r2_r3_r4_paths_and_rejects_unknown(self):
+        for pilot in ("r2", "r3", "r4", "r5"):
+            args = pilot_script.build_parser().parse_args(["run", "--model-root", "m", "--integrity-evidence", "i", "--result-root", "r", "--pilot", pilot])
+            self.assertEqual(args.pilot, pilot)
+        args = pilot_script.build_parser().parse_args(["run", "--model-root", "m", "--integrity-evidence", "i", "--result-root", "r"])
+        self.assertEqual(args.pilot, "r5")
+        with self.assertRaises(SystemExit):
+            pilot_script.build_parser().parse_args(["run", "--model-root", "m", "--integrity-evidence", "i", "--result-root", "r", "--pilot", "unknown"])
+
+    def test_r4_policy_and_projection_remain_historical(self):
+        policy, _ = p4q.load_p4r4_policy_revision()
+        self.assertEqual(policy.pilot_id, p4q.P4R4_PILOT_ID)
+        self.assertEqual(policy.runtime["max_new_tokens"], 640)
+        self.assertEqual([item.projection_revision for item in pilot_script._r4_policies()], [p4q.P4R2_PROJECTION_REVISION] * 4)
 
 
 if __name__ == "__main__":
