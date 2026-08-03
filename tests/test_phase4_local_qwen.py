@@ -4003,6 +4003,138 @@ class Phase4LocalQwenStreamDiagnosticTests(unittest.TestCase):
         self.assertIn("generation started", target.getvalue())
         self.assertTrue(target.getvalue().endswith("abc"))
 
+    def test_parent_receive_short_polls_and_emits_wait_heartbeat(self):
+        _, _, profile, _, _ = _binding_profile_manifest()
+
+        class Stdin:
+            @staticmethod
+            def write(_):
+                return None
+
+            @staticmethod
+            def flush():
+                return None
+
+        class Process:
+            pid = 4243
+            stdin = Stdin()
+
+            @staticmethod
+            def poll():
+                return None
+
+        class PollQueue:
+            def __init__(self):
+                self.timeouts = []
+                self.calls = 0
+
+            def get(self, *, timeout):
+                self.timeouts.append(timeout)
+                self.calls += 1
+                if self.calls == 1:
+                    raise queue.Empty
+                return {"kind": "generation_result"}
+
+        target = io.StringIO()
+        mirror = p4q.P4D1StreamMirror(target)
+        mirror.feed(p4q._canonical_bytes({
+            "schema_version": p4q.P4D1_STREAM_EVENT_SCHEMA_VERSION,
+            "event": "generation_started",
+            "delta_b64": "",
+        }) + b"\n")
+        messages = PollQueue()
+        backend = SupervisedLocalQwenBackend(
+            process=Process(),
+            messages=messages,
+            stderr_capture=p4q._WorkerStderrCapture(),
+            profile=profile,
+            worker_id="worker-d1-heartbeat",
+            loaded_facts={"synthetic": True},
+            capability=p4q._REAL_RUNTIME_CAPABILITY,
+            wait_observer=mirror.heartbeat,
+        )
+        with patch.object(p4q, "P4D1_HEARTBEAT_INTERVAL_SECONDS", 0.0):
+            message = backend._receive(timeout=1)
+        self.assertEqual(message, {"kind": "generation_result"})
+        self.assertTrue(messages.timeouts)
+        self.assertLessEqual(messages.timeouts[0], p4q.P4D1_RECEIVE_POLL_SECONDS)
+        self.assertIn("waiting for first token", target.getvalue())
+        self.assertEqual(mirror.partial_bytes, b"")
+
+    def test_keyboard_interrupt_tears_down_worker_and_writes_terminal_receipt(self):
+        prepared = self._prepared("d1-keyboard-interrupt")
+
+        class Stdin:
+            @staticmethod
+            def write(_):
+                return None
+
+            @staticmethod
+            def flush():
+                return None
+
+        class Process:
+            pid = 4244
+
+            def __init__(self):
+                self.stdin = Stdin()
+                self.alive = True
+
+            def poll(self):
+                return None if self.alive else 0
+
+            def terminate(self):
+                self.alive = False
+
+            def kill(self):
+                self.alive = False
+
+            def wait(self, timeout=None):
+                del timeout
+                self.alive = False
+                return 0
+
+        class InterruptingQueue:
+            @staticmethod
+            def get(*, timeout):
+                del timeout
+                raise KeyboardInterrupt
+
+        class JoinedThread:
+            def join(self, timeout=None):
+                del timeout
+
+            @staticmethod
+            def is_alive():
+                return False
+
+        process = Process()
+        capture = p4q._WorkerStderrCapture()
+        capture.complete()
+        backend = SupervisedLocalQwenBackend(
+            process=process,
+            messages=InterruptingQueue(),
+            stderr_capture=capture,
+            stderr_thread=JoinedThread(),
+            profile=prepared.profile,
+            worker_id="worker-d1-keyboard-interrupt",
+            loaded_facts={"synthetic": True},
+            capability=p4q._REAL_RUNTIME_CAPABILITY,
+            protocol=p4q.P4D1_WORKER_IPC_PROTOCOL,
+            generate_call_cap=1,
+        )
+        receipt = p4q.execute_p4d1_stream_diagnostic(
+            prepared=prepared,
+            backend=backend,
+            loaded_facts={"synthetic": True},
+            mirror=p4q.P4D1StreamMirror(io.StringIO()),
+        )
+        self.assertEqual(receipt.terminal_status, "generation_cancelled")
+        self.assertTrue(receipt.worker["worker_exit_verified"])
+        self.assertTrue((prepared.result_root / p4q.P4D1_TERMINAL_RECEIPT_NAME).is_file())
+        self.assertFalse((prepared.result_root / p4q.P4D1_RAW_NAME).exists())
+        self.assertIsNotNone(process.poll())
+
     def test_token_streamer_emits_compact_json_without_waiting_for_spaces(self):
         class Tokenizer:
             @staticmethod

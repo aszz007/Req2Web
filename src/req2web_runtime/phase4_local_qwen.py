@@ -33,6 +33,7 @@ import sys
 import sysconfig
 import tempfile
 import threading
+import time
 import traceback
 import uuid
 from pathlib import Path
@@ -295,6 +296,8 @@ P4D1_MANIFEST_NAME = "preflight_manifest.json"
 P4D1_RAW_NAME = "diagnostic_complete_raw.bin"
 P4D1_PARTIAL_TRANSCRIPT_NAME = "partial_diagnostic_transcript.json"
 P4D1_TERMINAL_RECEIPT_NAME = "terminal_receipt.json"
+P4D1_RECEIVE_POLL_SECONDS = 0.5
+P4D1_HEARTBEAT_INTERVAL_SECONDS = 10.0
 P4R2_POLICY_RELATIVE_PATH = "docs/phase4_local_qwen_r2_policy.json"
 P4R2_RESULT_POLICY_NAME = "p4_03r2_policy.json"
 P4R2_RESULT_LEDGER_NAME = "p4_03r2_predecessor_aggregate_ledger.json"
@@ -7413,6 +7416,7 @@ class SupervisedLocalQwenBackend:
         stderr_thread: threading.Thread | None = None,
         protocol: str = f"{P4_03_SCHEMA_PREFIX}.worker-ipc.v1",
         generate_call_cap: int | None = None,
+        wait_observer: Callable[[], None] | None = None,
     ) -> None:
         if capability is not _REAL_RUNTIME_CAPABILITY:
             raise Phase4LocalQwenContractError("real worker capability is invalid")
@@ -7429,7 +7433,10 @@ class SupervisedLocalQwenBackend:
         self._protocol = _text(protocol, "worker IPC protocol")
         if generate_call_cap is not None:
             _integer(generate_call_cap, "worker generate call cap", minimum=1)
+        if wait_observer is not None and not callable(wait_observer):
+            raise Phase4LocalQwenContractError("worker wait observer is invalid")
         self._generate_call_cap = generate_call_cap
+        self._wait_observer = wait_observer
         self._generate_call_count = 0
         self._closed = False
         self._generation_started = False
@@ -7500,19 +7507,36 @@ class SupervisedLocalQwenBackend:
             ) from exc
 
     def _receive(self, *, timeout: int) -> dict[str, object]:
-        try:
-            message = self._messages.get(timeout=timeout)
-        except queue.Empty as exc:
-            self._force_teardown("generation_timeout")
-            raise SupervisedWorkerFailure(
-                "generation_timeout", "model generation exceeded its wall-clock deadline"
-            ) from exc
-        if message.get("kind") == "protocol_error":
-            self._force_teardown("worker_failed")
-            raise SupervisedWorkerFailure(
-                "worker_protocol_failed", "model worker protocol failed closed"
-            )
-        return message
+        """Receive one worker message without an uninterruptible long wait."""
+
+        _integer(timeout, "worker receive timeout", minimum=1)
+        deadline = time.monotonic() + timeout
+        next_heartbeat = time.monotonic() + P4D1_HEARTBEAT_INTERVAL_SECONDS
+        last_empty: queue.Empty | None = None
+        while True:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                self._force_teardown("generation_timeout")
+                raise SupervisedWorkerFailure(
+                    "generation_timeout", "model generation exceeded its wall-clock deadline"
+                ) from last_empty
+            try:
+                message = self._messages.get(
+                    timeout=min(P4D1_RECEIVE_POLL_SECONDS, remaining)
+                )
+            except queue.Empty as exc:
+                last_empty = exc
+                now = time.monotonic()
+                if self._wait_observer is not None and now >= next_heartbeat:
+                    self._wait_observer()
+                    next_heartbeat = now + P4D1_HEARTBEAT_INTERVAL_SECONDS
+                continue
+            if message.get("kind") == "protocol_error":
+                self._force_teardown("worker_failed")
+                raise SupervisedWorkerFailure(
+                    "worker_protocol_failed", "model worker protocol failed closed"
+                )
+            return message
 
     def _force_teardown(self, terminal_status: str) -> None:
         if self._closed:
@@ -7699,6 +7723,8 @@ class P4D1StreamMirror:
         self._target = target if target is not None else sys.stderr
         self._partial_chunks: list[bytes] = []
         self._lock = threading.Lock()
+        self._generation_started_at: float | None = None
+        self._first_token_seen = False
 
     def stage(self, label: str) -> None:
         text = _text(label, "P4D1 stage")
@@ -7726,13 +7752,30 @@ class P4D1StreamMirror:
         delta = _decode_b64(data["delta_b64"], "P4D1 stream delta", allow_empty=True)
         if event_name == "token_delta":
             with self._lock:
-                self._partial_chunks.append(delta)
+                if delta:
+                    self._first_token_seen = True
+                    self._partial_chunks.append(delta)
                 self._target.write(delta.decode("utf-8", errors="replace"))  # type: ignore[union-attr]
                 self._target.flush()  # type: ignore[union-attr]
             return
         if delta:
             raise Phase4LocalQwenContractError("P4D1 stage event cannot carry a delta")
+        if event_name == "generation_started":
+            with self._lock:
+                self._generation_started_at = time.monotonic()
+                self._first_token_seen = False
         self.stage(event_name.replace("_", " "))
+
+    def heartbeat(self) -> None:
+        """Show parent-side wait progress without adding transcript bytes."""
+
+        with self._lock:
+            started_at = self._generation_started_at
+            first_token_seen = self._first_token_seen
+        if started_at is None or first_token_seen:
+            return
+        elapsed = max(0, int(time.monotonic() - started_at))
+        self.stage(f"waiting for first token (elapsed {elapsed}s)")
 
     @property
     def partial_bytes(self) -> bytes:
@@ -8424,6 +8467,7 @@ def start_p4d1_stream_diagnostic_runtime(
         capability=_REAL_RUNTIME_CAPABILITY,
         protocol=P4D1_WORKER_IPC_PROTOCOL,
         generate_call_cap=1,
+        wait_observer=mirror.heartbeat,
     )
     return P4D1SupervisedRuntime(backend=backend, loaded_facts=backend.loaded_facts)
 
