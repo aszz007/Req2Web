@@ -15,6 +15,7 @@ import shutil
 import subprocess
 import sys
 import unittest
+from collections.abc import Mapping
 from pathlib import Path
 from unittest.mock import patch
 
@@ -835,6 +836,154 @@ class Phase4LocalQwenTests(unittest.TestCase):
         self.assertTrue(receipt.action_state["model_action"])
         self.assertFalse(receipt.action_state["graph_runtime_execution"])
         self.assertFalse(receipt.generation_occurred)
+
+    def test_live_placement_allows_missing_or_empty_optional_device_map(self):
+        class Parameter:
+            def __init__(self, device):
+                self.device = device
+
+        class MissingMapModel:
+            def parameters(self):
+                return [Parameter("cuda:0")]
+
+        class Model:
+            def __init__(self, device_map):
+                self.hf_device_map = device_map
+
+            def parameters(self):
+                return [Parameter("cuda:0")]
+
+        for model in (MissingMapModel(), Model({})):
+            normalized_map, parameter_devices = p4q._validate_live_model_placement(model)
+            self.assertEqual(normalized_map, {})
+            self.assertEqual(parameter_devices, {"cuda:0"})
+
+    def test_live_placement_rejects_non_mapping_device_map(self):
+        class Model:
+            hf_device_map = ["cuda:0"]
+
+            @staticmethod
+            def parameters():
+                return [type("Parameter", (), {"device": "cuda:0"})()]
+
+        with self.assertRaises(Phase4LocalQwenContractError):
+            p4q._validate_live_model_placement(Model())
+
+    def test_device_map_rejects_non_string_and_duplicate_mapping_keys(self):
+        for device_map in ({0: 0}, {object(): 0}):
+            with self.subTest(device_map=device_map):
+                with self.assertRaises(Phase4LocalQwenContractError):
+                    p4q._normalize_hf_device_map(device_map)
+
+        class DuplicateItemsMapping(Mapping):
+            def __getitem__(self, key):
+                if key == "":
+                    return 0
+                raise KeyError(key)
+
+            def __iter__(self):
+                return iter(("",))
+
+            def __len__(self):
+                return 1
+
+            def items(self):
+                return (("", 0), ("", 0))
+
+        with self.assertRaises(Phase4LocalQwenContractError):
+            p4q._normalize_hf_device_map(DuplicateItemsMapping())
+
+    def test_device_map_rejects_boolean_and_float_devices(self):
+        for device in (False, True, 0.0, 1.0):
+            with self.subTest(device=device):
+                with self.assertRaises(Phase4LocalQwenContractError):
+                    p4q._normalize_hf_device_map({"": device})
+
+    def test_live_placement_rejects_cpu_or_disk_device_map(self):
+        class Model:
+            def __init__(self, device_map):
+                self.hf_device_map = device_map
+
+            @staticmethod
+            def parameters():
+                return [type("Parameter", (), {"device": "cuda:0"})()]
+
+        for device_map in ({"": "cpu"}, {"": "disk"}):
+            with self.subTest(device_map=device_map):
+                with self.assertRaises(Phase4LocalQwenContractError):
+                    p4q._validate_live_model_placement(Model(device_map))
+
+    def test_live_placement_rejects_parameters_mixed_with_cpu(self):
+        class Parameter:
+            def __init__(self, device):
+                self.device = device
+
+        class Model:
+            hf_device_map = {}
+
+            @staticmethod
+            def parameters():
+                return [Parameter("cuda:0"), Parameter("cpu")]
+
+        with self.assertRaises(Phase4LocalQwenContractError):
+            p4q._validate_live_model_placement(Model())
+
+    def test_load_receipt_allows_empty_map_but_rejects_forged_placement(self):
+        _, _, profile, binding, manifest = _binding_profile_manifest()
+        loaded_facts = {
+            "model_class": "Qwen3_5ForConditionalGeneration",
+            "processor_class": "Qwen3VLProcessor",
+            "is_loaded_in_4bit": True,
+            "hf_device_map": {},
+            "parameter_devices": ["cuda:0"],
+            "compute_dtypes": ["torch.bfloat16"],
+            "cpu_offload": False,
+            "device": "cuda:0",
+        }
+        receipt = LocalQwenLoadReceipt.create(
+            manifest=manifest,
+            pilot=binding,
+            profile=profile,
+            loaded_facts=loaded_facts,
+        )
+        roundtrip = LocalQwenLoadReceipt.from_bytes(receipt.canonical_bytes())
+        roundtrip.validate_against(manifest=manifest, pilot=binding, profile=profile)
+        self.assertEqual(roundtrip.loaded_facts["hf_device_map"], {})
+
+        for forged in (
+            {**loaded_facts, "hf_device_map": {"": "cpu"}},
+            {**loaded_facts, "parameter_devices": ["cpu"]},
+        ):
+            with self.subTest(forged=forged):
+                with self.assertRaises(Phase4LocalQwenContractError):
+                    LocalQwenLoadReceipt.create(
+                        manifest=manifest,
+                        pilot=binding,
+                        profile=profile,
+                        loaded_facts=forged,
+                    )
+
+    def test_v1_load_receipt_preserves_integer_zero_device_map(self):
+        _, _, profile, binding, manifest = _binding_profile_manifest()
+        receipt = LocalQwenLoadReceipt.create(
+            manifest=manifest,
+            pilot=binding,
+            profile=profile,
+            loaded_facts={
+                "model_class": "Qwen3_5ForConditionalGeneration",
+                "processor_class": "Qwen3VLProcessor",
+                "is_loaded_in_4bit": True,
+                "hf_device_map": {"": 0},
+                "parameter_devices": ["cuda:0"],
+                "compute_dtypes": ["torch.bfloat16"],
+                "cpu_offload": False,
+                "device": "cuda:0",
+            },
+        )
+        roundtrip = LocalQwenLoadReceipt.from_bytes(receipt.canonical_bytes())
+        roundtrip.validate_against(manifest=manifest, pilot=binding, profile=profile)
+        self.assertEqual(roundtrip.loaded_facts["hf_device_map"], {"": 0})
+        self.assertIs(type(roundtrip.loaded_facts["hf_device_map"][""]), int)
 
     def test_f4_input_binds_registry_mapping_and_exact_refs(self):
         b_input = synthetic_commerce_b_input()

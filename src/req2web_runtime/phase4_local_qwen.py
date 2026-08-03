@@ -1141,6 +1141,50 @@ class LocalQwenProfile(_CanonicalRecord):
             raise Phase4LocalQwenContractError("LocalQwenProfile.profile_id does not bind the profile")
 
 
+def _normalize_hf_device_map(
+    value: object, *, name: str = "hf_device_map"
+) -> dict[str, int | str]:
+    """Normalize optional Transformers placement metadata without trusting it."""
+
+    if value is None:
+        return {}
+    if not isinstance(value, Mapping):
+        raise Phase4LocalQwenContractError(f"{name} must be a mapping or None")
+    normalized: dict[str, int | str] = {}
+    seen_keys: set[str] = set()
+    for key, device in value.items():
+        if type(key) is not str:
+            raise Phase4LocalQwenContractError(f"{name} keys must be strings")
+        if key in seen_keys:
+            raise Phase4LocalQwenContractError(f"{name} contains duplicate keys")
+        seen_keys.add(key)
+        is_gpu0 = (type(device) is int and device == 0) or (
+            type(device) is str and device in {"0", "cuda:0"}
+        )
+        if not is_gpu0:
+            raise Phase4LocalQwenContractError(
+                f"{name} contains a non-GPU0 placement"
+            )
+        normalized[key] = device
+    return normalized
+
+
+def _validate_live_model_placement(
+    model: object,
+) -> tuple[dict[str, int | str], set[str]]:
+    """Validate optional map metadata and authoritative live parameter placement."""
+
+    normalized_device_map = _normalize_hf_device_map(
+        getattr(model, "hf_device_map", None)
+    )
+    parameter_devices = {str(parameter.device) for parameter in model.parameters()}
+    if parameter_devices != {"cuda:0"}:
+        raise Phase4LocalQwenContractError(
+            "loaded parameters are not exclusively on GPU0"
+        )
+    return normalized_device_map, parameter_devices
+
+
 class LocalQwenLoadReceipt(_CanonicalRecord):
     """Action-time proof that the exact offline model profile was loaded."""
 
@@ -1163,6 +1207,11 @@ class LocalQwenLoadReceipt(_CanonicalRecord):
         manifest.validate()
         pilot.validate()
         profile.validate()
+        normalized_loaded_facts = dict(loaded_facts)
+        normalized_loaded_facts["hf_device_map"] = _normalize_hf_device_map(
+            normalized_loaded_facts.get("hf_device_map"),
+            name="LocalQwenLoadReceipt.loaded_facts.hf_device_map",
+        )
         root = {
             "schema_version": cls.SCHEMA_VERSION,
             "receipt_id": "pending",
@@ -1171,7 +1220,7 @@ class LocalQwenLoadReceipt(_CanonicalRecord):
             "profile_identity": _identity(
                 profile.to_dict(), revision=LOCAL_QWEN_PROFILE_SCHEMA_VERSION
             ),
-            "loaded_facts": dict(loaded_facts),
+            "loaded_facts": normalized_loaded_facts,
             "model_loaded": True,
             "generation_occurred": False,
             "action_state": {
@@ -1209,6 +1258,10 @@ class LocalQwenLoadReceipt(_CanonicalRecord):
             ),
             "LocalQwenLoadReceipt.loaded_facts",
         )
+        normalized_device_map = _normalize_hf_device_map(
+            facts["hf_device_map"],
+            name="LocalQwenLoadReceipt.loaded_facts.hf_device_map",
+        )
         if (
             facts["model_class"] != "Qwen3_5ForConditionalGeneration"
             or facts["processor_class"] != "Qwen3VLProcessor"
@@ -1217,9 +1270,7 @@ class LocalQwenLoadReceipt(_CanonicalRecord):
             or facts["compute_dtypes"] != ["torch.bfloat16"]
             or _bool(facts["cpu_offload"], "load.cpu_offload") is not False
             or facts["device"] != "cuda:0"
-            or not isinstance(facts["hf_device_map"], Mapping)
-            or not facts["hf_device_map"]
-            or any(str(value) not in {"0", "cuda:0"} for value in facts["hf_device_map"].values())
+            or facts["hf_device_map"] != normalized_device_map
         ):
             raise Phase4LocalQwenContractError("loaded local Qwen facts drifted")
         if (
@@ -3160,15 +3211,7 @@ class _LazyTransformersQwenBackend:
             raise Phase4LocalQwenContractError("explicit local Qwen load failed closed") from exc
         if getattr(model, "is_loaded_in_4bit", False) is not True:
             raise Phase4LocalQwenContractError("loaded model is not the frozen 4-bit profile")
-        hf_device_map = getattr(model, "hf_device_map", None)
-        if not isinstance(hf_device_map, Mapping) or not hf_device_map:
-            raise Phase4LocalQwenContractError("loaded model device map is unavailable")
-        allowed_devices = {0, "0", "cuda:0"}
-        if any(value not in allowed_devices for value in hf_device_map.values()):
-            raise Phase4LocalQwenContractError("CPU/disk/off-profile device placement rejected")
-        parameter_devices = {str(parameter.device) for parameter in model.parameters()}
-        if parameter_devices != {"cuda:0"}:
-            raise Phase4LocalQwenContractError("loaded parameters are not exclusively on GPU0")
+        hf_device_map, parameter_devices = _validate_live_model_placement(model)
         compute_dtypes = {
             str(module.compute_dtype)
             for module in model.modules()
@@ -3184,7 +3227,7 @@ class _LazyTransformersQwenBackend:
             "model_class": type(model).__name__,
             "processor_class": type(processor).__name__,
             "is_loaded_in_4bit": True,
-            "hf_device_map": {str(key): str(value) for key, value in hf_device_map.items()},
+            "hf_device_map": hf_device_map,
             "parameter_devices": sorted(parameter_devices),
             "compute_dtypes": sorted(compute_dtypes),
             "cpu_offload": False,
