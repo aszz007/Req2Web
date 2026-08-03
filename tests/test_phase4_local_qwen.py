@@ -10,6 +10,7 @@ import json
 import hashlib
 import copy
 import io
+import os
 import queue
 import shutil
 import subprocess
@@ -1213,6 +1214,86 @@ class Phase4LocalQwenTests(unittest.TestCase):
                 manifest=manifest,
             )
 
+    def test_supervised_worker_python_runtime_is_exact_and_rejects_injection(self):
+        executable, pythonpath = p4q._supervised_worker_python_runtime()
+        expected_executable = (
+            str(Path(sys._base_executable).resolve(strict=True))
+            if os.name == "nt"
+            else sys.executable
+        )
+        self.assertEqual(executable, expected_executable)
+        self.assertTrue(Path(executable).is_absolute())
+        self.assertTrue(Path(executable).is_file())
+
+        expected_paths = [Path(p4q.__file__).resolve(strict=True).parent.parent]
+        for key in ("purelib", "platlib"):
+            path = Path(p4q.sysconfig.get_paths()[key]).resolve(strict=True)
+            if path not in expected_paths:
+                expected_paths.append(path)
+        actual_paths = tuple(Path(item) for item in pythonpath.split(os.pathsep))
+        self.assertEqual(actual_paths, tuple(expected_paths))
+        self.assertTrue(all(path.is_absolute() and path.is_dir() for path in actual_paths))
+
+        injected_paths = dict(p4q.sysconfig.get_paths())
+        injected_paths["purelib"] = (
+            injected_paths["purelib"]
+            + os.pathsep
+            + injected_paths["platlib"]
+        )
+        with patch.object(p4q.sysconfig, "get_paths", return_value=injected_paths):
+            with self.assertRaises(Phase4LocalQwenContractError):
+                p4q._supervised_worker_python_runtime()
+
+        executable_attr = "_base_executable" if os.name == "nt" else "executable"
+        with patch.object(p4q.sys, executable_attr, "relative-python"):
+            with self.assertRaises(Phase4LocalQwenContractError):
+                p4q._supervised_worker_python_runtime()
+
+    @unittest.skipUnless(os.name == "nt", "Windows redirector probe")
+    def test_windows_base_worker_probe_preserves_pid_and_imports_runtime(self):
+        executable, pythonpath = p4q._supervised_worker_python_runtime()
+        environment = dict(os.environ)
+        environment.update(
+            {
+                "PYTHONPATH": pythonpath,
+                "HF_HUB_OFFLINE": "1",
+                "TRANSFORMERS_OFFLINE": "1",
+                "HF_HUB_DISABLE_TELEMETRY": "1",
+                "DO_NOT_TRACK": "1",
+                "LANGSMITH_TRACING": "0",
+                "LANGCHAIN_TRACING_V2": "0",
+            }
+        )
+        probe = (
+            "import json,os; "
+            "import accelerate,bitsandbytes,torch,transformers; "
+            "import req2web_runtime.phase4_local_qwen as module; "
+            "print(json.dumps({'pid':os.getpid(),'schema':module.P4_03_SCHEMA_PREFIX,"
+            "'transformers':transformers.__version__,'torch':torch.__version__,"
+            "'bitsandbytes':bitsandbytes.__version__,'accelerate':accelerate.__version__},"
+            "sort_keys=True))"
+        )
+        process = subprocess.Popen(
+            [executable, "-c", probe],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            encoding="utf-8",
+            env=environment,
+            creationflags=subprocess.CREATE_NO_WINDOW,
+        )
+        parent_observed_pid = process.pid
+        stdout, stderr = process.communicate(timeout=60)
+        self.assertEqual(process.returncode, 0, stderr)
+        payload = json.loads(stdout.strip())
+        self.assertEqual(payload["pid"], parent_observed_pid)
+        self.assertEqual(payload["schema"], p4q.P4_03_SCHEMA_PREFIX)
+        self.assertEqual(payload["transformers"], p4q.TRANSFORMERS_VERSION)
+        self.assertEqual(payload["torch"], p4q.TORCH_VERSION)
+        self.assertEqual(payload["bitsandbytes"], p4q.BITSANDBYTES_VERSION)
+        self.assertEqual(payload["accelerate"], p4q.ACCELERATE_VERSION)
+
     def test_missing_or_drifted_prepare_artifact_rejects_before_popen(self):
         for case_name in ("missing", "drifted"):
             root = Path.cwd() / ".p4-03-test-results" / f"prepare-{case_name}-{len(self._test_roots)}"
@@ -1339,6 +1420,10 @@ class Phase4LocalQwenTests(unittest.TestCase):
         ) as popen, patch(
             "req2web_runtime.phase4_local_qwen.persist_local_qwen_load_receipt",
             side_effect=OSError("synthetic receipt write failure"),
+        ), patch.dict(
+            p4q.os.environ,
+            {"PYTHONPATH": "caller-injected"},
+            clear=False,
         ):
             with self.assertRaises(p4q.SupervisedWorkerStartFailure) as captured:
                 p4q.start_supervised_local_qwen_runtime(
@@ -1348,6 +1433,13 @@ class Phase4LocalQwenTests(unittest.TestCase):
                     load_timeout_seconds=1,
                 )
             self.assertEqual(popen.call_count, 1)
+            expected_executable, expected_pythonpath = (
+                p4q._supervised_worker_python_runtime()
+            )
+            self.assertEqual(popen.call_args.args[0][0], expected_executable)
+            self.assertEqual(
+                popen.call_args.kwargs["env"]["PYTHONPATH"], expected_pythonpath
+            )
         self.assertTrue(fake_process.terminated)
         self.assertEqual(
             captured.exception.failure_code, "evidence_persistence_failed"

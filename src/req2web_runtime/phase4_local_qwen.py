@@ -30,6 +30,7 @@ import queue
 import re
 import subprocess
 import sys
+import sysconfig
 import tempfile
 import threading
 import traceback
@@ -3759,6 +3760,70 @@ def _raise_worker_start_failure(
     )
 
 
+def _supervised_worker_python_runtime() -> tuple[str, str]:
+    """Resolve the non-overridable worker executable and isolated import path."""
+
+    raw_executable = (
+        getattr(sys, "_base_executable", None)
+        if os.name == "nt"
+        else sys.executable
+    )
+    if type(raw_executable) is not str or not raw_executable:
+        raise Phase4LocalQwenContractError(
+            "supervised worker Python executable is unavailable"
+        )
+    executable = Path(raw_executable)
+    if not executable.is_absolute() or not executable.is_file():
+        raise Phase4LocalQwenContractError(
+            "supervised worker Python executable is invalid"
+        )
+    if os.name == "nt":
+        executable = executable.resolve(strict=True)
+
+    source_root = Path(__file__).resolve(strict=True).parent.parent
+    if not source_root.is_absolute() or not source_root.is_dir():
+        raise Phase4LocalQwenContractError(
+            "Req2Web worker source root is invalid"
+        )
+    venv_root = Path(sys.prefix)
+    if not venv_root.is_absolute() or not venv_root.is_dir():
+        raise Phase4LocalQwenContractError("current Python environment is invalid")
+    venv_root = venv_root.resolve(strict=True)
+
+    configured_paths = sysconfig.get_paths()
+    if not isinstance(configured_paths, Mapping):
+        raise Phase4LocalQwenContractError(
+            "supervised worker Python paths are unavailable"
+        )
+    python_paths: list[Path] = [source_root]
+    seen = {os.path.normcase(str(source_root))}
+    for key in ("purelib", "platlib"):
+        raw_path = configured_paths.get(key)
+        if (
+            type(raw_path) is not str
+            or not raw_path
+            or os.pathsep in raw_path
+        ):
+            raise Phase4LocalQwenContractError(
+                f"supervised worker {key} path is invalid"
+            )
+        path = Path(raw_path)
+        if not path.is_absolute() or not path.is_dir():
+            raise Phase4LocalQwenContractError(
+                f"supervised worker {key} path is invalid"
+            )
+        path = path.resolve(strict=True)
+        if not path.is_relative_to(venv_root):
+            raise Phase4LocalQwenContractError(
+                f"supervised worker {key} is outside the current environment"
+            )
+        identity = os.path.normcase(str(path))
+        if identity not in seen:
+            seen.add(identity)
+            python_paths.append(path)
+    return str(executable), os.pathsep.join(str(path) for path in python_paths)
+
+
 def start_supervised_local_qwen_runtime(
     *,
     model_root: Path,
@@ -3814,8 +3879,9 @@ def start_supervised_local_qwen_runtime(
         "_run_local_qwen_worker_protocol; "
         "raise SystemExit(_run_local_qwen_worker_protocol(model_root=Path(sys.argv[1])))"
     )
+    worker_executable, worker_pythonpath = _supervised_worker_python_runtime()
     command = [
-        sys.executable,
+        worker_executable,
         "-c",
         worker_bootstrap,
         str(model_root),
@@ -3829,6 +3895,7 @@ def start_supervised_local_qwen_runtime(
             "DO_NOT_TRACK": "1",
             "LANGSMITH_TRACING": "0",
             "LANGCHAIN_TRACING_V2": "0",
+            "PYTHONPATH": worker_pythonpath,
         }
     )
     creationflags = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
