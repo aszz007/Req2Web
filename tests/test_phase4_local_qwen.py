@@ -664,6 +664,229 @@ class Phase4LocalQwenTests(unittest.TestCase):
         self.assertIsNone(receipt.stderr_identity)
         stderr_persist.assert_not_called()
 
+    def test_windows_unsigned_exit_codes_normalize_to_signed_receipt_values(self):
+        self.assertEqual(p4q._normalize_process_exit_code(0xFFFFFFFF), -1)
+        self.assertEqual(
+            p4q._normalize_process_exit_code(0xC000013A),
+            0xC000013A - 0x100000000,
+        )
+        for value in (0, 17, -1, -15, -2147483648, 2147483647):
+            with self.subTest(value=value):
+                self.assertEqual(p4q._normalize_process_exit_code(value), value)
+        for invalid in (False, True, 0.0, -2147483649, 0x100000000):
+            with self.subTest(invalid=invalid):
+                with self.assertRaises(Phase4LocalQwenContractError):
+                    p4q._normalize_process_exit_code(invalid)
+
+        _, _, profile, binding, manifest = _binding_profile_manifest()
+
+        class ExitedProcess:
+            pid = 5656
+            stdin = object()
+
+            @staticmethod
+            def poll():
+                return 0xFFFFFFFF
+
+        backend = SupervisedLocalQwenBackend(
+            process=ExitedProcess(),
+            messages=queue.Queue(),
+            stderr_capture=p4q._WorkerStderrCapture(),
+            profile=profile,
+            worker_id="worker-unsigned-exit",
+            loaded_facts={"synthetic": True},
+            capability=p4q._REAL_RUNTIME_CAPABILITY,
+        )
+        backend._force_teardown("pilot_stopped")
+        facts = backend.teardown_facts
+        self.assertEqual(facts["worker_exit_code"], -1)
+        self.assertTrue(facts["worker_exit_verified"])
+        self.assertEqual(facts["terminal_status"], "pilot_stopped")
+
+        lease = PilotExecutionLease.create(
+            pilot=binding, manifest=manifest, parent_pid=1
+        )
+        receipt = PilotSupervisorReceipt.create(
+            lease=lease,
+            terminal_status="pilot_stopped",
+            worker_id="worker-unsigned-exit",
+            worker_pid=5656,
+            worker_exit_code=0xFFFFFFFF,
+            worker_exit_verified=True,
+            graceful_shutdown_requested=False,
+            terminate_sent=True,
+            kill_sent=False,
+            generation_started=True,
+            raw_status="not_captured",
+            latest_attempt_result_identity=None,
+            pilot_outcome_identity=None,
+            stderr_identity=None,
+            model_action=True,
+        )
+        self.assertEqual(receipt.worker_exit_code, -1)
+        roundtrip = PilotSupervisorReceipt.from_bytes(receipt.canonical_bytes())
+        self.assertEqual(roundtrip, receipt)
+        self.assertEqual(roundtrip.worker_exit_code, -1)
+
+        tampered = receipt.to_dict()
+        tampered["worker_exit_code"] = 0xFFFFFFFF
+        tampered["receipt_id"] = p4q._identity(
+            {key: value for key, value in tampered.items() if key != "receipt_id"},
+            revision=p4q.SUPERVISOR_RECEIPT_SCHEMA_VERSION,
+        )["sha256"]
+        with self.assertRaises(Phase4LocalQwenContractError):
+            PilotSupervisorReceipt.from_dict(tampered)
+
+        for invalid in (False, True, -2147483649, 0x100000000):
+            with self.subTest(receipt_invalid=invalid):
+                with self.assertRaises(Phase4LocalQwenContractError):
+                    PilotSupervisorReceipt.create(
+                        lease=lease,
+                        terminal_status="pilot_stopped",
+                        worker_id="worker-invalid-exit",
+                        worker_pid=5657,
+                        worker_exit_code=invalid,
+                        worker_exit_verified=True,
+                        graceful_shutdown_requested=False,
+                        terminate_sent=True,
+                        kill_sent=False,
+                        generation_started=True,
+                        raw_status="not_captured",
+                        latest_attempt_result_identity=None,
+                        pilot_outcome_identity=None,
+                        stderr_identity=None,
+                        model_action=True,
+                    )
+
+    def test_worker_start_failure_normalizes_final_windows_poll_code(self):
+        class Process:
+            pid = 5757
+
+            def __init__(self):
+                self.poll_count = 0
+
+            def poll(self):
+                self.poll_count += 1
+                return None if self.poll_count == 1 else 0xC000013A
+
+            @staticmethod
+            def terminate():
+                return None
+
+            @staticmethod
+            def kill():
+                return None
+
+            @staticmethod
+            def wait(timeout=None):
+                del timeout
+                return 0xC000013A
+
+        with self.assertRaises(p4q.SupervisedWorkerStartFailure) as captured:
+            p4q._raise_worker_start_failure(
+                process=Process(),
+                stderr_capture=None,
+                message="synthetic unsigned startup exit",
+            )
+        facts = captured.exception.teardown_facts
+        self.assertEqual(
+            facts["worker_exit_code"], 0xC000013A - 0x100000000
+        )
+        self.assertTrue(facts["worker_exit_verified"])
+        self.assertEqual(facts["terminal_status"], "load_failed")
+
+    def test_normal_close_normalizes_windows_code_and_none_is_unverified(self):
+        _, _, profile, _, _ = _binding_profile_manifest()
+
+        class Stdin:
+            @staticmethod
+            def write(_):
+                return None
+
+            @staticmethod
+            def flush():
+                return None
+
+        class HighExitProcess:
+            pid = 5858
+            stdin = Stdin()
+
+            @staticmethod
+            def wait(timeout=None):
+                del timeout
+                return 0xFFFFFFFF
+
+            @staticmethod
+            def poll():
+                return 0xFFFFFFFF
+
+        high_messages = queue.Queue()
+        high_messages.put(
+            {"kind": "shutdown_ack", "worker_id": "worker-high-close"}
+        )
+        high_stderr = p4q._WorkerStderrCapture()
+        high_stderr.complete()
+        high_backend = SupervisedLocalQwenBackend(
+            process=HighExitProcess(),
+            messages=high_messages,
+            stderr_capture=high_stderr,
+            profile=profile,
+            worker_id="worker-high-close",
+            loaded_facts={"synthetic": True},
+            capability=p4q._REAL_RUNTIME_CAPABILITY,
+        )
+        high_facts = high_backend.close()
+        self.assertEqual(high_facts["worker_exit_code"], -1)
+        self.assertTrue(high_facts["worker_exit_verified"])
+        self.assertEqual(high_facts["terminal_status"], "normal_completed")
+
+        class NoneExitProcess:
+            pid = 5959
+            stdin = Stdin()
+
+            def __init__(self):
+                self.terminate_count = 0
+
+            @staticmethod
+            def wait(timeout=None):
+                del timeout
+                return None
+
+            @staticmethod
+            def poll():
+                return None
+
+            def terminate(self):
+                self.terminate_count += 1
+
+            @staticmethod
+            def kill():
+                return None
+
+        none_process = NoneExitProcess()
+        none_messages = queue.Queue()
+        none_messages.put(
+            {"kind": "shutdown_ack", "worker_id": "worker-none-close"}
+        )
+        none_stderr = p4q._WorkerStderrCapture()
+        none_stderr.complete()
+        none_backend = SupervisedLocalQwenBackend(
+            process=none_process,
+            messages=none_messages,
+            stderr_capture=none_stderr,
+            profile=profile,
+            worker_id="worker-none-close",
+            loaded_facts={"synthetic": True},
+            capability=p4q._REAL_RUNTIME_CAPABILITY,
+        )
+        none_facts = none_backend.close()
+        self.assertIsNone(none_facts["worker_exit_code"])
+        self.assertFalse(none_facts["worker_exit_verified"])
+        self.assertEqual(
+            none_facts["terminal_status"], "worker_teardown_unverified"
+        )
+        self.assertEqual(none_process.terminate_count, 1)
+
     def test_exact_records_reject_bool_and_direct_constructor(self):
         _, _, _, binding, _ = _binding_profile_manifest()
         self.assertEqual(binding, type(binding).from_bytes(binding.canonical_bytes()))

@@ -653,6 +653,24 @@ class PilotRuntimeStartClaim(_CanonicalRecord):
             raise Phase4LocalQwenContractError("runtime start claim identity drifted")
 
 
+def _normalize_process_exit_code(value: object) -> int | None:
+    """Normalize a verified OS process code to the receipt's signed int32 form."""
+
+    if value is None:
+        return None
+    if type(value) is not int:
+        raise Phase4LocalQwenContractError(
+            "worker process exit code must be an integer or None"
+        )
+    if value < -2147483648 or value > 4294967295:
+        raise Phase4LocalQwenContractError(
+            "worker process exit code is outside the supported 32-bit range"
+        )
+    if value > 2147483647:
+        return value - 4294967296
+    return value
+
+
 class PilotSupervisorReceipt(_CanonicalRecord):
     """Terminal parent-process evidence for worker exit and pilot closure."""
 
@@ -687,6 +705,7 @@ class PilotSupervisorReceipt(_CanonicalRecord):
         model_action: bool,
     ) -> "PilotSupervisorReceipt":
         lease.validate()
+        normalized_exit_code = _normalize_process_exit_code(worker_exit_code)
         root: dict[str, object] = {
             "schema_version": cls.SCHEMA_VERSION,
             "receipt_id": "pending",
@@ -699,7 +718,7 @@ class PilotSupervisorReceipt(_CanonicalRecord):
             "terminal_status": terminal_status,
             "worker_id": worker_id,
             "worker_pid": worker_pid,
-            "worker_exit_code": worker_exit_code,
+            "worker_exit_code": normalized_exit_code,
             "worker_exit_verified": worker_exit_verified,
             "graceful_shutdown_requested": graceful_shutdown_requested,
             "terminate_sent": terminate_sent,
@@ -3588,6 +3607,7 @@ class SupervisedLocalQwenBackend:
             exit_code = process.poll()
         except OSError:
             exit_code = None
+        exit_code = _normalize_process_exit_code(exit_code)
         self._closed = True
         self._teardown["worker_exit_code"] = exit_code
         self._teardown["worker_exit_verified"] = exit_code is not None
@@ -3675,17 +3695,24 @@ class SupervisedLocalQwenBackend:
                     raise SupervisedWorkerFailure(
                         "worker_protocol_failed", "worker shutdown acknowledgement drifted"
                     )
-                exit_code = self._process.wait(timeout=20)
-                self._closed = True
-                self._teardown["worker_exit_code"] = exit_code
-                self._teardown["worker_exit_verified"] = True
-                self._teardown["terminal_status"] = "normal_completed"
+                exit_code = _normalize_process_exit_code(
+                    self._process.wait(timeout=20)
+                )
+                if exit_code is None:
+                    self._force_teardown("worker_failed")
+                    return self.teardown_facts
+                else:
+                    self._closed = True
+                    self._teardown["worker_exit_code"] = exit_code
+                    self._teardown["worker_exit_verified"] = True
+                    self._teardown["terminal_status"] = "normal_completed"
             except (OSError, subprocess.SubprocessError, SupervisedWorkerFailure):
                 self._force_teardown("worker_failed")
         try:
             exit_code = self._process.poll()
         except OSError:
             exit_code = None
+        exit_code = _normalize_process_exit_code(exit_code)
         if exit_code is None:
             if self._teardown["worker_exit_verified"] is not True:
                 self._closed = False
@@ -3752,6 +3779,7 @@ def _raise_worker_start_failure(
         exit_code = process.poll()
     except OSError:
         exit_code = None
+    exit_code = _normalize_process_exit_code(exit_code)
     if exit_code is None:
         terminate_sent = True
         try:
@@ -3768,6 +3796,7 @@ def _raise_worker_start_failure(
         exit_code = process.poll()
     except OSError:
         exit_code = None
+    exit_code = _normalize_process_exit_code(exit_code)
     capture = (
         {"completed": False, "thread_joined": False,
          "error": "stderr_reader_unavailable", "stderr_bytes": None}
