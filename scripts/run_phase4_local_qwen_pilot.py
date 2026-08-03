@@ -23,6 +23,9 @@ from req2web_runtime.phase4_local_qwen import (
     P4R5_PILOT_ID,
     P4R5_PROMPT_REVISION,
     P4R5_PROJECTION_REVISION,
+    P4R6_PILOT_ID,
+    P4R6_PROMPT_REVISION,
+    P4R6_PROJECTION_REVISION,
     PilotSupervisorReceipt,
     Phase4LocalQwenContractError,
     Phase4LocalQwenPilotRunner,
@@ -34,6 +37,7 @@ from req2web_runtime.phase4_local_qwen import (
     load_p4r3_policy_revision,
     load_p4r4_policy_revision,
     load_p4r5_policy_revision,
+    load_p4r6_policy_revision,
     make_canonical_identity,
     persist_pilot_outcome,
     persist_supervisor_receipt,
@@ -103,6 +107,14 @@ def _r5_policies() -> tuple[NodeProjectionPolicy, ...]:
     )
 
 
+def _r6_policies() -> tuple[NodeProjectionPolicy, ...]:
+    return _policies(
+        prompt_revision=P4R6_PROMPT_REVISION,
+        config_revision="p4-03r6-config-v1",
+        projection_revision=P4R6_PROJECTION_REVISION,
+    )
+
+
 def _offline_process() -> None:
     os.environ["HF_HUB_OFFLINE"] = "1"
     os.environ["TRANSFORMERS_OFFLINE"] = "1"
@@ -133,9 +145,9 @@ def build_parser() -> argparse.ArgumentParser:
     for command in (prepare, run):
         command.add_argument(
             "--pilot",
-            choices=("r2", "r3", "r4", "r5"),
-            default="r5",
-            help="Explicit pilot revision; the default is checkpoint node-local R5.",
+            choices=("r2", "r3", "r4", "r5", "r6"),
+            default="r6",
+            help="Explicit pilot revision; the default is prompt-order recovery R6.",
         )
     return parser
 
@@ -170,6 +182,8 @@ def main(argv: list[str] | None = None) -> int:
                 policy_kwargs = {"r4_policy": load_p4r4_policy_revision()[0], "pilot_id": P4R4_PILOT_ID, "policies": _r4_policies()}
             elif args.pilot == "r5":
                 policy_kwargs = {"r5_policy": load_p4r5_policy_revision()[0], "pilot_id": P4R5_PILOT_ID, "policies": _r5_policies(), "checkpoint_b_input": b_input}
+            elif args.pilot == "r6":
+                policy_kwargs = {"r6_policy": load_p4r6_policy_revision()[0], "pilot_id": P4R6_PILOT_ID, "policies": _r6_policies(), "checkpoint_b_input": b_input}
             else:
                 raise Phase4LocalQwenContractError("unknown pilot revision before prepare")
             binding, policies, profile, manifest = prepare_local_qwen_pilot(
@@ -202,6 +216,8 @@ def main(argv: list[str] | None = None) -> int:
             policy_kwargs = {"r4_policy": load_p4r4_policy_revision()[0]}
         elif args.pilot == "r5":
             policy_kwargs = {"r5_policy": load_p4r5_policy_revision()[0]}
+        elif args.pilot == "r6":
+            policy_kwargs = {"r6_policy": load_p4r6_policy_revision()[0]}
         else:
             raise Phase4LocalQwenContractError("unknown pilot revision before Popen")
         binding, policies, profile, manifest = load_prepared_local_qwen_pilot(
@@ -247,7 +263,7 @@ def main(argv: list[str] | None = None) -> int:
                 execution_lease=runtime.execution_lease,
                 runtime_start_claim=runtime.runtime_start_claim,
             )
-            node_order = ("F3", "F4") if args.pilot == "r5" else ("F1", "F2", "F3", "F4")
+            node_order = ("F3", "F4") if args.pilot in {"r5", "r6"} else ("F1", "F2", "F3", "F4")
             for node_id in node_order:
                 first = runner.run_node_local(node_id=node_id)
                 if first.failure_code is None:
@@ -271,7 +287,7 @@ def main(argv: list[str] | None = None) -> int:
                     outcome = runner.outcome(stop_reason="node_budget_exhausted")
                     break
             if outcome is None:
-                if args.pilot == "r5":
+                if args.pilot in {"r5", "r6"}:
                     outcome = runner.stop_for_report(
                         reason="checkpoint_node_local_complete"
                     )

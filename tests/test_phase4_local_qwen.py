@@ -44,6 +44,10 @@ from req2web_runtime.phase4_local_qwen import (
     P4R5CheckpointReceipt,
     P4R5_PILOT_ID,
     P4R5_PROJECTION_REVISION,
+    P4R6_PILOT_ID,
+    P4R6_PROMPT_REVISION,
+    P4R6_PROMPT_V2_REVISION,
+    P4R6_PROJECTION_REVISION,
     Phase4LocalQwenContractError,
     Phase4LocalQwenPilotRunner,
     PilotBinding,
@@ -62,6 +66,8 @@ from req2web_runtime.phase4_local_qwen import (
     load_p4r2_policy_revision,
     load_p4r4_result_summary,
     load_p4r5_policy_revision,
+    load_p4r5_result_summary,
+    load_p4r6_policy_revision,
     validate_model_inventory_metadata,
     validate_p4r2_live_binding,
 )
@@ -389,6 +395,38 @@ def _r5_fixture_binding_manifest(root_marker: str = "r5-test-result-root"):
     )
     binding = PilotBinding.create(
         pilot_id=P4R5_PILOT_ID,
+        policy_id="pending",
+        case_binding=build_synthetic_case_binding(b_input),
+        node_policy_identities={policy.node_id: policy.sha256() for policy in policies},
+        profile_id=profile.profile_id,
+        result_root_marker=root_marker,
+        integrated_run_cap=0,
+    )
+    manifest = PreCallManifest.create(
+        pilot_binding=binding,
+        policies=policies,
+        profile=profile,
+        model_root_identity=model_root_identity,
+        model_inventory_identity=inventory_identity,
+        inventory_file_count=1,
+        offline_environment={"local_files_only": True, "network": False, "telemetry": False, "tracing": False},
+    )
+    return b_input, policies, profile, binding, manifest
+
+
+def _r6_fixture_binding_manifest(root_marker: str = "r6-test-result-root"):
+    b_input = synthetic_commerce_b_input()
+    policies = pilot_script._r6_policies()
+    model_root_identity = make_identity({"fake_model_root": "r6-metadata-only"}, revision="test.r6.model-root.v1")
+    inventory_identity = make_identity({"fake_inventory": ["config.json"]}, revision="test.r6.inventory.v1")
+    profile = LocalQwenProfile.create(
+        model_root_identity=model_root_identity,
+        model_inventory_identity=inventory_identity,
+        model_file_count=1,
+        max_new_tokens=512,
+    )
+    binding = PilotBinding.create(
+        pilot_id=P4R6_PILOT_ID,
         policy_id="pending",
         case_binding=build_synthetic_case_binding(b_input),
         node_policy_identities={policy.node_id: policy.sha256() for policy in policies},
@@ -3215,12 +3253,181 @@ class Phase4LocalQwenTests(unittest.TestCase):
                 policies=policies,
             )
 
+    def test_r6_policy_binds_r5_source_identity_and_rejects_summary_tamper(self):
+        summary, summary_raw = load_p4r5_result_summary()
+        policy, policy_raw = load_p4r6_policy_revision()
+        self.assertEqual(summary.source_commit, "ec2f297e4b0c3ca2bb9abdd584b05df636221ace")
+        self.assertEqual(summary.result_root_leaf, "p4-03r5-local-qwen-9b-ec2f297e4b-20260803-a")
+        self.assertEqual(summary.pilot_outcome["node_total_counts"], {"F1": 0, "F2": 0, "F3": 2, "F4": 0})
+        self.assertEqual(policy.pilot_id, P4R6_PILOT_ID)
+        self.assertEqual(policy.predecessor_r5_result["summary_raw_sha256"], p4q.P4R5_RESULT_SUMMARY_RAW_SHA256)
+        self.assertEqual(policy.predecessor_r5_result["summary_raw_byte_length"], len(summary_raw))
+        self.assertEqual(policy.prompt["revision"], P4R6_PROMPT_REVISION)
+        self.assertEqual(policy.prompt["retry_revision"], P4R6_PROMPT_V2_REVISION)
+        self.assertEqual(policy_raw, p4q._read_tracked_canonical_record(p4q.P4R6_POLICY_PATH, "r6 policy"))
+        self.assertEqual(p4q._canonical_bytes(summary.to_dict()), summary_raw)
+        tampered = summary.to_dict()
+        tampered["source_commit"] = "0000000000000000000000000000000000000000"
+        with self.assertRaises(Phase4LocalQwenContractError):
+            p4q.P4R5ResultSummary.from_dict(tampered)
+
+    def test_r6_live_r5_source_replay_rejects_packet_tamper(self):
+        model_root = Path(r"D:\Models\Req2Web\Qwen3.5-9B-c202236235762e1c871ad0ccb60c8ee5ba337b9a")
+        r5_root = Path(r"D:\Models\Req2Web\phase4_runs\p4-03r5-local-qwen-9b-ec2f297e4b-20260803-a")
+        if not model_root.is_dir() or not r5_root.is_dir():
+            self.skipTest("action-time R5 root is not present")
+        r5_manifest = PreCallManifest.from_bytes((r5_root / "pre_call_manifest.json").read_bytes())
+        profile = LocalQwenProfile.from_dict(r5_manifest.profile)
+        b_input = synthetic_commerce_b_input()
+        policies = pilot_script._r6_policies()
+        binding = PilotBinding.create(
+            pilot_id=P4R6_PILOT_ID,
+            policy_id="pending",
+            case_binding=build_synthetic_case_binding(b_input),
+            node_policy_identities={policy.node_id: policy.sha256() for policy in policies},
+            profile_id=profile.profile_id,
+            result_root_marker="r6-live-replay-result-root",
+            integrated_run_cap=0,
+        )
+        root = Path.cwd() / ".p4-03-test-results" / "r6-live-replay"
+        root.mkdir(parents=True, exist_ok=False)
+        self._test_roots.append(root)
+        (root / p4q.RESULT_ROOT_MARKER_NAME).write_text(binding.result_root_marker + "\n", encoding="ascii")
+        r6_policy, r6_policy_raw = load_p4r6_policy_revision()
+        _, r5_summary_raw = load_p4r5_result_summary()
+        _, r5_policy_raw = load_p4r5_policy_revision()
+        with patch.object(p4q, "_validate_p4r5_aggregate_budget", return_value=None):
+            seed = p4q._p4r6_build_checkpoint_seed(model_root=model_root, b_input=b_input)
+        (root / p4q.P4R6_RESULT_POLICY_NAME).write_bytes(r6_policy_raw)
+        (root / p4q.P4R6_RESULT_R5_SUMMARY_NAME).write_bytes(r5_summary_raw)
+        (root / p4q.P4R6_RESULT_R5_POLICY_NAME).write_bytes(r5_policy_raw)
+        (root / p4q.P4R6_RESULT_R5_PACKET_NAME).write_bytes(seed["packet_raw"])
+        (root / p4q.P4R6_RESULT_R5_RECEIPT_NAME).write_bytes(seed["receipt_raw"])
+        with patch.object(p4q, "_validate_p4r5_aggregate_budget", return_value=None), patch.object(p4q, "_validate_p4r6_aggregate_budget", return_value=None):
+            replay = p4q.validate_p4r6_live_binding(
+                model_root=model_root,
+                result_root=root,
+                b_input=b_input,
+                pilot=binding,
+                profile=profile,
+                policies=policies,
+            )
+        self.assertEqual(replay["packet"], seed["packet"])
+        tampered = seed["packet"].to_dict()
+        tampered["nodes"][0]["raw_b64"] = "eA=="
+        (root / p4q.P4R6_RESULT_R5_PACKET_NAME).write_bytes(p4q._canonical_bytes(tampered))
+        with patch.object(p4q, "_validate_p4r5_aggregate_budget", return_value=None), patch.object(p4q, "_validate_p4r6_aggregate_budget", return_value=None), self.assertRaises(Phase4LocalQwenContractError):
+            p4q.validate_p4r6_live_binding(
+                model_root=model_root,
+                result_root=root,
+                b_input=b_input,
+                pilot=binding,
+                profile=profile,
+                policies=policies,
+            )
+
+    def test_r6_seeded_f3_f4_node_local_path_keeps_f1_f2_zero_and_rejects_integrated(self):
+        b_input, policies, profile, binding, manifest = _r6_fixture_binding_manifest("r6-seeded-result-root")
+        root = Path.cwd() / ".p4-03-test-results" / "r6-seeded-node-local"
+        root.mkdir(parents=True, exist_ok=False)
+        self._test_roots.append(root)
+        (root / p4q.RESULT_ROOT_MARKER_NAME).write_text(binding.result_root_marker + "\n", encoding="ascii")
+        outputs = _fixture_bytes(b_input)
+        state = phase4_create_authority_state(b_input)
+        refs = {}
+        for node_id, raw in zip(("F1", "F2"), outputs[:2], strict=True):
+            parsed = json.loads(raw)
+            state = phase4_register_node_output(state, node_id, parsed)
+            identity = make_identity({"node_id": node_id, "raw": raw.decode("utf-8")}, revision="test.r6.seed.ref.v1")
+            refs[node_id] = {
+                "ref_type": "node_output",
+                "ref_id": identity["sha256"],
+                "ref_sha256": identity["sha256"],
+                "ref_revision": f"{p4q.P4_03_SCHEMA_PREFIX}.node_output.{P4R6_PILOT_ID}.{P4R6_PILOT_ID}-node-local.{b_input['case_id']}.{b_input['request_id']}.{node_id}",
+            }
+        backend = FakeBackend(outputs[2:])
+        runner = Phase4LocalQwenPilotRunner(
+            pilot=binding,
+            policies=policies,
+            profile=profile,
+            manifest=manifest,
+            result_root=root,
+            b_input=b_input,
+            backend=backend,
+        )
+        runner._node_local_status["F1"] = "passed"
+        runner._node_local_status["F2"] = "passed"
+        runner._node_local_outputs = {"F1": outputs[0], "F2": outputs[1]}
+        runner._node_local_refs = refs
+        runner._checkpoint_seed = {"authority_state": state}
+        with self.assertRaises(Phase4LocalQwenContractError):
+            runner.run_node_local(node_id="F1")
+        with self.assertRaises(Phase4LocalQwenContractError):
+            runner.run_node_local(node_id="F2")
+        self.assertEqual(backend.calls, [])
+        self.assertEqual(runner.ledger.node_total_counts, {"F1": 0, "F2": 0, "F3": 0, "F4": 0})
+        self.assertIsNone(runner.run_node_local(node_id="F3").failure_code)
+        self.assertIsNone(runner.run_node_local(node_id="F4").failure_code)
+        with self.assertRaises(Phase4LocalQwenContractError):
+            runner.run_integrated()
+        outcome = runner.stop_for_report(reason="r6_node_local_complete")
+        self.assertEqual(outcome.claim_boundary, "phase4_local_qwen_checkpoint_seeded_f1_f2_r6_node_local_only")
+        self.assertEqual(outcome.node_total_counts, {"F1": 0, "F2": 0, "F3": 1, "F4": 1})
+        self.assertEqual(outcome.node_local_statuses, {"F1": "passed", "F2": "passed", "F3": "passed", "F4": "passed"})
+        self.assertEqual(outcome.integrated_outcome, "not_started")
+
+    def test_r6_prompt_v1_v2_exact_order_guidance_is_node_local(self):
+        b_input, policies, profile, binding, manifest = _r6_fixture_binding_manifest("r6-prompt-result-root")
+        root = Path.cwd() / ".p4-03-test-results" / "r6-prompt-v2"
+        root.mkdir(parents=True, exist_ok=False)
+        self._test_roots.append(root)
+        (root / p4q.RESULT_ROOT_MARKER_NAME).write_text(binding.result_root_marker + "\n", encoding="ascii")
+        outputs = _fixture_bytes(b_input)
+        state = phase4_create_authority_state(b_input)
+        refs = {}
+        for node_id, raw in zip(("F1", "F2"), outputs[:2], strict=True):
+            state = phase4_register_node_output(state, node_id, json.loads(raw))
+            identity = make_identity({"node_id": node_id, "raw": raw.decode("utf-8")}, revision="test.r6.prompt.ref.v1")
+            refs[node_id] = {"ref_type": "node_output", "ref_id": identity["sha256"], "ref_sha256": identity["sha256"], "ref_revision": f"{p4q.P4_03_SCHEMA_PREFIX}.node_output.{P4R6_PILOT_ID}.{P4R6_PILOT_ID}-node-local.{b_input['case_id']}.{b_input['request_id']}.{node_id}"}
+        runner = Phase4LocalQwenPilotRunner(
+            pilot=binding,
+            policies=policies,
+            profile=profile,
+            manifest=manifest,
+            result_root=root,
+            b_input=b_input,
+            backend=FakeBackend([b"not-json"]),
+        )
+        runner._node_local_status["F1"] = "passed"
+        runner._node_local_status["F2"] = "passed"
+        runner._node_local_outputs = {"F1": outputs[0], "F2": outputs[1]}
+        runner._node_local_refs = refs
+        runner._checkpoint_seed = {"authority_state": state}
+        prior_failure = runner.run_node_local(node_id="F3")
+        self.assertEqual(prior_failure.failure_code, "node_contract_invalid")
+        v1 = json.loads(build_prompt_v1(node_id="F3", input_bytes=b"{}", policy=policies[2], profile=profile))
+        v2 = json.loads(build_prompt_v2(node_id="F3", input_bytes=b"{}", policy=policies[2], profile=profile, prior_failure=prior_failure, change_reason=CHANGE_REASONS[0]))
+        f4 = json.loads(build_prompt_v1(node_id="F4", input_bytes=b"{}", policy=policies[3], profile=profile))
+        f3_guidance = "\n".join(v1["instructions"])
+        f3_v2_guidance = "\n".join(v2["instructions"])
+        f4_guidance = "\n".join(f4["instructions"])
+        exact_f3 = "local_id, entity_type, trigger_component_local_id, source_state_local_id, action, target_state_local_id, user_feedback, refs"
+        exact_f4 = "local_id, entity_type, description, use_case_refs, state_ref, refs"
+        self.assertEqual(v1["template_revision"], P4R6_PROMPT_REVISION)
+        self.assertEqual(v2["template_revision"], P4R6_PROMPT_V2_REVISION)
+        self.assertIn(exact_f3, f3_guidance)
+        self.assertIn("action key must appear before target_state_local_id", f3_guidance)
+        self.assertIn(exact_f3, f3_v2_guidance)
+        self.assertIn("failure_code=node_contract_invalid", f3_v2_guidance)
+        self.assertIn(exact_f4, f4_guidance)
+        self.assertIn("does not change the validator, registry, or global node schema", f4_guidance)
+
     def test_r5_dispatch_has_explicit_r2_r3_r4_paths_and_rejects_unknown(self):
-        for pilot in ("r2", "r3", "r4", "r5"):
+        for pilot in ("r2", "r3", "r4", "r5", "r6"):
             args = pilot_script.build_parser().parse_args(["run", "--model-root", "m", "--integrity-evidence", "i", "--result-root", "r", "--pilot", pilot])
             self.assertEqual(args.pilot, pilot)
         args = pilot_script.build_parser().parse_args(["run", "--model-root", "m", "--integrity-evidence", "i", "--result-root", "r"])
-        self.assertEqual(args.pilot, "r5")
+        self.assertEqual(args.pilot, "r6")
         with self.assertRaises(SystemExit):
             pilot_script.build_parser().parse_args(["run", "--model-root", "m", "--integrity-evidence", "i", "--result-root", "r", "--pilot", "unknown"])
 
