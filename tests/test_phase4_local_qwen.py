@@ -290,6 +290,41 @@ def _prepare_tiny_r3_artifact(parent: Path):
     return model_root, integrity_evidence, result_root, b_input, *prepared
 
 
+def _prepare_tiny_r4_artifact(parent: Path):
+    model_root, integrity_evidence = _write_fake_integrity(parent)
+    b_input = synthetic_commerce_b_input()
+    result_root = parent / "prepared-r4"
+    r4_policy, _ = p4q.load_p4r4_policy_revision()
+    with patch.object(
+        p4q,
+        "_load_p4r4_r3_action_time_evidence",
+        return_value=p4q._p4r4_expected_action_evidence(),
+    ):
+        prepared = prepare_local_qwen_pilot(
+            model_root=model_root,
+            integrity_evidence=integrity_evidence,
+            result_root=result_root,
+            case_binding=build_synthetic_case_binding(b_input),
+            policies=pilot_script._r4_policies(),
+            pilot_id=r4_policy.pilot_id,
+            runtime_versions={
+                "transformers": p4q.TRANSFORMERS_VERSION,
+                "torch": p4q.TORCH_VERSION,
+                "bitsandbytes": p4q.BITSANDBYTES_VERSION,
+                "accelerate": p4q.ACCELERATE_VERSION,
+            },
+            gpu_facts=_fake_gpu_facts(),
+            environment={
+                "HF_HUB_OFFLINE": "1",
+                "TRANSFORMERS_OFFLINE": "1",
+                "LANGSMITH_TRACING": "0",
+                "LANGCHAIN_TRACING_V2": "0",
+            },
+            r4_policy=r4_policy,
+        )
+    return model_root, integrity_evidence, result_root, b_input, *prepared
+
+
 def FakeBackend(
     outputs: list[bytes], *, result_root: Path | None = None
 ):
@@ -1341,6 +1376,63 @@ class Phase4LocalQwenTests(unittest.TestCase):
             p4q.build_config_bytes(profile=profile, policy=r3_policies[0]).decode("utf-8")
         )
         self.assertEqual(config["max_new_tokens"], 512)
+
+    def test_r4_summary_policy_prompt_and_profile_are_independent(self):
+        summary, summary_raw = p4q.load_p4r3_result_summary()
+        policy, policy_raw = p4q.load_p4r4_policy_revision()
+        self.assertEqual(summary.canonical_bytes(), summary_raw)
+        self.assertEqual(policy.canonical_bytes(), policy_raw)
+        self.assertEqual(policy.pilot_id, p4q.P4R4_PILOT_ID)
+        self.assertEqual(policy.runtime["max_new_tokens"], 640)
+        self.assertNotEqual(policy.pilot_id, p4q.P4R3_PILOT_ID)
+        profile = LocalQwenProfile.create(
+            model_root_identity=make_identity({"r4": "model"}, revision="test.r4.model.v1"),
+            model_inventory_identity=make_identity({"r4": "inventory"}, revision="test.r4.inventory.v1"),
+            model_file_count=1,
+            max_new_tokens=640,
+        )
+        r4_prompt = json.loads(
+            build_prompt_v1(
+                node_id="F1",
+                input_bytes=b"{}",
+                policy=pilot_script._r4_policies()[0],
+                profile=profile,
+            ).decode("utf-8")
+        )
+        guidance = "\n".join(r4_prompt["instructions"])
+        self.assertEqual(r4_prompt["template_revision"], p4q.P4R4_PROMPT_REVISION)
+        for required in (
+            "no more than 5 necessary components and no more than 3 sections",
+            "product or cart display (one compact display semantic is sufficient)",
+            "extremely short and non-redundant",
+            "pilot-local size guards for this fixed case, not global F1 schema rules",
+            "max_new_tokens=640",
+        ):
+            self.assertIn(required, guidance)
+        self.assertEqual(json.loads(p4q.build_config_bytes(profile=profile, policy=pilot_script._r4_policies()[0]))["max_new_tokens"], 640)
+
+    def test_r4_prepare_binds_r3_action_evidence_and_uses_separate_shared_aggregate(self):
+        parent = Path.cwd() / ".p4-03-test-results" / f"r4-binding-{len(self._test_roots)}"
+        parent.mkdir(parents=True, exist_ok=False)
+        self._test_roots.append(parent)
+        model_root, _, result_root, _, binding, policies, profile, _ = _prepare_tiny_r4_artifact(parent)
+        self.assertEqual(binding.pilot_id, p4q.P4R4_PILOT_ID)
+        self.assertEqual(profile.max_new_tokens, 640)
+        self.assertTrue((result_root / p4q.P4R4_RESULT_POLICY_NAME).is_file())
+        self.assertTrue((result_root / p4q.P4R4_RESULT_R3_SUMMARY_NAME).is_file())
+        root_binding = p4q.P4R4ResultRootBinding.from_bytes((result_root / p4q.P4R4_RESULT_BINDING_NAME).read_bytes())
+        self.assertEqual(root_binding.r3_summary_identity["sha256"], p4q.P4R3_SUMMARY_SHA256)
+        self.assertEqual(root_binding.r3_outcome_identity["sha256"], p4q.P4R3_OUTCOME_SHA256)
+        r2_root, r2_name, _ = p4q._p4r2_aggregate_budget_paths(model_root)
+        r3_root, r3_name, _ = p4q._p4r3_aggregate_budget_paths(model_root)
+        r4_root, r4_name, _ = p4q._p4r4_aggregate_budget_paths(model_root)
+        self.assertEqual(r2_root, r3_root)
+        self.assertEqual(r3_root, r4_root)
+        self.assertNotEqual(r2_name, r3_name)
+        self.assertNotEqual(r3_name, r4_name)
+        self.assertIsInstance(p4q.P4R4AggregateBudgetLedger.from_bytes((r4_root / r4_name).read_bytes()), p4q.P4R4AggregateBudgetLedger)
+        with patch.object(p4q, "_load_p4r4_r3_action_time_evidence", return_value=p4q._p4r4_expected_action_evidence()):
+            p4q.validate_p4r4_live_binding(model_root=model_root, result_root=result_root, pilot=binding, policies=policies)
 
     def test_r2_prepare_writes_direct_projection_and_cross_bound_root_evidence(self):
         parent = Path.cwd() / ".p4-03-test-results" / f"r2-{len(self._test_roots)}"

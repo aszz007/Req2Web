@@ -18,6 +18,8 @@ from req2web_runtime.phase4_local_qwen import (
     P4R2_PROJECTION_REVISION,
     P4R3_PILOT_ID,
     P4R3_PROMPT_REVISION,
+    P4R4_PILOT_ID,
+    P4R4_PROMPT_REVISION,
     PilotSupervisorReceipt,
     Phase4LocalQwenContractError,
     Phase4LocalQwenPilotRunner,
@@ -27,6 +29,7 @@ from req2web_runtime.phase4_local_qwen import (
     load_prepared_local_qwen_pilot,
     load_p4r2_policy_revision,
     load_p4r3_policy_revision,
+    load_p4r4_policy_revision,
     make_canonical_identity,
     persist_pilot_outcome,
     persist_supervisor_receipt,
@@ -80,6 +83,14 @@ def _default_policies() -> tuple[NodeProjectionPolicy, ...]:
     return _policies(prompt_revision=P4R3_PROMPT_REVISION, config_revision="p4-03r3-config-v1")
 
 
+def _r3_policies() -> tuple[NodeProjectionPolicy, ...]:
+    return _default_policies()
+
+
+def _r4_policies() -> tuple[NodeProjectionPolicy, ...]:
+    return _policies(prompt_revision=P4R4_PROMPT_REVISION, config_revision="p4-03r4-config-v1")
+
+
 def _offline_process() -> None:
     os.environ["HF_HUB_OFFLINE"] = "1"
     os.environ["TRANSFORMERS_OFFLINE"] = "1"
@@ -107,6 +118,13 @@ def build_parser() -> argparse.ArgumentParser:
         choices=CHANGE_REASONS,
         help="Explicitly authorize one new v2 envelope after a first node-local failure.",
     )
+    for command in (prepare, run):
+        command.add_argument(
+            "--pilot",
+            choices=("r2", "r3", "r4"),
+            default="r4",
+            help="Explicit pilot revision; the default is the independent R4 pilot.",
+        )
     return parser
 
 
@@ -132,16 +150,19 @@ def main(argv: list[str] | None = None) -> int:
     b_input = synthetic_commerce_b_input()
     try:
         if args.command == "prepare":
-            r3_policy, _ = load_p4r3_policy_revision()
+            if args.pilot == "r2":
+                policy_kwargs = {"r2_policy": load_p4r2_policy_revision()[0], "pilot_id": P4R2_PILOT_ID, "policies": _r2_historical_policies()}
+            elif args.pilot == "r3":
+                policy_kwargs = {"r3_policy": load_p4r3_policy_revision()[0], "pilot_id": P4R3_PILOT_ID, "policies": _r3_policies()}
+            else:
+                policy_kwargs = {"r4_policy": load_p4r4_policy_revision()[0], "pilot_id": P4R4_PILOT_ID, "policies": _r4_policies()}
             binding, policies, profile, manifest = prepare_local_qwen_pilot(
                 model_root=args.model_root,
                 integrity_evidence=args.integrity_evidence,
                 result_root=args.result_root,
                 case_binding=build_synthetic_case_binding(b_input),
-                policies=_default_policies(),
-                pilot_id=P4R3_PILOT_ID,
                 gpu_facts=probe_local_gpu_facts(),
-                r3_policy=r3_policy,
+                **policy_kwargs,
             )
             print(json.dumps({
                 "status": manifest.status,
@@ -157,13 +178,18 @@ def main(argv: list[str] | None = None) -> int:
             }, ensure_ascii=False, sort_keys=True))
             return 0
 
-        r3_policy, _ = load_p4r3_policy_revision()
+        if args.pilot == "r2":
+            policy_kwargs = {"r2_policy": load_p4r2_policy_revision()[0]}
+        elif args.pilot == "r3":
+            policy_kwargs = {"r3_policy": load_p4r3_policy_revision()[0]}
+        else:
+            policy_kwargs = {"r4_policy": load_p4r4_policy_revision()[0]}
         binding, policies, profile, manifest = load_prepared_local_qwen_pilot(
             model_root=args.model_root,
             integrity_evidence=args.integrity_evidence,
             result_root=args.result_root,
             b_input=b_input,
-            r3_policy=r3_policy,
+            **policy_kwargs,
         )
         lease = acquire_pilot_execution_lease(
             result_root=args.result_root,
