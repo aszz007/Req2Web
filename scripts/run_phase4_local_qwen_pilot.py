@@ -13,6 +13,9 @@ from req2web_runtime.phase4_local_qwen import (
     CHANGE_REASONS,
     NodeProjectionPolicy,
     OUTCOME_SCHEMA_VERSION,
+    P4R2_PILOT_ID,
+    P4R2_PROMPT_REVISION,
+    P4R2_PROJECTION_REVISION,
     PilotSupervisorReceipt,
     Phase4LocalQwenContractError,
     Phase4LocalQwenPilotRunner,
@@ -20,6 +23,7 @@ from req2web_runtime.phase4_local_qwen import (
     acquire_pilot_execution_lease,
     build_synthetic_case_binding,
     load_prepared_local_qwen_pilot,
+    load_p4r2_policy_revision,
     make_canonical_identity,
     persist_pilot_outcome,
     persist_supervisor_receipt,
@@ -57,6 +61,9 @@ def _default_policies() -> tuple[NodeProjectionPolicy, ...]:
             prohibited_categories=prohibited,
             field_caps=caps,
             upstream_required_node_ids=upstream[node_id],
+            projection_revision=P4R2_PROJECTION_REVISION,
+            prompt_template_revision=P4R2_PROMPT_REVISION,
+            config_revision="p4-03r2-config-v1",
         )
         for node_id in ("F1", "F2", "F3", "F4")
     )
@@ -82,7 +89,6 @@ def build_parser() -> argparse.ArgumentParser:
     commands = parser.add_subparsers(dest="command", required=True)
     prepare = commands.add_parser("prepare", help="Live-validate and write the no-run pre-call manifest.")
     _common_arguments(prepare)
-    prepare.add_argument("--pilot-id", default="p4-03-local-qwen-9b")
     run = commands.add_parser("run", help="Revalidate, explicitly load, and execute the bounded pilot.")
     _common_arguments(run)
     run.add_argument(
@@ -115,14 +121,16 @@ def main(argv: list[str] | None = None) -> int:
     b_input = synthetic_commerce_b_input()
     try:
         if args.command == "prepare":
+            r2_policy, _ = load_p4r2_policy_revision()
             binding, policies, profile, manifest = prepare_local_qwen_pilot(
                 model_root=args.model_root,
                 integrity_evidence=args.integrity_evidence,
                 result_root=args.result_root,
                 case_binding=build_synthetic_case_binding(b_input),
                 policies=_default_policies(),
-                pilot_id=args.pilot_id,
+                pilot_id=P4R2_PILOT_ID,
                 gpu_facts=probe_local_gpu_facts(),
+                r2_policy=r2_policy,
             )
             print(json.dumps({
                 "status": manifest.status,
@@ -138,11 +146,13 @@ def main(argv: list[str] | None = None) -> int:
             }, ensure_ascii=False, sort_keys=True))
             return 0
 
+        r2_policy, _ = load_p4r2_policy_revision()
         binding, policies, profile, manifest = load_prepared_local_qwen_pilot(
             model_root=args.model_root,
             integrity_evidence=args.integrity_evidence,
             result_root=args.result_root,
             b_input=b_input,
+            r2_policy=r2_policy,
         )
         lease = acquire_pilot_execution_lease(
             result_root=args.result_root,
@@ -173,6 +183,7 @@ def main(argv: list[str] | None = None) -> int:
                 manifest=runtime.manifest,
                 result_root=args.result_root,
                 b_input=runtime.b_input,
+                model_root=args.model_root,
                 backend=backend,
                 source_kind="real_local_qwen",
                 load_receipt=runtime.load_receipt,

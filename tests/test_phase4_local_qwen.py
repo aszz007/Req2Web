@@ -39,6 +39,7 @@ from req2web_runtime.phase4_local_qwen import (
     LocalQwenLoadReceipt,
     LocalQwenProfile,
     NodeProjectionPolicy,
+    P4R2ResultRootBinding,
     Phase4LocalQwenContractError,
     Phase4LocalQwenPilotRunner,
     PilotBinding,
@@ -54,7 +55,9 @@ from req2web_runtime.phase4_local_qwen import (
     create_scripted_fixture_backend,
     derive_node_input,
     prepare_local_qwen_pilot,
+    load_p4r2_policy_revision,
     validate_model_inventory_metadata,
+    validate_p4r2_live_binding,
 )
 
 
@@ -218,6 +221,36 @@ def _prepare_tiny_artifact(parent: Path):
             "LANGSMITH_TRACING": "0",
             "LANGCHAIN_TRACING_V2": "0",
         },
+    )
+    return model_root, integrity_evidence, result_root, b_input, *prepared
+
+
+def _prepare_tiny_r2_artifact(parent: Path):
+    model_root, integrity_evidence = _write_fake_integrity(parent)
+    b_input = synthetic_commerce_b_input()
+    result_root = parent / "prepared-r2"
+    r2_policy, _ = load_p4r2_policy_revision()
+    prepared = prepare_local_qwen_pilot(
+        model_root=model_root,
+        integrity_evidence=integrity_evidence,
+        result_root=result_root,
+        case_binding=build_synthetic_case_binding(b_input),
+        policies=pilot_script._default_policies(),
+        pilot_id=r2_policy.pilot_id,
+        runtime_versions={
+            "transformers": p4q.TRANSFORMERS_VERSION,
+            "torch": p4q.TORCH_VERSION,
+            "bitsandbytes": p4q.BITSANDBYTES_VERSION,
+            "accelerate": p4q.ACCELERATE_VERSION,
+        },
+        gpu_facts=_fake_gpu_facts(),
+        environment={
+            "HF_HUB_OFFLINE": "1",
+            "TRANSFORMERS_OFFLINE": "1",
+            "LANGSMITH_TRACING": "0",
+            "LANGCHAIN_TRACING_V2": "0",
+        },
+        r2_policy=r2_policy,
     )
     return model_root, integrity_evidence, result_root, b_input, *prepared
 
@@ -1131,6 +1164,428 @@ class Phase4LocalQwenTests(unittest.TestCase):
                         envelope["output_contract"]["use_case_ref_rule"],
                     )
 
+    def test_r2_policy_is_canonical_and_rejects_extra_key_and_bool_injection(self):
+        policy, raw = load_p4r2_policy_revision()
+        self.assertEqual(policy.canonical_bytes(), raw)
+        self.assertEqual(
+            policy.authority_semantics,
+            "frozen_owner_approval_record_not_live_self_authority",
+        )
+        self.assertEqual(
+            policy.authorized_actions,
+            {
+                "existing_local_model_load_and_generate": True,
+                "local_langgraph_runtime": True,
+            },
+        )
+        payload = policy.to_dict()
+        payload["unexpected"] = True
+        with self.assertRaises(Phase4LocalQwenContractError):
+            type(policy).from_dict(payload)
+        payload = policy.to_dict()
+        payload["prompt"]["f3_interaction_max"] = True
+        with self.assertRaises(Phase4LocalQwenContractError):
+            type(policy).from_dict(payload)
+
+    def test_r2_prepare_writes_direct_projection_and_cross_bound_root_evidence(self):
+        parent = Path.cwd() / ".p4-03-test-results" / f"r2-{len(self._test_roots)}"
+        parent.mkdir(parents=True, exist_ok=False)
+        self._test_roots.append(parent)
+        _, _, result_root, b_input, binding, policies, _, manifest = _prepare_tiny_r2_artifact(parent)
+        self.assertEqual(binding.pilot_id, "p4-03r2-local-qwen-9b")
+        self.assertTrue((result_root / "p4_03r2_policy.json").is_file())
+        self.assertTrue((result_root / "p4_03r2_predecessor_aggregate_ledger.json").is_file())
+        root_binding = P4R2ResultRootBinding.from_bytes(
+            (result_root / "p4_03r2_result_root_binding.json").read_bytes()
+        )
+        self.assertEqual(root_binding.pilot_binding_policy_id, binding.policy_id)
+        validate_p4r2_live_binding(result_root=result_root, pilot=binding, policies=policies)
+        state = phase4_create_authority_state(b_input)
+        upstream = {}
+        for node_id in ("F1", "F2"):
+            output = phase4_synthetic_fixture_output(node_id, state)
+            upstream[node_id] = json.dumps(
+                output,
+                ensure_ascii=False,
+                indent=2 if node_id == "F1" else None,
+                separators=None if node_id == "F1" else (",", ":"),
+            ).encode("utf-8")
+            state = phase4_register_node_output(state, node_id, output)
+        actual = derive_node_input(
+            node_id="F3",
+            b_input_bytes=p4q._canonical_bytes(b_input),
+            upstream_outputs=upstream,
+            authority_state=state,
+            policy=policies[2],
+        )
+        projection = json.loads(actual.decode("utf-8"))
+        self.assertEqual(projection["input_schema_version"], p4q.P4R2_NODE_INPUT_SCHEMA_VERSION)
+        self.assertIsInstance(projection["canonical_b_input"], dict)
+        self.assertIsInstance(projection["upstream"][0]["output"], dict)
+        self.assertEqual(projection["canonical_b_input_sha256"], p4q._sha256(p4q._canonical_bytes(projection["canonical_b_input"])))
+        self.assertEqual(projection["upstream"][0]["raw_sha256"], p4q._sha256(p4q._decode_b64(projection["upstream"][0]["raw_b64"], "test.raw_b64")))
+        self.assertEqual(
+            projection["canonical_b_input_identity"],
+            {
+                "sha256": p4q._sha256(p4q._canonical_bytes(projection["canonical_b_input"])),
+                "byte_length": len(p4q._canonical_bytes(projection["canonical_b_input"])),
+                "revision": p4q.P4R2_READABLE_JSON_IDENTITY_REVISION,
+            },
+        )
+        self.assertEqual(
+            projection["upstream"][0]["canonical_identity"],
+            {
+                "sha256": p4q._sha256(p4q._canonical_bytes(projection["upstream"][0]["output"])),
+                "byte_length": len(p4q._canonical_bytes(projection["upstream"][0]["output"])),
+                "revision": p4q.P4R2_READABLE_JSON_IDENTITY_REVISION,
+            },
+        )
+        self.assertNotEqual(
+            projection["upstream"][0]["raw_sha256"],
+            projection["upstream"][0]["canonical_identity"]["sha256"],
+        )
+        f1_prompt = json.loads(build_prompt_v1(node_id="F1", input_bytes=actual, policy=policies[0], profile=manifest.profile and LocalQwenProfile.from_dict(manifest.profile)).decode("utf-8"))
+        f3_prompt = json.loads(build_prompt_v1(node_id="F3", input_bytes=actual, policy=policies[2], profile=LocalQwenProfile.from_dict(manifest.profile)).decode("utf-8"))
+        f1_guidance = "\n".join(f1_prompt["instructions"])
+        f3_guidance = "\n".join(f3_prompt["instructions"])
+        self.assertIn("input control and a submit/enter trigger", f1_guidance)
+        self.assertIn("at most 4 interactions", f3_guidance)
+        self.assertIn("not a global F3 schema rule", f3_guidance)
+        for semantic in ("search/filter", "checkout open", "submit", "validation recovery"):
+            self.assertIn(semantic, f3_guidance)
+        self.assertEqual(f3_prompt["template_revision"], p4q.P4R2_PROMPT_REVISION)
+        runner = Phase4LocalQwenPilotRunner(
+            pilot=binding,
+            policies=policies,
+            profile=LocalQwenProfile.from_dict(manifest.profile),
+            manifest=manifest,
+            result_root=result_root,
+            b_input=b_input,
+            backend=create_scripted_fixture_backend(_fixture_bytes(b_input), result_root=result_root),
+        )
+        self.assertIsNone(runner.run_node_local(node_id="F1").failure_code)
+        action = json.loads(next(result_root.rglob("node_d17_action.json")).read_text(encoding="utf-8"))
+        self.assertEqual(action["prompt_revision"], p4q.P4R2_PROMPT_REVISION)
+        self.assertIn(p4q.P4R2_PROJECTION_REVISION, action["input_view_ref"]["ref_revision"])
+
+    def test_r2_shared_budget_cannot_reset_across_result_roots(self):
+        parent = Path.cwd() / ".p4-03-test-results" / f"r2-shared-{len(self._test_roots)}"
+        parent.mkdir(parents=True, exist_ok=False)
+        self._test_roots.append(parent)
+        model_root, integrity, _, b_input, binding_one, _, profile_one, _ = _prepare_tiny_r2_artifact(parent)
+        policy, policy_raw = load_p4r2_policy_revision()
+        result_two = parent / "prepared-r2-second"
+        binding_two, _, profile_two, _ = prepare_local_qwen_pilot(
+            model_root=model_root,
+            integrity_evidence=integrity,
+            result_root=result_two,
+            case_binding=build_synthetic_case_binding(b_input),
+            policies=pilot_script._default_policies(),
+            pilot_id=policy.pilot_id,
+            runtime_versions={
+                "transformers": p4q.TRANSFORMERS_VERSION,
+                "torch": p4q.TORCH_VERSION,
+                "bitsandbytes": p4q.BITSANDBYTES_VERSION,
+                "accelerate": p4q.ACCELERATE_VERSION,
+            },
+            gpu_facts=_fake_gpu_facts(),
+            environment={
+                "HF_HUB_OFFLINE": "1",
+                "TRANSFORMERS_OFFLINE": "1",
+                "LANGSMITH_TRACING": "0",
+                "LANGCHAIN_TRACING_V2": "0",
+            },
+            r2_policy=policy,
+        )
+        p4q._reserve_p4r2_aggregate_generate_entry(
+            model_root=model_root,
+            policy_raw=policy_raw,
+            pilot=binding_one,
+            profile=profile_one,
+            node_id="F1",
+            call_kind="node_local",
+            run_id="run-one",
+        )
+        p4q._reserve_p4r2_aggregate_generate_entry(
+            model_root=model_root,
+            policy_raw=policy_raw,
+            pilot=binding_two,
+            profile=profile_two,
+            node_id="F1",
+            call_kind="node_local",
+            run_id="run-two",
+        )
+        with self.assertRaisesRegex(
+            Phase4LocalQwenContractError,
+            "shared node-local budget is exhausted",
+        ):
+            p4q._reserve_p4r2_aggregate_generate_entry(
+                model_root=model_root,
+                policy_raw=policy_raw,
+                pilot=binding_two,
+                profile=profile_two,
+                node_id="F1",
+                call_kind="node_local",
+                run_id="run-three",
+            )
+        shared = p4q._validate_p4r2_aggregate_budget(
+            model_root=model_root,
+            policy_raw=policy_raw,
+            pilot=binding_two,
+            profile=profile_two,
+        )
+        self.assertEqual(shared.node_local_generate_entry_reservations["F1"], 2)
+        self.assertEqual(shared.node_total_generate_entry_reservations["F1"], 2)
+
+    def test_r2_aggregate_rejects_resigned_invalid_integrated_decomposition(self):
+        parent = Path.cwd() / ".p4-03-test-results" / f"r2-ledger-invariant-{len(self._test_roots)}"
+        parent.mkdir(parents=True, exist_ok=False)
+        self._test_roots.append(parent)
+        model_root, _, _, _, binding, _, profile, _ = _prepare_tiny_r2_artifact(parent)
+        _, policy_raw = load_p4r2_policy_revision()
+        ledger = p4q._validate_p4r2_aggregate_budget(
+            model_root=model_root,
+            policy_raw=policy_raw,
+            pilot=binding,
+            profile=profile,
+        )
+
+        forged_payloads = []
+        no_integrated_run = ledger.to_dict()
+        no_integrated_run["node_total_generate_entry_reservations"]["F1"] = 1
+        forged_payloads.append(no_integrated_run)
+
+        non_prefix = ledger.to_dict()
+        non_prefix["integrated_run_reservations"] = 1
+        non_prefix["integrated_run_owner"] = {
+            "run_id": "resigned-integrated-run",
+            "result_root_marker": binding.result_root_marker,
+        }
+        non_prefix["node_total_generate_entry_reservations"]["F1"] = 1
+        non_prefix["node_total_generate_entry_reservations"]["F3"] = 1
+        forged_payloads.append(non_prefix)
+
+        delta_two = ledger.to_dict()
+        delta_two["integrated_run_reservations"] = 1
+        delta_two["integrated_run_owner"] = {
+            "run_id": "resigned-integrated-run",
+            "result_root_marker": binding.result_root_marker,
+        }
+        delta_two["node_total_generate_entry_reservations"]["F1"] = 2
+        forged_payloads.append(delta_two)
+
+        for payload in forged_payloads:
+            with self.subTest(total=payload["node_total_generate_entry_reservations"]):
+                payload["generate_entry_reservation_total"] = sum(
+                    payload["node_total_generate_entry_reservations"].values()
+                )
+                payload["ledger_id"] = p4q._sha256(
+                    p4q._canonical_bytes(
+                        {key: value for key, value in payload.items() if key != "ledger_id"}
+                    )
+                )
+                with self.assertRaises(Phase4LocalQwenContractError):
+                    p4q.P4R2AggregateBudgetLedger.from_dict(payload)
+
+    def test_r2_fake_real_runner_reserves_after_pre_call_and_shares_one_integrated_slot(self):
+        base = Path.cwd() / ".p4-03-test-results" / f"r2-real-order-{len(self._test_roots)}"
+        base.mkdir(parents=True, exist_ok=False)
+        self._test_roots.append(base)
+
+        class Sink:
+            def write(self, value):
+                return len(value)
+
+            def flush(self):
+                return None
+
+        class ControlledProcess:
+            stdin = Sink()
+
+            def __init__(self, pid):
+                self.pid = pid
+
+            @staticmethod
+            def poll():
+                return None
+
+        loaded_facts = {
+            "model_class": "Qwen3_5ForConditionalGeneration",
+            "processor_class": "Qwen3VLProcessor",
+            "is_loaded_in_4bit": True,
+            "hf_device_map": {"": "0"},
+            "parameter_devices": ["cuda:0"],
+            "compute_dtypes": ["torch.bfloat16"],
+            "cpu_offload": False,
+            "device": "cuda:0",
+        }
+
+        def make_controlled_runner(parent, worker_id, pid):
+            parent.mkdir()
+            model_root, _, result_root, b_input, binding, policies, profile, manifest = _prepare_tiny_r2_artifact(parent)
+            lease = acquire_pilot_execution_lease(
+                result_root=result_root, pilot=binding, manifest=manifest
+            )
+            claim = p4q._acquire_runtime_start_claim(result_root=result_root, lease=lease)
+            receipt = LocalQwenLoadReceipt.create(
+                manifest=manifest,
+                pilot=binding,
+                profile=profile,
+                loaded_facts=loaded_facts,
+            )
+            object.__setattr__(receipt, "_real_runtime_capability", p4q._REAL_RUNTIME_CAPABILITY)
+            backend = SupervisedLocalQwenBackend(
+                process=ControlledProcess(pid),
+                messages=queue.Queue(),
+                stderr_capture=p4q._WorkerStderrCapture(),
+                profile=profile,
+                worker_id=worker_id,
+                loaded_facts=loaded_facts,
+                capability=p4q._REAL_RUNTIME_CAPABILITY,
+            )
+            runner = Phase4LocalQwenPilotRunner(
+                pilot=binding,
+                policies=policies,
+                profile=profile,
+                manifest=manifest,
+                result_root=result_root,
+                b_input=b_input,
+                model_root=model_root,
+                backend=backend,
+                source_kind="real_local_qwen",
+                load_receipt=receipt,
+                execution_lease=lease,
+                runtime_start_claim=claim,
+            )
+            return model_root, result_root, b_input, binding, profile, backend, runner
+
+        _, rejected_root, _, _, _, rejected_backend, rejected_runner = make_controlled_runner(
+            base / "rejected", "worker-r2-rejected", 6101
+        )
+        reserve_observed_pre_call = []
+
+        def reject_reserve(**_):
+            reserve_observed_pre_call.append(bool(list(rejected_root.rglob("pre_call.json"))))
+            raise Phase4LocalQwenContractError("synthetic shared reserve rejection")
+
+        with patch.object(rejected_backend, "generate", return_value=b"") as generate, patch.object(
+            p4q, "_reserve_p4r2_aggregate_generate_entry", side_effect=reject_reserve
+        ):
+            with self.assertRaisesRegex(Phase4LocalQwenContractError, "synthetic shared reserve rejection"):
+                rejected_runner.run_node_local(node_id="F1")
+        self.assertEqual(reserve_observed_pre_call, [True])
+        generate.assert_not_called()
+
+        model_root, result_root, b_input, binding, profile, backend, runner = make_controlled_runner(
+            base / "integrated", "worker-r2-integrated", 6102
+        )
+        fixture = _fixture_bytes(b_input)
+        original_reserve = p4q._reserve_p4r2_aggregate_generate_entry
+        pre_call_counts = []
+
+        def observe_reserve(**kwargs):
+            current_count = len(list(result_root.rglob("pre_call.json")))
+            self.assertGreaterEqual(current_count, len(pre_call_counts) + 1)
+            pre_call_counts.append(current_count)
+            return original_reserve(**kwargs)
+
+        with patch.object(backend, "generate", side_effect=fixture + fixture) as generate, patch.object(
+            p4q, "_reserve_p4r2_aggregate_generate_entry", side_effect=observe_reserve
+        ):
+            for node_id in ("F1", "F2", "F3", "F4"):
+                self.assertIsNone(runner.run_node_local(node_id=node_id).failure_code)
+            runner.run_integrated()
+
+        _, policy_raw = load_p4r2_policy_revision()
+        shared = p4q._validate_p4r2_aggregate_budget(
+            model_root=model_root,
+            policy_raw=policy_raw,
+            pilot=binding,
+            profile=profile,
+        )
+        self.assertEqual(generate.call_count, 8)
+        self.assertEqual(len(pre_call_counts), 8)
+        self.assertEqual(shared.integrated_run_reservations, 1)
+        self.assertEqual(
+            shared.node_local_generate_entry_reservations,
+            {node_id: 1 for node_id in ("F1", "F2", "F3", "F4")},
+        )
+        self.assertEqual(
+            shared.node_total_generate_entry_reservations,
+            {node_id: 2 for node_id in ("F1", "F2", "F3", "F4")},
+        )
+
+    def test_r2_f3_limit_is_pilot_local_and_fail_closed(self):
+        b_input = synthetic_commerce_b_input()
+        state = phase4_create_authority_state(b_input)
+        for node_id in ("F1", "F2"):
+            output = phase4_synthetic_fixture_output(node_id, state)
+            state = phase4_register_node_output(state, node_id, output)
+        f3 = phase4_synthetic_fixture_output("F3", state)
+        for suffix in ("extra-one", "extra-two"):
+            extra = copy.deepcopy(f3["interactions"][0])
+            extra["local_id"] = f"interaction-{suffix}"
+            f3["interactions"].append(extra)
+        raw = json.dumps(f3, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+        self.assertEqual(
+            len(p4q._validate_node_output_json(
+                raw,
+                node_id="F3",
+                authority_state=state,
+                policy=_policies()[2],
+            )["interactions"]),
+            5,
+        )
+        with self.assertRaisesRegex(
+            Phase4LocalQwenContractError,
+            "R2 pilot-local F3 interaction limit exceeded",
+        ):
+            p4q._validate_node_output_json(
+                raw,
+                node_id="F3",
+                authority_state=state,
+                policy=pilot_script._default_policies()[2],
+            )
+
+    def test_r2_live_binding_rejects_cross_pilot_and_old_ledger_drift(self):
+        parent = Path.cwd() / ".p4-03-test-results" / f"r2-drift-{len(self._test_roots)}"
+        parent.mkdir(parents=True, exist_ok=False)
+        self._test_roots.append(parent)
+        _, _, result_root, _, binding, policies, _, _ = _prepare_tiny_r2_artifact(parent)
+        binding_payload = json.loads((result_root / "p4_03r2_result_root_binding.json").read_text(encoding="utf-8"))
+        binding_payload["pilot_id"] = "p4-03r2-other-pilot"
+        binding_payload["binding_id"] = p4q._sha256(p4q._canonical_bytes({key: value for key, value in binding_payload.items() if key != "binding_id"}))
+        (result_root / "p4_03r2_result_root_binding.json").write_bytes(p4q._canonical_bytes(binding_payload))
+        with self.assertRaises(Phase4LocalQwenContractError):
+            validate_p4r2_live_binding(result_root=result_root, pilot=binding, policies=policies)
+        original_binding = P4R2ResultRootBinding.create(
+            policy_raw=(result_root / "p4_03r2_policy.json").read_bytes(),
+            ledger_raw=(result_root / "p4_03r2_predecessor_aggregate_ledger.json").read_bytes(),
+            pilot=binding,
+            result_root_marker=binding.result_root_marker,
+        )
+        (result_root / "p4_03r2_result_root_binding.json").write_bytes(original_binding.canonical_bytes())
+        drift = parent / "drifted-ledger.json"
+        drift.write_bytes((result_root / "p4_03r2_predecessor_aggregate_ledger.json").read_bytes() + b" ")
+        with patch.object(p4q, "P4R2_LEDGER_PATH", drift):
+            with self.assertRaises(Phase4LocalQwenContractError):
+                validate_p4r2_live_binding(result_root=result_root, pilot=binding, policies=policies)
+
+    def test_real_start_requires_r2_binding_before_popen(self):
+        parent = Path.cwd() / ".p4-03-test-results" / f"r2-start-{len(self._test_roots)}"
+        parent.mkdir(parents=True, exist_ok=False)
+        self._test_roots.append(parent)
+        model_root, integrity, result_root, _, _, _, _, _ = _prepare_tiny_artifact(parent)
+        with patch("req2web_runtime.phase4_local_qwen.subprocess.Popen") as popen:
+            with self.assertRaises(Phase4LocalQwenContractError):
+                p4q.start_supervised_local_qwen_runtime(
+                    model_root=model_root,
+                    integrity_evidence=integrity,
+                    result_root=result_root,
+                    load_timeout_seconds=1,
+                )
+            popen.assert_not_called()
+
     def test_load_receipt_is_separate_from_pre_call_action_state(self):
         _, _, profile, binding, manifest = _binding_profile_manifest()
         receipt = LocalQwenLoadReceipt.create(
@@ -1670,7 +2125,7 @@ class Phase4LocalQwenTests(unittest.TestCase):
             _policies,
             profile,
             manifest,
-        ) = _prepare_tiny_artifact(root)
+        ) = _prepare_tiny_r2_artifact(root)
         lease = acquire_pilot_execution_lease(
             result_root=result_root, pilot=binding, manifest=manifest
         )
