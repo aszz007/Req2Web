@@ -836,11 +836,19 @@ class Phase4LocalQwenTests(unittest.TestCase):
                 'literal entity_type value "interaction"',
                 "trigger_component_local_id",
                 "upstream F2 state local IDs",
+                "distinct use-case and state transitions",
+                "component-by-state Cartesian product",
+                "automatically create an interaction for every visible component",
+                "do not repeat equivalent actions",
+                "without fixing an exact interaction count or weakening reference validation",
             ),
             "F4": (
                 'literal entity_type value "candidate_acceptance_check"',
                 "authority_bindings.canonical_b_use_case_refs",
                 "authority_bindings.f2_state_refs",
+                "complete coverage of every canonical use case",
+                "state-by-use-case Cartesian product",
+                "do not fix an exact check count or weaken use-case or state-ref validation",
             ),
         }
         expected_keys = {
@@ -888,6 +896,16 @@ class Phase4LocalQwenTests(unittest.TestCase):
                     self.assertNotRegex(
                         guidance,
                         r"\b\d+\s+(?:sections|components)\b|\bexactly\s+\d+\b",
+                    )
+                if policy.node_id in {"F3", "F4"}:
+                    self.assertNotRegex(
+                        guidance,
+                        r"\b\d+\s+(?:interactions|acceptance_checks|checks)\b|\bexactly\s+\d+\b",
+                    )
+                if policy.node_id == "F4":
+                    self.assertIn(
+                        "collectively cover every use case",
+                        envelope["output_contract"]["use_case_ref_rule"],
                     )
 
     def test_load_receipt_is_separate_from_pre_call_action_state(self):

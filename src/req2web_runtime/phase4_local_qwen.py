@@ -126,10 +126,15 @@ _NODE_PROMPT_GUIDANCE: dict[str, tuple[str, ...]] = {
     "F3": (
         "Generate only interactions; every object must use the literal entity_type value \"interaction\" and a new F3-owned local_id that does not reuse F1 or F2 local IDs.",
         "trigger_component_local_id must copy an exact upstream F1 component local_id; source_state_local_id and target_state_local_id must copy exact upstream F2 state local IDs.",
+        "Generate only the interactions necessary to represent distinct use-case and state transitions required by the current input.",
+        "Do not enumerate a component-by-state Cartesian product, do not automatically create an interaction for every visible component, and do not repeat equivalent actions.",
+        "Preserve every distinct interaction required by the requirements and use cases without fixing an exact interaction count or weakening reference validation.",
     ),
     "F4": (
         "Generate only acceptance_checks; every object must use the literal entity_type value \"candidate_acceptance_check\" and a new F4-owned local_id.",
         "Copy use_case_refs only from authority_bindings.canonical_b_use_case_refs in canonical order, and copy state_ref as one exact registry_stable ref from authority_bindings.f2_state_refs.",
+        "Generate only the necessary acceptance checks while retaining complete coverage of every canonical use case and its required acceptance semantics.",
+        "Do not enumerate a state-by-use-case Cartesian product or repeat equivalent checks; do not fix an exact check count or weaken use-case or state-ref validation.",
     ),
 }
 
