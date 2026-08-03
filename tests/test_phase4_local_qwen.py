@@ -325,6 +325,51 @@ def _prepare_tiny_r4_artifact(parent: Path):
     return model_root, integrity_evidence, result_root, b_input, *prepared
 
 
+def _make_r4_action_record(
+    *,
+    profile: LocalQwenProfile,
+    prompt_revision: str,
+    prompt: bytes,
+    prompt_change: Mapping[str, object] | None,
+    attempt_index: int,
+):
+    def ref(ref_type: str, ref_id: str) -> dict[str, object]:
+        return {
+            "ref_type": ref_type,
+            "ref_id": ref_id,
+            "ref_sha256": "sha256:" + "1" * 64,
+            "ref_revision": "test.r4.action.v1",
+        }
+
+    return p4q.NodeD17ActionRecord.create(
+        pilot_id=p4q.P4R4_PILOT_ID,
+        run_id="p4-03r4-action-test",
+        case_id="path3-commerce-checkout",
+        request_id="p4-02a-synthetic-request-001",
+        node_id="F1",
+        attempt_index=attempt_index,
+        call_kind="node_local",
+        profile=profile,
+        manifest_ref=ref("d17_manifest", "r4-manifest"),
+        policy_ref=ref("d17_policy", "r4-f1-policy"),
+        input_view_ref=ref("d17_input_view", f"r4-f1-input-{attempt_index}"),
+        upstream_refs=(),
+        actual_input=b"{}",
+        prompt_revision=prompt_revision,
+        prompt_change=prompt_change,
+        prompt=prompt,
+        config_revision="p4-03r4-config-v1",
+        config=b"{}",
+        request=b"{}",
+        budget_identity=make_identity(
+            {"pilot_id": p4q.P4R4_PILOT_ID},
+            revision="test.r4.budget.v1",
+        ),
+        source_kind="scripted_test_fixture",
+        runtime_load_ref=None,
+    )
+
+
 def FakeBackend(
     outputs: list[bytes], *, result_root: Path | None = None
 ):
@@ -1410,6 +1455,92 @@ class Phase4LocalQwenTests(unittest.TestCase):
         ):
             self.assertIn(required, guidance)
         self.assertEqual(json.loads(p4q.build_config_bytes(profile=profile, policy=pilot_script._r4_policies()[0]))["max_new_tokens"], 640)
+
+    def test_r4_first_action_envelope_accepts_only_the_r4_v1_revision(self):
+        profile = LocalQwenProfile.create(
+            model_root_identity=make_identity({"r4": "model"}, revision="test.r4.model.v1"),
+            model_inventory_identity=make_identity({"r4": "inventory"}, revision="test.r4.inventory.v1"),
+            model_file_count=1,
+            max_new_tokens=640,
+        )
+        policy = pilot_script._r4_policies()[0]
+        prompt = build_prompt_v1(
+            node_id="F1", input_bytes=b"{}", policy=policy, profile=profile
+        )
+        action = _make_r4_action_record(
+            profile=profile,
+            prompt_revision=p4q.P4R4_PROMPT_REVISION,
+            prompt=prompt,
+            prompt_change=None,
+            attempt_index=1,
+        )
+        self.assertEqual(action.prompt_revision, p4q.P4R4_PROMPT_REVISION)
+        self.assertIsNone(action.prompt_change)
+
+    def test_r4_second_attempt_action_envelope_preserves_v2_prior_failure_binding(self):
+        failure_runner, _, _ = self._runner(FailingBackend([b"not-json"]))
+        prior_failure = failure_runner.run_node_local(node_id="F1")
+        self.assertEqual(prior_failure.failure_code, "node_contract_invalid")
+        profile = LocalQwenProfile.create(
+            model_root_identity=make_identity({"r4": "model"}, revision="test.r4.model.v1"),
+            model_inventory_identity=make_identity({"r4": "inventory"}, revision="test.r4.inventory.v1"),
+            model_file_count=1,
+            max_new_tokens=640,
+        )
+        policy = pilot_script._r4_policies()[0]
+        reason = "output_schema_clarification"
+        prompt = build_prompt_v2(
+            node_id="F1",
+            input_bytes=b"{}",
+            policy=policy,
+            profile=profile,
+            prior_failure=prior_failure,
+            change_reason=reason,
+        )
+        prior_identity = make_identity(
+            prior_failure.to_dict(), revision=p4q.ATTEMPT_RESULT_SCHEMA_VERSION
+        )
+        action = _make_r4_action_record(
+            profile=profile,
+            prompt_revision=p4q.P4R4_PROMPT_V2_REVISION,
+            prompt=prompt,
+            prompt_change={
+                "prior_result_id": prior_failure.result_id,
+                "prior_failure_identity": prior_identity,
+                "change_reason": reason,
+            },
+            attempt_index=2,
+        )
+        self.assertEqual(action.prompt_revision, p4q.P4R4_PROMPT_V2_REVISION)
+        self.assertEqual(action.prompt_change["prior_failure_identity"], prior_identity)
+        self.assertEqual(action.retry_count, 0)
+
+    def test_r4_action_envelope_still_rejects_an_unknown_prompt_revision(self):
+        profile = LocalQwenProfile.create(
+            model_root_identity=make_identity({"r4": "model"}, revision="test.r4.model.v1"),
+            model_inventory_identity=make_identity({"r4": "inventory"}, revision="test.r4.inventory.v1"),
+            model_file_count=1,
+            max_new_tokens=640,
+        )
+        policy = pilot_script._r4_policies()[0]
+        action = _make_r4_action_record(
+            profile=profile,
+            prompt_revision=p4q.P4R4_PROMPT_REVISION,
+            prompt=build_prompt_v1(
+                node_id="F1", input_bytes=b"{}", policy=policy, profile=profile
+            ),
+            prompt_change=None,
+            attempt_index=1,
+        )
+        payload = action.to_dict()
+        payload["prompt_revision"] = "p4-03r4-prompt-v999"
+        payload["action_record_id"] = p4q._sha256(
+            p4q._canonical_bytes(p4q._action_record_root(payload))
+        )
+        with self.assertRaisesRegex(
+            Phase4LocalQwenContractError, "action prompt revision is invalid"
+        ):
+            p4q.NodeD17ActionRecord.from_dict(payload)
 
     def test_r4_prepare_binds_r3_action_evidence_and_uses_separate_shared_aggregate(self):
         parent = Path.cwd() / ".p4-03-test-results" / f"r4-binding-{len(self._test_roots)}"

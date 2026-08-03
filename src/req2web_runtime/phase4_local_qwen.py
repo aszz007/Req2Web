@@ -2718,14 +2718,14 @@ class NodeD17ActionRecord(_CanonicalRecord):
                 raise Phase4LocalQwenContractError(f"NodeD17ActionRecord.{prefix} cannot be empty")
         prompt_revision = _text(data["prompt_revision"], "NodeD17ActionRecord.prompt_revision")
         prompt_payload = _strict_json(decoded["prompt"])
-        if prompt_revision in {"p4-03-prompt-v1", P4R2_PROMPT_REVISION, P4R3_PROMPT_REVISION}:
+        if prompt_revision in {"p4-03-prompt-v1", P4R2_PROMPT_REVISION, P4R3_PROMPT_REVISION, P4R4_PROMPT_REVISION}:
             if (
                 data["prompt_change"] is not None
                 or prompt_payload.get("prompt_schema_version") != f"{P4_03_SCHEMA_PREFIX}.prompt.v1"
                 or prompt_payload.get("template_revision") != prompt_revision
             ):
                 raise Phase4LocalQwenContractError("initial prompt action binding drifted")
-        elif prompt_revision in {"p4-03-prompt-v2", P4R2_PROMPT_V2_REVISION, P4R3_PROMPT_V2_REVISION}:
+        elif prompt_revision in {"p4-03-prompt-v2", P4R2_PROMPT_V2_REVISION, P4R3_PROMPT_V2_REVISION, P4R4_PROMPT_V2_REVISION}:
             change = _exact(
                 data["prompt_change"],
                 ("prior_result_id", "prior_failure_identity", "change_reason"),
