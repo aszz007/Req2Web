@@ -112,6 +112,26 @@ _NODE_OUTPUT_CONTRACTS: dict[str, dict[str, object]] = {
     },
 }
 
+_NODE_PROMPT_GUIDANCE: dict[str, tuple[str, ...]] = {
+    "F1": (
+        "Generate only sections and components: each section entity_type must be the literal \"section\", and each component entity_type must be the literal \"component\".",
+        "Create unique F1-owned local_id values; component_local_ids and section_local_id must reference only local IDs created in this F1 output.",
+    ),
+    "F2": (
+        "Generate only the top-level states array; do not copy, rename, or transform upstream F1 sections or components into state objects.",
+        "Every F2 object must use the literal entity_type value \"state\" and a new F2-owned local_id that does not reuse any F1 section or component local_id.",
+        "Every visible_component_local_ids value must be an exact local_id from upstream F1 components only, never a section or state ID, and the list must preserve F1 component order as a subsequence.",
+    ),
+    "F3": (
+        "Generate only interactions; every object must use the literal entity_type value \"interaction\" and a new F3-owned local_id that does not reuse F1 or F2 local IDs.",
+        "trigger_component_local_id must copy an exact upstream F1 component local_id; source_state_local_id and target_state_local_id must copy exact upstream F2 state local IDs.",
+    ),
+    "F4": (
+        "Generate only acceptance_checks; every object must use the literal entity_type value \"candidate_acceptance_check\" and a new F4-owned local_id.",
+        "Copy use_case_refs only from authority_bindings.canonical_b_use_case_refs in canonical order, and copy state_ref as one exact registry_stable ref from authority_bindings.f2_state_refs.",
+    ),
+}
+
 _ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$")
 _SHA_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
 _HEX_RE = re.compile(r"^[0-9a-f]{64}$")
@@ -2246,6 +2266,31 @@ def _validate_json_bytes(raw: bytes, name: str, *, max_bytes: int | None = None)
     return _strict_json(raw)
 
 
+def _node_prompt_instructions(
+    node_id: str, *, prior_failure_code: str | None = None
+) -> list[str]:
+    instructions = [
+        "Read the separately supplied ACTUAL_NODE_INPUT_JSON bytes.",
+        "Return only one UTF-8 JSON object with the exact keys below.",
+        "Do not emit markdown, fences, explanations, hidden reasoning, extra keys, null placeholders, or a second object.",
+        "Preserve canonical input order and supplied reference identities; never invent a stable ID.",
+        *_NODE_PROMPT_GUIDANCE[node_id],
+    ]
+    if prior_failure_code is not None:
+        instructions.extend(
+            (
+                f"The immutable prior attempt failed with failure_code={prior_failure_code}; correct that failure against the current node-specific contract.",
+                "No prior raw output is included; do not reconstruct, quote, or depend on prior raw content.",
+                "Correct only the recorded contract failure; do not broaden semantics.",
+            )
+        )
+        if prior_failure_code == "node_contract_invalid":
+            instructions.append(
+                "For failure_code=node_contract_invalid, rebuild the output from the current ACTUAL_NODE_INPUT_JSON and obey every literal entity type, local-ID ownership, reference-domain, exact-key, and order rule above."
+            )
+    return instructions
+
+
 def build_prompt_v1(*, node_id: str, input_bytes: bytes, policy: NodeProjectionPolicy, profile: LocalQwenProfile) -> bytes:
     """Build a deterministic canonical JSON prompt envelope for one node."""
 
@@ -2263,12 +2308,7 @@ def build_prompt_v1(*, node_id: str, input_bytes: bytes, policy: NodeProjectionP
         "output_format": "exact_json_object",
         "input_sha256": _sha256(input_bytes),
         "input_byte_length": len(input_bytes),
-        "instructions": [
-            "Read the separately supplied ACTUAL_NODE_INPUT_JSON bytes.",
-            "Return only one UTF-8 JSON object with the exact keys below.",
-            "Do not emit markdown, fences, explanations, hidden reasoning, extra keys, null placeholders, or a second object.",
-            "Preserve canonical input order and supplied reference identities; never invent a stable ID.",
-        ],
+        "instructions": _node_prompt_instructions(node_id),
         "output_contract": _NODE_OUTPUT_CONTRACTS[node_id],
         "model_id": profile.model_id,
         "model_revision": profile.model_revision,
@@ -2301,13 +2341,9 @@ def build_prompt_v2(*, node_id: str, input_bytes: bytes, policy: NodeProjectionP
         "output_format": "exact_json_object",
         "input_sha256": _sha256(input_bytes),
         "input_byte_length": len(input_bytes),
-        "instructions": [
-            "Read the separately supplied ACTUAL_NODE_INPUT_JSON bytes.",
-            "Return only one UTF-8 JSON object with the exact keys below.",
-            "Do not emit markdown, fences, explanations, hidden reasoning, extra keys, null placeholders, or a second object.",
-            "Preserve canonical input order and supplied reference identities; never invent a stable ID.",
-            "Correct only the recorded contract failure; do not broaden semantics.",
-        ],
+        "instructions": _node_prompt_instructions(
+            node_id, prior_failure_code=prior_failure.failure_code
+        ),
         "output_contract": _NODE_OUTPUT_CONTRACTS[node_id],
         "model_id": profile.model_id,
         "model_revision": profile.model_revision,

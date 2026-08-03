@@ -816,6 +816,63 @@ class Phase4LocalQwenTests(unittest.TestCase):
         self.assertIn('ACTUAL_NODE_INPUT_JSON\n{"actual":"node-input"}', processor.model_text)
         self.assertFalse(processor.kwargs["enable_thinking"])
 
+    def test_node_specific_prompts_are_canonical_replayable_and_capped(self):
+        _, policies, profile, _, _ = _binding_profile_manifest()
+        input_bytes = b'{"same":"canonical-input"}'
+        expected_guidance = {
+            "F1": ('literal "section"', 'literal "component"'),
+            "F2": (
+                "new F2-owned local_id",
+                "does not reuse any F1 section or component local_id",
+                "exact local_id from upstream F1 components only",
+                "preserve F1 component order as a subsequence",
+            ),
+            "F3": (
+                'literal entity_type value "interaction"',
+                "trigger_component_local_id",
+                "upstream F2 state local IDs",
+            ),
+            "F4": (
+                'literal entity_type value "candidate_acceptance_check"',
+                "authority_bindings.canonical_b_use_case_refs",
+                "authority_bindings.f2_state_refs",
+            ),
+        }
+        expected_keys = {
+            "prompt_schema_version",
+            "node_id",
+            "template_revision",
+            "output_format",
+            "input_sha256",
+            "input_byte_length",
+            "instructions",
+            "output_contract",
+            "model_id",
+            "model_revision",
+        }
+        for policy in policies:
+            with self.subTest(node_id=policy.node_id):
+                first = build_prompt_v1(
+                    node_id=policy.node_id,
+                    input_bytes=input_bytes,
+                    policy=policy,
+                    profile=profile,
+                )
+                replay = build_prompt_v1(
+                    node_id=policy.node_id,
+                    input_bytes=input_bytes,
+                    policy=policy,
+                    profile=profile,
+                )
+                self.assertEqual(first, replay)
+                envelope = json.loads(first.decode("utf-8"))
+                self.assertEqual(set(envelope), expected_keys)
+                self.assertEqual(p4q._canonical_bytes(envelope), first)
+                self.assertLessEqual(len(first), policy.field_caps["prompt_bytes"])
+                guidance = "\n".join(envelope["instructions"])
+                for fragment in expected_guidance[policy.node_id]:
+                    self.assertIn(fragment, guidance)
+
     def test_load_receipt_is_separate_from_pre_call_action_state(self):
         _, _, profile, binding, manifest = _binding_profile_manifest()
         receipt = LocalQwenLoadReceipt.create(
@@ -1019,13 +1076,16 @@ class Phase4LocalQwenTests(unittest.TestCase):
 
     def test_prompt_v2_requires_immutable_prior_failure(self):
         b_input, policies, profile, binding, manifest = _binding_profile_manifest()
-        runner, _, _ = self._runner(FailingBackend([b"{}"]))
-        result = runner.run_node_local(node_id="F1")
-        self.assertIsNotNone(result.failure_code)
+        fixture = _fixture_bytes(b_input)
+        private_prior_raw = b'{"private_marker":"F2_PRIOR_RAW_MUST_NOT_APPEAR"}'
+        runner, _, _ = self._runner(FailingBackend([fixture[0], private_prior_raw]))
+        self.assertIsNone(runner.run_node_local(node_id="F1").failure_code)
+        result = runner.run_node_local(node_id="F2")
+        self.assertEqual(result.failure_code, "node_contract_invalid")
         prompt = build_prompt_v2(
-            node_id="F1",
+            node_id="F2",
             input_bytes=b'{"input":"same"}',
-            policy=policies[0],
+            policy=policies[1],
             profile=profile,
             prior_failure=result,
             change_reason=CHANGE_REASONS[0],
@@ -1033,8 +1093,15 @@ class Phase4LocalQwenTests(unittest.TestCase):
         envelope = json.loads(prompt.decode("utf-8"))
         self.assertEqual(envelope["prompt_schema_version"], "req2web.phase4.p4_03.prompt.v2")
         self.assertEqual(envelope["prior_failure_identity"]["sha256"], make_identity(result.to_dict(), revision="req2web.phase4.p4_03.attempt_result.v1")["sha256"])
+        self.assertEqual(p4q._canonical_bytes(envelope), prompt)
+        self.assertLessEqual(len(prompt), policies[1].field_caps["prompt_bytes"])
+        guidance = "\n".join(envelope["instructions"])
+        self.assertIn("failure_code=node_contract_invalid", guidance)
+        self.assertIn("new F2-owned local_id", guidance)
+        self.assertIn("rebuild the output from the current ACTUAL_NODE_INPUT_JSON", guidance)
+        self.assertNotIn("F2_PRIOR_RAW_MUST_NOT_APPEAR", prompt.decode("utf-8"))
         with self.assertRaises(Phase4LocalQwenContractError):
-            build_prompt_v2(node_id="F1", input_bytes=b'{"input":"same"}', policy=policies[0], profile=profile, prior_failure=result, change_reason="free_form_tuning")
+            build_prompt_v2(node_id="F2", input_bytes=b'{"input":"same"}', policy=policies[1], profile=profile, prior_failure=result, change_reason="free_form_tuning")
 
     def test_node_local_success_then_fresh_integrated_success_and_raw_first(self):
         b_input = synthetic_commerce_b_input()
