@@ -820,7 +820,12 @@ class Phase4LocalQwenTests(unittest.TestCase):
         _, policies, profile, _, _ = _binding_profile_manifest()
         input_bytes = b'{"same":"canonical-input"}'
         expected_guidance = {
-            "F1": ('literal "section"', 'literal "component"'),
+            "F1": (
+                'literal "section"',
+                'literal "component"',
+                "Avoid redundant sections or components",
+                "without fixing an exact entity count",
+            ),
             "F2": (
                 "new F2-owned local_id",
                 "does not reuse any F1 section or component local_id",
@@ -870,8 +875,20 @@ class Phase4LocalQwenTests(unittest.TestCase):
                 self.assertEqual(p4q._canonical_bytes(envelope), first)
                 self.assertLessEqual(len(first), policy.field_caps["prompt_bytes"])
                 guidance = "\n".join(envelope["instructions"])
+                for fragment in (
+                    "minified compact JSON",
+                    "free-text field concise and non-redundant",
+                    "smallest complete entity collection",
+                    "close every string, array, and object",
+                ):
+                    self.assertIn(fragment, guidance)
                 for fragment in expected_guidance[policy.node_id]:
                     self.assertIn(fragment, guidance)
+                if policy.node_id == "F1":
+                    self.assertNotRegex(
+                        guidance,
+                        r"\b\d+\s+(?:sections|components)\b|\bexactly\s+\d+\b",
+                    )
 
     def test_load_receipt_is_separate_from_pre_call_action_state(self):
         _, _, profile, binding, manifest = _binding_profile_manifest()
@@ -1098,7 +1115,9 @@ class Phase4LocalQwenTests(unittest.TestCase):
         guidance = "\n".join(envelope["instructions"])
         self.assertIn("failure_code=node_contract_invalid", guidance)
         self.assertIn("new F2-owned local_id", guidance)
-        self.assertIn("rebuild the output from the current ACTUAL_NODE_INPUT_JSON", guidance)
+        self.assertIn("rebuild one complete minified JSON object", guidance)
+        self.assertIn("close every string, array, and object", guidance)
+        self.assertNotIn("truncat", guidance.lower())
         self.assertNotIn("F2_PRIOR_RAW_MUST_NOT_APPEAR", prompt.decode("utf-8"))
         with self.assertRaises(Phase4LocalQwenContractError):
             build_prompt_v2(node_id="F2", input_bytes=b'{"input":"same"}', policy=policies[1], profile=profile, prior_failure=result, change_reason="free_form_tuning")

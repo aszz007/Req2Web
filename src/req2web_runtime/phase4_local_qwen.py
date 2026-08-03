@@ -116,6 +116,7 @@ _NODE_PROMPT_GUIDANCE: dict[str, tuple[str, ...]] = {
     "F1": (
         "Generate only sections and components: each section entity_type must be the literal \"section\", and each component entity_type must be the literal \"component\".",
         "Create unique F1-owned local_id values; component_local_ids and section_local_id must reference only local IDs created in this F1 output.",
+        "Avoid redundant sections or components; include only the entities needed to satisfy the current input and contract without fixing an exact entity count.",
     ),
     "F2": (
         "Generate only the top-level states array; do not copy, rename, or transform upstream F1 sections or components into state objects.",
@@ -2273,6 +2274,10 @@ def _node_prompt_instructions(
         "Read the separately supplied ACTUAL_NODE_INPUT_JSON bytes.",
         "Return only one UTF-8 JSON object with the exact keys below.",
         "Do not emit markdown, fences, explanations, hidden reasoning, extra keys, null placeholders, or a second object.",
+        "Serialize the answer as minified compact JSON with no unnecessary spaces, indentation, or line breaks.",
+        "Keep every free-text field concise and non-redundant while preserving its required meaning.",
+        "Generate the smallest complete entity collection that satisfies the current input and contract; do not omit entities required by references, ordering, or coverage.",
+        "Within the fixed output budget, prioritize syntactic completeness: close every string, array, and object before ending the response.",
         "Preserve canonical input order and supplied reference identities; never invent a stable ID.",
         *_NODE_PROMPT_GUIDANCE[node_id],
     ]
@@ -2286,7 +2291,7 @@ def _node_prompt_instructions(
         )
         if prior_failure_code == "node_contract_invalid":
             instructions.append(
-                "For failure_code=node_contract_invalid, rebuild the output from the current ACTUAL_NODE_INPUT_JSON and obey every literal entity type, local-ID ownership, reference-domain, exact-key, and order rule above."
+                "For failure_code=node_contract_invalid, rebuild one complete minified JSON object from the current ACTUAL_NODE_INPUT_JSON, close every string, array, and object, and obey every literal entity type, local-ID ownership, reference-domain, exact-key, and order rule above."
             )
     return instructions
 
