@@ -433,6 +433,73 @@ every nested identity, check the case/request/contract bindings, and confirm
 the same source-kind and node revision. Resume, routing, and composition are
 blocked for any status other than `verified`.
 
+#### 5.4.1 P4-01a F4 generic audit-ref normalization amendment
+
+The project owner approves one versioned deterministic compatibility layer for
+F4 entity-level generic audit-only `refs`. Immutable Provider/model raw bytes
+remain the source artifact and are never overwritten. If, and only if, the
+exact raw F4 payload fails because an `acceptance_checks/*/refs` array contains
+valid, unique, same-case refs in a noncanonical order, the
+`req2web.phase4.f4_generic_audit_ref_normalization.p4_01a.v1` normalizer may
+sort that array by the exact `(ref_type, ref_id, ref_revision)` tuple.
+
+The normalizer uses an exact JSON Pointer allowlist. It may not add, remove,
+deduplicate, rewrite, infer, or replace a ref. It may not touch
+`acceptance_checks` order, `use_case_refs`, `state_ref`, F1/F2/F3 semantic
+arrays, mappings, descriptions, IDs, or any final candidate field. Duplicate,
+missing, extra, unknown, wrong-revision, dangling, cross-case, cross-request,
+or prohibited refs fail closed. A normalized output must pass the complete F4
+validator and registry with no schema relaxation.
+
+Every normalization produces an independently replayable receipt binding the
+raw-byte identity, normalized-output identity, owning contract identity,
+normalizer revision, exact changed JSON Pointers, and the before/after ref
+tuple orders. Downstream registry, composition, and assembler use only the
+receipt-validated normalized identity. This operation performs zero model
+calls, does not reset a call budget, is not the A-07 one-repair, and is not
+raw-model first-pass success.
+
+#### 5.4.2 P4-01b F4 ownership/shape normalization amendment
+
+The project owner also approves one separate, versioned deterministic
+compatibility layer for the exact F4 representation drift observed in the
+bounded fresh integrated pilot. P4-01b is not an expansion of P4-01a and
+cannot alter the meaning or replay rules of P4-01a.
+
+For an immutable raw F4 payload, and only at the exact allowlisted pointers:
+
+* A string in `acceptance_checks/*/use_case_refs/*` may be expanded only when
+  it is an exact, unique same-case canonical B use-case ID. The resulting Ref
+  must be the exact canonical B use-case Ref, including its owning revision.
+* A string in `acceptance_checks/*/state_ref` may be expanded only when it is
+  an exact, unique same-run F2 registered stable ID. The resulting Ref must be
+  the exact `registry_stable` Ref from the live authority bindings.
+* A generic F4 `refs` entry may be rebound only when it is one of the exact
+  observed legacy aliases for its owning F1/F2/F3 entity type and revision
+  suffix, and its ID has exactly one match in the same-run cumulative
+  registry. Canonical B refs that are already exact are preserved.
+
+P4-01b must reject arbitrary ID-only correction, wrong aliases, mixed object
+and string shapes, duplicate or dangling targets, cross-node or cross-run
+targets, and any change outside the allowlist. It must preserve every
+`ref_id`, acceptance-check order, semantic array order, description, local ID,
+and non-allowlisted canonical tree value. It records every before/after pointer
+operation and proves the non-allowlisted tree is unchanged.
+
+The normalized output then passes the existing P4-01a generic-ref ordering
+stage, producing the identity chain
+`raw -> P4-01b ownership artifact -> P4-01a sorted artifact -> validated
+output`. The P4-01b receipt binds the live B, F1, F2, F3, mapping, contract,
+case, and request identities. A consuming fresh-run revalidation receipt must
+add the pilot, run, action, pre-call, attempt, and raw identities; stable IDs
+alone are not sufficient to prove same-run provenance.
+
+P4-01b performs zero model calls, never overwrites raw bytes, does not reset a
+budget, is not retry or A-07 repair, and does not itself establish system
+usability. `agent_chain_system_output_usable=true` is permitted only after
+the normalized F4 output, registry, mapping, composition, and existing
+assembler have all passed live validation.
+
 All public create/from-dict/from-bytes/to-dict/canonical-bytes/hash/validate
 boundaries must perform live validation or a fresh canonical reparse. Direct
 object construction followed by mutation is not an authority path.
@@ -442,11 +509,15 @@ object construction followed by mutation is not an authority path.
 Canonical order is semantic contract state, not presentation. Validators must
 apply all of the following rules:
 
-* Generic Ref arrays (`input_refs`, `output_refs`, `authority_refs`,
+* In strict raw records, generic Ref arrays (`input_refs`, `output_refs`, `authority_refs`,
   `local_refs`, every field named `refs`, and other audit-only Ref arrays) are
   sorted by the exact `(ref_type, ref_id, ref_revision)` tuple and contain no
   duplicates. Schema-specific semantic reference arrays such as
-  `use_case_refs` follow their owning order rule instead.
+  `use_case_refs` follow their owning order rule instead. The only approved
+  exceptions are the P4-01a F4 entity-level audit-ref normalizer in section
+  5.4.1 and the P4-01b ownership/shape normalizer in section 5.4.2. Each
+  creates a separate normalized artifact and receipt while preserving the raw
+  failure; neither permits semantic-array sorting.
 * B-Aux `advisory_items` preserves validated raw source order exactly; items
   are never sorted by kind, statement, target, hash, or display value. Within
   each item, `target_b_refs` follows the generic Ref tuple order and is
@@ -474,8 +545,10 @@ apply all of the following rules:
   frozen graph topology, never by completion timestamp or lexical sorting.
 
 If a prior canonical order exists, any reordered, multiply represented, or
-partially reordered array fails closed even when it contains the same set of
-values.
+partially reordered semantic array fails closed even when it contains the same
+set of values. A raw F4 generic audit-only `refs` order drift also remains a
+raw contract failure; only the exact P4-01a artifact-and-receipt path in
+section 5.4.1 may produce a separately validated normalized output.
 
 ## 6. B, B-Aux, and per-F advisory disposition
 
@@ -647,6 +720,21 @@ The `NodeResult` payload has exactly `node_id`, `call_count`,
 * `node_output` is the exact payload schema below only for `validated`; it is
   the exact empty object for `not_run`, `failed_closed`, `interrupted`, and
   `cancelled`. Envelope `output_refs` follows the same rule.
+
+For the P4-01a F4 normalization path, the immutable raw attempt remains
+`failed_closed` with `raw_model_contract_success=false`. After the independent
+normalization receipt is replayed and the complete F4 validator succeeds, the
+attempt envelope may bind the normalized payload as the validated NodeResult
+output without adding keys to `NodeResult`. The attempt envelope must retain
+the separate raw and normalized identities and report
+`normalized_node_contract_success=true`. This is an amended system output, not
+a strict raw-model pass.
+
+For the P4-01b path, the same NodeResult rule applies, but the envelope must
+retain the raw identity, the P4-01b ownership artifact identity, the P4-01a
+sorted artifact identity, and the two-stage receipt chain. The normalized
+NodeResult is valid only after the exact P4-01b and P4-01a receipts are
+replayed against the live authority state.
 
 Every generated entity includes the common fields `local_id`, `entity_type`,
 and `refs` in addition to only the node-specific keys listed below; there is
@@ -1176,7 +1264,8 @@ consumer D17 record blocks that consumer's input and routes fail closed.
 The future chain has the following non-interchangeable layers:
 
 1. B canonical requirement/use-case authority and optional advisory B-Aux.
-2. F1-F4 raw/output records and deterministic registries.
+2. F1-F4 raw/output records, any separately receipted P4-01a or P4-01b F4
+   normalization, and deterministic registries.
 3. Deterministic mapping and composition into a strict
    `ModelSemanticCandidate` candidate.
 4. Existing parser/assembler and provenance/identity checks.
@@ -1190,6 +1279,15 @@ not a RequirementView, AcceptancePlan, binding, browser observation, final
 verdict, formal-quality result, H1 result, or evidence-use result. A failed or
 unknown downstream gate blocks model success. Deterministic repair, closure,
 and G0 delivery retain their existing labels and accounting.
+
+Success accounting additionally distinguishes
+`raw_model_contract_success=false`,
+`normalized_node_contract_success=true`, and
+`agent_chain_system_output_usable=true` for the P4-01a/P4-01b paths. A later
+chain that passes registry, composition, and assembler through either path may
+be reported as amended Agent-chain success with deterministic normalization.
+It must not be reported as strict raw-model first-pass success, and historical
+strict-model results remain unchanged.
 
 ## 14. C2D target decision
 

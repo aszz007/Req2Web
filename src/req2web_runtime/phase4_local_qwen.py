@@ -283,6 +283,14 @@ P4D1_PARTIAL_TRANSCRIPT_SCHEMA_VERSION = f"{P4_03_SCHEMA_PREFIX}.d1.partial_tran
 P4D1_RAW_IDENTITY_REVISION = f"{P4_03_SCHEMA_PREFIX}.d1.complete_raw.v1"
 P4D1_WORKER_IPC_PROTOCOL = f"{P4_03_SCHEMA_PREFIX}.d1.worker-ipc.v1"
 P4D1_STREAM_EVENT_SCHEMA_VERSION = f"{P4_03_SCHEMA_PREFIX}.d1.stream_event.v1"
+FRESH_INTEGRATED_WORKER_PROTOCOL = (
+    f"{P4_03_SCHEMA_PREFIX}.fresh_integrated.worker-ipc.v1"
+)
+FRESH_INTEGRATED_RUNTIME_FACTS_SCHEMA_VERSION = (
+    f"{P4_03_SCHEMA_PREFIX}.fresh_integrated.runtime_facts.v1"
+)
+FRESH_INTEGRATED_RUNTIME_FACTS_NAME = "fresh_integrated_runtime_facts.json"
+FRESH_INTEGRATED_PILOT_PREFIX = "p4-03i-local-qwen-fresh-integrated-"
 P4D1_DIAGNOSTIC_ID = "p4-03d1-local-qwen-stream-diagnostic"
 P4D1_POLICY_RELATIVE_PATH = "docs/phase4_local_qwen_stream_diagnostic_policy.json"
 P4D1_POLICY_PATH = Path(__file__).resolve().parents[2] / P4D1_POLICY_RELATIVE_PATH
@@ -4933,6 +4941,47 @@ class AttemptLedger(_CanonicalRecord):
         data["ledger_id"] = _sha256(_canonical_bytes({key: value for key, value in data.items() if key != "ledger_id"}))
         return type(self)._from_payload(data)  # type: ignore[return-value]
 
+    def release_generate_started(
+        self,
+        *,
+        node_id: str,
+        call_kind: str,
+    ) -> "AttemptLedger":
+        """Release a reservation when the worker never accepted generate."""
+
+        self.validate()
+        if node_id not in NODE_ORDER or call_kind not in CALL_KINDS:
+            raise Phase4LocalQwenContractError(
+                "invalid ledger generate-release binding"
+            )
+        data = self.to_dict()
+        total = dict(data["node_total_counts"])
+        local = dict(data["node_local_counts"])
+        if total[node_id] <= 0:
+            raise Phase4LocalQwenContractError(
+                "cannot release an unreserved generate call"
+            )
+        total[node_id] -= 1
+        if call_kind == "node_local":
+            if local[node_id] <= 0:
+                raise Phase4LocalQwenContractError(
+                    "cannot release an unreserved node-local call"
+                )
+            local[node_id] -= 1
+        data["node_total_counts"] = total
+        data["node_local_counts"] = local
+        data["ledger_id"] = "pending"
+        data["ledger_id"] = _sha256(
+            _canonical_bytes(
+                {
+                    key: value
+                    for key, value in data.items()
+                    if key != "ledger_id"
+                }
+            )
+        )
+        return type(self)._from_payload(data)  # type: ignore[return-value]
+
     def begin_integrated_run(self) -> "AttemptLedger":
         self.validate()
         data = self.to_dict()
@@ -7068,6 +7117,8 @@ class _LazyTransformersQwenBackend:
         self._model: Any = None
         self._torch: Any = None
         self._loaded_facts: dict[str, object] | None = None
+        self._fresh_runtime_facts: dict[str, object] | None = None
+        self._last_generation_facts: dict[str, object] | None = None
         self._runtime_capability = runtime_capability
 
     @property
@@ -7077,6 +7128,14 @@ class _LazyTransformersQwenBackend:
     @property
     def loaded_facts(self) -> dict[str, object] | None:
         return copy.deepcopy(self._loaded_facts)
+
+    @property
+    def fresh_runtime_facts(self) -> dict[str, object] | None:
+        return copy.deepcopy(self._fresh_runtime_facts)
+
+    @property
+    def last_generation_facts(self) -> dict[str, object] | None:
+        return copy.deepcopy(self._last_generation_facts)
 
     def load(self) -> None:
         """Load only when the caller explicitly chooses a model action."""
@@ -7163,6 +7222,71 @@ class _LazyTransformersQwenBackend:
             "device": "cuda:0",
         }
 
+    def load_fresh_integrated(self) -> None:
+        """Install and verify the shared full-context fresh-integrated runtime."""
+
+        if not self.loaded:
+            self.load()
+        if self._fresh_runtime_facts is not None:
+            return
+        try:
+            from req2web_runtime import phase4_local_qwen_f4 as f4
+
+            native_context_tokens, native_context_identity = (
+                f4._read_native_model_context(model_root=self._model_root)
+            )
+            if native_context_tokens != self._profile.context_tokens:
+                raise Phase4LocalQwenContractError(
+                    "fresh integrated native context/profile binding drifted"
+                )
+            if self._profile.max_input_tokens != native_context_tokens:
+                raise Phase4LocalQwenContractError(
+                    "fresh integrated input cap is not the native context"
+                )
+            attention = f4._install_f4_memory_efficient_attention(self)
+            stopping_revision = (
+                f"{f4.F4_LOCAL_SCHEMA_PREFIX}.complete_single_json.v1"
+            )
+            if (
+                f4.F4CompleteSingleJSONStoppingCriteria.__name__
+                != "F4CompleteSingleJSONStoppingCriteria"
+            ):
+                raise Phase4LocalQwenContractError(
+                    "fresh integrated stopping criteria identity drifted"
+                )
+            if attention.get("math_fallback_allowed") is not False:
+                raise Phase4LocalQwenContractError(
+                    "fresh integrated attention fallback is not disabled"
+                )
+            self._fresh_runtime_facts = {
+                "schema_version": FRESH_INTEGRATED_RUNTIME_FACTS_SCHEMA_VERSION,
+                "native_context_tokens": native_context_tokens,
+                "native_context_identity": native_context_identity,
+                "native_context_source": (
+                    "config.json:/text_config/max_position_embeddings"
+                ),
+                "max_input_tokens": native_context_tokens,
+                "output_limit_kind": "context_remaining",
+                "input_truncation": False,
+                "output_truncation": False,
+                "memory_efficient_attention": attention,
+                "stopping_criteria": {
+                    "class_name": (
+                        f4.F4CompleteSingleJSONStoppingCriteria.__name__
+                    ),
+                    "revision": stopping_revision,
+                    "one_top_level_json_object": True,
+                    "eos_allowed": True,
+                },
+                "worker_protocol": FRESH_INTEGRATED_WORKER_PROTOCOL,
+            }
+        except Phase4LocalQwenContractError:
+            raise
+        except Exception as exc:  # pragma: no cover - explicit model action
+            raise Phase4LocalQwenContractError(
+                "fresh integrated runtime installation failed closed"
+            ) from exc
+
     @staticmethod
     def _validated_text_inputs(inputs: object) -> tuple[str, ...]:
         if not isinstance(inputs, Mapping):
@@ -7233,6 +7357,118 @@ class _LazyTransformersQwenBackend:
             return text.encode("utf-8")
         except Exception as exc:
             raise Phase4LocalQwenContractError("explicit local Qwen generation failed closed") from exc
+
+    def generate_fresh_integrated(
+        self,
+        *,
+        node_id: str,
+        input_bytes: bytes,
+        prompt_bytes: bytes,
+        config_bytes: bytes,
+        request_bytes: bytes,
+        emit_delta: Callable[[bytes], None],
+    ) -> bytes:
+        """Generate one fresh-integrated node result with full-context streaming."""
+
+        if (
+            self._runtime_capability is not _REAL_RUNTIME_CAPABILITY
+            or not self.loaded
+            or self._fresh_runtime_facts is None
+            or not callable(emit_delta)
+        ):
+            raise Phase4LocalQwenContractError(
+                "fresh integrated backend is not explicitly loaded"
+            )
+        try:  # pragma: no cover - explicit future model action
+            from req2web_runtime import phase4_local_qwen_f4 as f4
+
+            prompt_contract = _strict_json(prompt_bytes)
+            actual_input = _strict_json(input_bytes)
+            _strict_json(config_bytes)
+            request = _strict_json(request_bytes)
+            if (
+                request.get("call_kind") != "integrated"
+                or request.get("b_aux_disposition") != "absent/not_requested"
+                or request.get("node_id") != node_id
+            ):
+                raise Phase4LocalQwenContractError(
+                    "fresh integrated request identity drifted"
+                )
+            model_text = (
+                "PROMPT_CONTRACT_JSON\n"
+                + _canonical_bytes(prompt_contract).decode("utf-8")
+                + "\nACTUAL_NODE_INPUT_JSON\n"
+                + _canonical_bytes(actual_input).decode("utf-8")
+            )
+            rendered = self._processor.apply_chat_template(
+                [{"role": "user", "content": [{"type": "text", "text": model_text}]}],
+                tokenize=False,
+                add_generation_prompt=True,
+                enable_thinking=False,
+            )
+            encoded = self._processor(text=[rendered], return_tensors="pt")
+            keys = self._validated_text_inputs(encoded)
+            encoded = {key: encoded[key].to("cuda:0") for key in keys}
+            input_length = int(encoded["input_ids"].shape[1])
+            native_context = int(
+                self._fresh_runtime_facts["native_context_tokens"]
+            )
+            if input_length > native_context:
+                raise Phase4LocalQwenContractError(
+                    "fresh integrated input exceeds native context"
+                )
+            generation_budget = f4._context_remaining_budget(
+                self._profile,
+                input_length,
+            )
+            tokenizer = getattr(self._processor, "tokenizer", self._processor)
+            streamer = _P4D1TokenDeltaStreamer(
+                tokenizer=tokenizer,
+                emit_delta=emit_delta,
+            )
+            transformers = importlib.import_module("transformers")
+            stopping_criteria = transformers.StoppingCriteriaList(
+                [
+                    f4.F4CompleteSingleJSONStoppingCriteria(
+                        tokenizer=tokenizer,
+                        prompt_length=input_length,
+                    )
+                ]
+            )
+            self._torch.manual_seed(self._profile.seed)
+            self._torch.cuda.manual_seed_all(self._profile.seed)
+            generated = self._model.generate(
+                **encoded,
+                streamer=streamer,
+                stopping_criteria=stopping_criteria,
+                max_new_tokens=generation_budget,
+                do_sample=False,
+                num_return_sequences=1,
+            )
+            generated_only = generated[:, input_length:]
+            text = self._processor.batch_decode(
+                generated_only,
+                skip_special_tokens=True,
+            )[0]
+            raw = text.encode("utf-8")
+            facts = {
+                "schema_version": FRESH_INTEGRATED_RUNTIME_FACTS_SCHEMA_VERSION,
+                "input_token_length": input_length,
+                "native_context_tokens": native_context,
+                "generation_budget": generation_budget,
+                "output_limit_kind": "context_remaining",
+                "input_truncation": False,
+                "output_truncation": False,
+                "complete_single_json_required": True,
+            }
+            self._last_generation_facts = copy.deepcopy(facts)
+            return raw
+        except Phase4LocalQwenContractError:
+            raise
+        except Exception as exc:  # pragma: no cover - explicit model action
+            raise Phase4LocalQwenContractError(
+                "fresh integrated local Qwen generation failed closed"
+            ) from exc
 
     def generate_stream_diagnostic(
         self,
@@ -7417,6 +7653,7 @@ class SupervisedLocalQwenBackend:
         protocol: str = f"{P4_03_SCHEMA_PREFIX}.worker-ipc.v1",
         generate_call_cap: int | None = None,
         wait_observer: Callable[[], None] | None = None,
+        fresh_runtime_facts: Mapping[str, object] | None = None,
     ) -> None:
         if capability is not _REAL_RUNTIME_CAPABILITY:
             raise Phase4LocalQwenContractError("real worker capability is invalid")
@@ -7441,6 +7678,12 @@ class SupervisedLocalQwenBackend:
         self._closed = False
         self._generation_started = False
         self._last_raw_captured = False
+        self._last_generation_facts: dict[str, object] | None = None
+        self._fresh_runtime_facts = (
+            None
+            if fresh_runtime_facts is None
+            else copy.deepcopy(dict(fresh_runtime_facts))
+        )
         self._teardown = {
             "worker_id": self._worker_id,
             "worker_pid": process.pid,
@@ -7464,6 +7707,14 @@ class SupervisedLocalQwenBackend:
     @property
     def last_raw_captured(self) -> bool:
         return self._last_raw_captured
+
+    @property
+    def fresh_runtime_facts(self) -> dict[str, object] | None:
+        return copy.deepcopy(self._fresh_runtime_facts)
+
+    @property
+    def last_generation_facts(self) -> dict[str, object] | None:
+        return copy.deepcopy(self._last_generation_facts)
 
     @property
     def stderr_bytes(self) -> bytes | None:
@@ -7642,6 +7893,182 @@ class SupervisedLocalQwenBackend:
             )
         raw = _decode_b64(data["raw_b64"], "worker_generation_result.raw_b64")
         self._last_raw_captured = True
+        return raw
+
+    def _receive_fresh_generation(
+        self,
+        *,
+        call_id: str,
+        node_id: str,
+        emit_delta: Callable[[bytes], None],
+    ) -> dict[str, object]:
+        while True:
+            message = self._receive(timeout=self._profile.timeout_seconds)
+            if message.get("kind") != "token_delta":
+                return message
+            data = _exact(
+                message,
+                (
+                    "protocol",
+                    "kind",
+                    "call_id",
+                    "worker_id",
+                    "node_id",
+                    "delta_b64",
+                ),
+                "fresh_integrated_worker_token_delta",
+            )
+            if (
+                data["protocol"] != self._protocol
+                or data["call_id"] != call_id
+                or data["worker_id"] != self._worker_id
+                or data["node_id"] != node_id
+            ):
+                self._force_teardown("worker_failed")
+                raise SupervisedWorkerFailure(
+                    "worker_protocol_failed",
+                    "fresh integrated token stream identity drifted",
+                )
+            delta = _decode_b64(
+                data["delta_b64"],
+                "fresh_integrated_worker_token_delta.delta_b64",
+            )
+            if not delta:
+                self._force_teardown("worker_failed")
+                raise SupervisedWorkerFailure(
+                    "worker_protocol_failed",
+                    "fresh integrated token delta is empty",
+                )
+            try:
+                emit_delta(delta)
+            except Exception as exc:
+                self._force_teardown("generation_cancelled")
+                raise SupervisedWorkerFailure(
+                    "generation_cancelled",
+                    "fresh integrated token observer failed",
+                ) from exc
+
+    def generate_fresh_integrated(
+        self,
+        *,
+        node_id: str,
+        input_bytes: bytes,
+        prompt_bytes: bytes,
+        config_bytes: bytes,
+        request_bytes: bytes,
+        emit_delta: Callable[[bytes], None],
+    ) -> bytes:
+        """Run one streamed fresh-integrated call on the surviving worker."""
+
+        if (
+            self._closed
+            or self._process.poll() is not None
+            or self._fresh_runtime_facts is None
+            or self._protocol != FRESH_INTEGRATED_WORKER_PROTOCOL
+            or not callable(emit_delta)
+        ):
+            raise SupervisedWorkerFailure(
+                "worker_unavailable",
+                "fresh integrated worker is not available",
+            )
+        if (
+            self._generate_call_cap is not None
+            and self._generate_call_count >= self._generate_call_cap
+        ):
+            raise SupervisedWorkerFailure(
+                "generate_call_cap_exhausted",
+                "fresh integrated worker generate call cap is exhausted",
+            )
+        call_id = f"call-{uuid.uuid4().hex}"
+        self._last_raw_captured = False
+        self._last_generation_facts = None
+        self._send(
+            {
+                "protocol": self._protocol,
+                "kind": "generate_fresh_integrated",
+                "call_id": call_id,
+                "node_id": node_id,
+                "input_b64": _b64(input_bytes, "fresh.worker.input"),
+                "prompt_b64": _b64(prompt_bytes, "fresh.worker.prompt"),
+                "config_b64": _b64(config_bytes, "fresh.worker.config"),
+                "request_b64": _b64(request_bytes, "fresh.worker.request"),
+            }
+        )
+        # The parent-side send is the worker-acceptance boundary. A failure
+        # before this point is a pre-worker failure and must not consume the
+        # real model-call budget or claim that generation started.
+        self._generate_call_count += 1
+        self._generation_started = True
+        try:
+            message = self._receive_fresh_generation(
+                call_id=call_id,
+                node_id=node_id,
+                emit_delta=emit_delta,
+            )
+        except KeyboardInterrupt as exc:
+            self._force_teardown("generation_cancelled")
+            raise SupervisedWorkerFailure(
+                "generation_cancelled",
+                "fresh integrated generation was cancelled",
+            ) from exc
+        if message.get("call_id") != call_id:
+            self._force_teardown("worker_failed")
+            raise SupervisedWorkerFailure(
+                "worker_protocol_failed",
+                "fresh integrated worker call identity drifted",
+            )
+        if message.get("kind") == "generation_error":
+            self._force_teardown("worker_failed")
+            raise SupervisedWorkerFailure(
+                "backend_exception",
+                "fresh integrated worker generation failed closed",
+            )
+        data = _exact(
+            message,
+            (
+                "protocol",
+                "kind",
+                "call_id",
+                "worker_id",
+                "raw_b64",
+                "generation_facts",
+            ),
+            "fresh_integrated_worker_generation_result",
+        )
+        if (
+            data["protocol"] != self._protocol
+            or data["kind"] != "generation_result"
+            or data["worker_id"] != self._worker_id
+            or not isinstance(data["generation_facts"], Mapping)
+        ):
+            self._force_teardown("worker_failed")
+            raise SupervisedWorkerFailure(
+                "worker_protocol_failed",
+                "fresh integrated worker response drifted",
+            )
+        generation_facts = dict(data["generation_facts"])
+        if (
+            generation_facts.get("schema_version")
+            != FRESH_INTEGRATED_RUNTIME_FACTS_SCHEMA_VERSION
+            or generation_facts.get("input_truncation") is not False
+            or generation_facts.get("output_truncation") is not False
+            or generation_facts.get("complete_single_json_required") is not True
+        ):
+            self._force_teardown("worker_failed")
+            raise SupervisedWorkerFailure(
+                "worker_protocol_failed",
+                "fresh integrated generation facts drifted",
+            )
+        raw = _decode_b64(
+            data["raw_b64"],
+            "fresh_integrated_worker_generation_result.raw_b64",
+        )
+        if not raw:
+            self._last_raw_captured = True
+            self._last_generation_facts = generation_facts
+            return raw
+        self._last_raw_captured = True
+        self._last_generation_facts = generation_facts
         return raw
 
     def close(self) -> dict[str, object]:
@@ -8180,6 +8607,314 @@ def start_supervised_local_qwen_runtime(
     )
 
 
+def start_supervised_local_qwen_fresh_integrated_runtime(
+    *,
+    model_root: Path,
+    integrity_evidence: Path,
+    result_root: Path,
+    pilot: PilotBinding,
+    policies: Sequence[NodeProjectionPolicy],
+    profile: LocalQwenProfile,
+    manifest: PreCallManifest,
+    b_input: Mapping[str, object],
+    execution_lease: PilotExecutionLease,
+    load_timeout_seconds: int = 600,
+) -> SupervisedLocalQwenRuntime:
+    """Start one persistent worker for the fresh integrated pilot."""
+
+    if (
+        not isinstance(model_root, Path)
+        or not model_root.is_absolute()
+        or not model_root.is_dir()
+        or model_root.is_symlink()
+        or not isinstance(integrity_evidence, Path)
+        or not integrity_evidence.is_absolute()
+        or not integrity_evidence.is_file()
+        or integrity_evidence.is_symlink()
+        or not isinstance(result_root, Path)
+        or not result_root.is_absolute()
+        or not result_root.is_dir()
+        or pilot.pilot_id.startswith(FRESH_INTEGRATED_PILOT_PREFIX) is not True
+    ):
+        raise Phase4LocalQwenContractError(
+            "fresh integrated runtime path or pilot binding is invalid"
+        )
+    pilot.validate()
+    profile.validate()
+    manifest.validate()
+    execution_lease.validate()
+    if execution_lease.parent_pid != os.getpid():
+        raise Phase4LocalQwenContractError(
+            "fresh integrated execution lease parent binding drifted"
+        )
+    if manifest.pilot_binding != pilot.to_dict():
+        raise Phase4LocalQwenContractError(
+            "fresh integrated manifest/pilot binding drifted"
+        )
+    if [policy.node_id for policy in policies] != list(NODE_ORDER):
+        raise Phase4LocalQwenContractError(
+            "fresh integrated policy order drifted"
+        )
+    checked_policies = tuple(
+        NodeProjectionPolicy.from_dict(policy.to_dict()) for policy in policies
+    )
+    checked_b_input = copy.deepcopy(dict(b_input))
+    from req2web_orchestration.phase4_graph import validate_b_input
+
+    checked_b_input = validate_b_input(checked_b_input)
+    inventory = validate_model_inventory_metadata(
+        model_root=model_root,
+        integrity_evidence=integrity_evidence,
+    )
+    inventory_identity = dict(inventory["inventory_identity"])
+    model_root_identity = _identity(
+        {
+            "model_id": QWEN_MODEL_ID,
+            "model_revision": QWEN_MODEL_REVISION,
+            "resolved_model_root": str(model_root.resolve(strict=True)),
+            "inventory": inventory_identity,
+        },
+        revision=f"{P4_03_SCHEMA_PREFIX}.model-root.v1",
+    )
+    if (
+        profile.model_root_identity != model_root_identity
+        or profile.model_inventory_identity != inventory_identity
+        or profile.model_file_count != inventory["file_count"]
+        or manifest.model_root_identity != model_root_identity
+        or manifest.model_inventory_identity != inventory_identity
+        or manifest.inventory_file_count != inventory["file_count"]
+    ):
+        raise Phase4LocalQwenContractError(
+            "fresh integrated model identity drifted before worker start"
+        )
+    _integer(load_timeout_seconds, "fresh load_timeout_seconds", minimum=1, maximum=1800)
+    runtime_claim = _acquire_runtime_start_claim(
+        result_root=result_root,
+        lease=execution_lease,
+    )
+    worker_bootstrap = (
+        "import sys; from pathlib import Path; "
+        "from req2web_runtime.phase4_local_qwen import "
+        "_run_local_qwen_fresh_integrated_worker_protocol; "
+        "raise SystemExit(_run_local_qwen_fresh_integrated_worker_protocol("
+        "model_root=Path(sys.argv[1])))"
+    )
+    worker_executable, worker_pythonpath = _supervised_worker_python_runtime()
+    process = subprocess.Popen(
+        [
+            worker_executable,
+            "-c",
+            worker_bootstrap,
+            str(model_root),
+        ],
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        encoding="utf-8",
+        bufsize=1,
+        env={
+            **dict(os.environ),
+            "HF_HUB_OFFLINE": "1",
+            "TRANSFORMERS_OFFLINE": "1",
+            "HF_HUB_DISABLE_TELEMETRY": "1",
+            "DO_NOT_TRACK": "1",
+            "LANGSMITH_TRACING": "0",
+            "LANGCHAIN_TRACING_V2": "0",
+            "PYTHONPATH": worker_pythonpath,
+        },
+        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+    )
+    if process.stdout is None or process.stderr is None or process.stdin is None:
+        _raise_worker_start_failure(
+            process=process,
+            stderr_capture=None,
+            message="fresh integrated worker IPC streams are unavailable",
+        )
+    messages: "queue.Queue[dict[str, object]]" = queue.Queue()
+    stderr_capture = _WorkerStderrCapture()
+    threading.Thread(
+        target=_worker_stdout_reader,
+        args=(process.stdout, messages),
+        daemon=True,
+    ).start()
+    stderr_thread = threading.Thread(
+        target=_worker_stderr_reader,
+        args=(process.stderr, stderr_capture),
+        daemon=True,
+    )
+    stderr_thread.start()
+    try:
+        process.stdin.write(
+            _canonical_bytes(
+                {
+                    "protocol": FRESH_INTEGRATED_WORKER_PROTOCOL,
+                    "kind": "load",
+                    "profile_b64": _b64(
+                        profile.canonical_bytes(),
+                        "fresh_integrated.worker.profile",
+                    ),
+                }
+            ).decode("utf-8")
+            + "\n"
+        )
+        process.stdin.flush()
+        loaded = messages.get(timeout=load_timeout_seconds)
+    except queue.Empty:
+        _raise_worker_start_failure(
+            process=process,
+            stderr_capture=stderr_capture,
+            stderr_thread=stderr_thread,
+            message="fresh integrated worker load timed out",
+        )
+    except (BrokenPipeError, OSError):
+        _raise_worker_start_failure(
+            process=process,
+            stderr_capture=stderr_capture,
+            stderr_thread=stderr_thread,
+            message="fresh integrated worker load IPC failed closed",
+        )
+    if loaded.get("kind") != "loaded":
+        _raise_worker_start_failure(
+            process=process,
+            stderr_capture=stderr_capture,
+            stderr_thread=stderr_thread,
+            message="fresh integrated worker load failed closed",
+        )
+    data = _exact(
+        loaded,
+        (
+            "protocol",
+            "kind",
+            "worker_id",
+            "worker_pid",
+            "loaded_facts",
+            "fresh_runtime_facts",
+        ),
+        "fresh_integrated_worker_loaded",
+    )
+    if (
+        data["protocol"] != FRESH_INTEGRATED_WORKER_PROTOCOL
+        or data["kind"] != "loaded"
+        or _integer(
+            data["worker_pid"],
+            "fresh_integrated_worker_loaded.worker_pid",
+            minimum=1,
+        )
+        != process.pid
+        or not isinstance(data["loaded_facts"], Mapping)
+        or not isinstance(data["fresh_runtime_facts"], Mapping)
+    ):
+        _raise_worker_start_failure(
+            process=process,
+            stderr_capture=stderr_capture,
+            stderr_thread=stderr_thread,
+            message="fresh integrated worker load identity drifted",
+            worker_id=(
+                data["worker_id"]
+                if type(data["worker_id"]) is str
+                and _ID_RE.fullmatch(data["worker_id"]) is not None
+                else None
+            ),
+        )
+    fresh_runtime_facts = dict(data["fresh_runtime_facts"])
+    attention = fresh_runtime_facts.get("memory_efficient_attention")
+    stopping = fresh_runtime_facts.get("stopping_criteria")
+    from req2web_runtime import phase4_local_qwen_f4 as f4
+
+    if (
+        fresh_runtime_facts.get("schema_version")
+        != FRESH_INTEGRATED_RUNTIME_FACTS_SCHEMA_VERSION
+        or fresh_runtime_facts.get("worker_protocol")
+        != FRESH_INTEGRATED_WORKER_PROTOCOL
+        or fresh_runtime_facts.get("native_context_tokens")
+        != profile.context_tokens
+        or fresh_runtime_facts.get("max_input_tokens")
+        != profile.context_tokens
+        or fresh_runtime_facts.get("input_truncation") is not False
+        or fresh_runtime_facts.get("output_truncation") is not False
+        or not isinstance(attention, Mapping)
+        or attention.get("implementation")
+        != f4.F4_MEMORY_EFFICIENT_ATTENTION_NAME
+        or attention.get("revision")
+        != f4.F4_MEMORY_EFFICIENT_ATTENTION_REVISION
+        or attention.get("math_fallback_allowed") is not False
+        or not isinstance(stopping, Mapping)
+        or stopping.get("class_name") != "F4CompleteSingleJSONStoppingCriteria"
+        or stopping.get("revision")
+        != f"{f4.F4_LOCAL_SCHEMA_PREFIX}.complete_single_json.v1"
+        or stopping.get("one_top_level_json_object") is not True
+    ):
+        _raise_worker_start_failure(
+            process=process,
+            stderr_capture=stderr_capture,
+            stderr_thread=stderr_thread,
+            message="fresh integrated runtime facts failed closed",
+            worker_id=_text(
+                data["worker_id"],
+                "fresh_integrated_worker_loaded.worker_id",
+                pattern=_ID_RE,
+            ),
+        )
+    backend = SupervisedLocalQwenBackend(
+        process=process,
+        messages=messages,
+        stderr_capture=stderr_capture,
+        stderr_thread=stderr_thread,
+        profile=profile,
+        worker_id=_text(
+            data["worker_id"],
+            "fresh_integrated_worker_loaded.worker_id",
+            pattern=_ID_RE,
+        ),
+        loaded_facts=data["loaded_facts"],
+        capability=_REAL_RUNTIME_CAPABILITY,
+        protocol=FRESH_INTEGRATED_WORKER_PROTOCOL,
+        generate_call_cap=4,
+        fresh_runtime_facts=fresh_runtime_facts,
+    )
+    try:
+        receipt = LocalQwenLoadReceipt.create(
+            manifest=manifest,
+            pilot=pilot,
+            profile=profile,
+            loaded_facts=backend.loaded_facts,
+        )
+        object.__setattr__(
+            receipt,
+            "_real_runtime_capability",
+            _REAL_RUNTIME_CAPABILITY,
+        )
+        persist_local_qwen_load_receipt(
+            result_root=result_root,
+            receipt=receipt,
+        )
+        _write_once(
+            result_root,
+            FRESH_INTEGRATED_RUNTIME_FACTS_NAME,
+            _canonical_bytes(fresh_runtime_facts),
+        )
+    except Exception as exc:
+        backend._force_teardown("load_failed")
+        raise SupervisedWorkerStartFailure(
+            "fresh integrated load receipt persistence failed closed",
+            backend.teardown_facts,
+            stderr_bytes=backend.stderr_bytes,
+            failure_code="evidence_persistence_failed",
+        ) from exc
+    return SupervisedLocalQwenRuntime(
+        backend=backend,
+        load_receipt=receipt,
+        runtime_start_claim=runtime_claim,
+        execution_lease=execution_lease,
+        pilot=pilot,
+        policies=checked_policies,
+        profile=profile,
+        manifest=manifest,
+        b_input=checked_b_input,
+    )
+
+
 class P4D1SupervisedRuntime(NamedTuple):
     backend: SupervisedLocalQwenBackend
     loaded_facts: dict[str, object]
@@ -8713,6 +9448,178 @@ def _run_local_qwen_worker_protocol(*, model_root: Path) -> int:
         return 2
 
 
+def _run_local_qwen_fresh_integrated_worker_protocol(*, model_root: Path) -> int:
+    """Persistent worker protocol for one fresh integrated run."""
+
+    worker_id = f"worker-{uuid.uuid4().hex}"
+
+    def send(payload: Mapping[str, object]) -> None:
+        sys.stdout.buffer.write(_canonical_bytes(dict(payload)) + b"\n")
+        sys.stdout.buffer.flush()
+
+    try:
+        first = sys.stdin.buffer.readline()
+        load = _exact(
+            _strict_json(first.rstrip(b"\r\n")),
+            ("protocol", "kind", "profile_b64"),
+            "fresh_integrated_worker_load_request",
+        )
+        if (
+            load["protocol"] != FRESH_INTEGRATED_WORKER_PROTOCOL
+            or load["kind"] != "load"
+        ):
+            raise Phase4LocalQwenContractError(
+                "fresh integrated worker load request drifted"
+            )
+        profile = LocalQwenProfile.from_bytes(
+            _decode_b64(
+                load["profile_b64"],
+                "fresh_integrated_worker_load_request.profile_b64",
+            )
+        )
+        backend = _LazyTransformersQwenBackend(
+            model_root=model_root,
+            profile=profile,
+            runtime_capability=_REAL_RUNTIME_CAPABILITY,
+        )
+        backend.load_fresh_integrated()
+        loaded_facts = backend.loaded_facts
+        fresh_runtime_facts = backend.fresh_runtime_facts
+        if loaded_facts is None or fresh_runtime_facts is None:
+            raise Phase4LocalQwenContractError(
+                "fresh integrated worker load facts are unavailable"
+            )
+        send(
+            {
+                "protocol": FRESH_INTEGRATED_WORKER_PROTOCOL,
+                "kind": "loaded",
+                "worker_id": worker_id,
+                "worker_pid": os.getpid(),
+                "loaded_facts": loaded_facts,
+                "fresh_runtime_facts": fresh_runtime_facts,
+            }
+        )
+        while True:
+            line = sys.stdin.buffer.readline()
+            if not line:
+                return 0
+            request = _strict_json(line.rstrip(b"\r\n"))
+            if request.get("protocol") != FRESH_INTEGRATED_WORKER_PROTOCOL:
+                raise Phase4LocalQwenContractError(
+                    "fresh integrated worker protocol revision drifted"
+                )
+            if request.get("kind") == "shutdown":
+                send(
+                    {
+                        "protocol": FRESH_INTEGRATED_WORKER_PROTOCOL,
+                        "kind": "shutdown_ack",
+                        "worker_id": worker_id,
+                    }
+                )
+                return 0
+            data = _exact(
+                request,
+                (
+                    "protocol",
+                    "kind",
+                    "call_id",
+                    "node_id",
+                    "input_b64",
+                    "prompt_b64",
+                    "config_b64",
+                    "request_b64",
+                ),
+                "fresh_integrated_worker_generate_request",
+            )
+            if data["kind"] != "generate_fresh_integrated":
+                raise Phase4LocalQwenContractError(
+                    "fresh integrated worker request kind is invalid"
+                )
+
+            def emit_delta(delta: bytes) -> None:
+                if type(delta) is not bytes or not delta:
+                    raise Phase4LocalQwenContractError(
+                        "fresh integrated worker token delta is invalid"
+                    )
+                send(
+                    {
+                        "protocol": FRESH_INTEGRATED_WORKER_PROTOCOL,
+                        "kind": "token_delta",
+                        "call_id": data["call_id"],
+                        "worker_id": worker_id,
+                        "node_id": data["node_id"],
+                        "delta_b64": _b64(
+                            delta,
+                            "fresh_integrated_worker.token_delta",
+                        ),
+                    }
+                )
+
+            try:
+                raw = backend.generate_fresh_integrated(
+                    node_id=_text(
+                        data["node_id"],
+                        "fresh_integrated_worker.node_id",
+                    ),
+                    input_bytes=_decode_b64(
+                        data["input_b64"],
+                        "fresh_integrated_worker.input_b64",
+                    ),
+                    prompt_bytes=_decode_b64(
+                        data["prompt_b64"],
+                        "fresh_integrated_worker.prompt_b64",
+                    ),
+                    config_bytes=_decode_b64(
+                        data["config_b64"],
+                        "fresh_integrated_worker.config_b64",
+                    ),
+                    request_bytes=_decode_b64(
+                        data["request_b64"],
+                        "fresh_integrated_worker.request_b64",
+                    ),
+                    emit_delta=emit_delta,
+                )
+                generation_facts = backend.last_generation_facts
+                if generation_facts is None:
+                    raise Phase4LocalQwenContractError(
+                        "fresh integrated generation facts are unavailable"
+                    )
+                response = {
+                    "protocol": FRESH_INTEGRATED_WORKER_PROTOCOL,
+                    "kind": "generation_result",
+                    "call_id": data["call_id"],
+                    "worker_id": worker_id,
+                    "raw_b64": _b64(
+                        raw,
+                        "fresh_integrated_worker.raw",
+                    ),
+                    "generation_facts": generation_facts,
+                }
+            except Exception:
+                traceback.print_exc(file=sys.stderr)
+                sys.stderr.flush()
+                response = {
+                    "protocol": FRESH_INTEGRATED_WORKER_PROTOCOL,
+                    "kind": "generation_error",
+                    "call_id": data["call_id"],
+                    "worker_id": worker_id,
+                }
+            send(response)
+    except Exception:
+        traceback.print_exc(file=sys.stderr)
+        sys.stderr.flush()
+        try:
+            send(
+                {
+                    "protocol": FRESH_INTEGRATED_WORKER_PROTOCOL,
+                    "kind": "load_error",
+                }
+            )
+        except Exception:
+            pass
+        return 2
+
+
 class Phase4LocalQwenPilotRunner:
     """Bounded node-local/integrated runner around the frozen P4-03 contract."""
 
@@ -8734,10 +9641,37 @@ class Phase4LocalQwenPilotRunner:
         assembler_context: object | None = None,
         assembler_guidance: object | None = None,
         r6_attempt_continuation: tuple[R6AttemptContinuationReceipt, AttemptResult] | None = None,
+        fresh_integrated_only: bool = False,
+        integrated_event_observer: Callable[[str], None] | None = None,
+        f4_normalizer: Callable[
+            [bytes, object, Mapping[str, object]],
+            tuple[Mapping[str, object], Mapping[str, object]],
+        ] | None = None,
+        integrated_run_id: str | None = None,
     ) -> None:
         pilot.validate()
         profile.validate()
         manifest.validate()
+        if type(fresh_integrated_only) is not bool:
+            raise Phase4LocalQwenContractError(
+                "fresh integrated mode flag is invalid"
+            )
+        if integrated_event_observer is not None and not callable(
+            integrated_event_observer
+        ):
+            raise Phase4LocalQwenContractError(
+                "integrated event observer is invalid"
+            )
+        if f4_normalizer is not None and not callable(f4_normalizer):
+            raise Phase4LocalQwenContractError("F4 normalizer is invalid")
+        if f4_normalizer is not None and not fresh_integrated_only:
+            raise Phase4LocalQwenContractError(
+                "F4 normalizer is only available in fresh integrated mode"
+            )
+        if integrated_run_id is not None and (
+            type(integrated_run_id) is not str or not integrated_run_id
+        ):
+            raise Phase4LocalQwenContractError("integrated run identity is invalid")
         if [policy.node_id for policy in policies] != list(NODE_ORDER):
             raise Phase4LocalQwenContractError("runner policies must be ordered F1-F4")
         if source_kind not in SOURCE_KINDS:
@@ -8751,9 +9685,19 @@ class Phase4LocalQwenPilotRunner:
         ):
             raise Phase4LocalQwenContractError("runner R6 continuation binding is invalid")
         if source_kind == "real_local_qwen":
+            controlled_real_backend = backend
+            if (
+                type(backend) is not SupervisedLocalQwenBackend
+                and fresh_integrated_only
+            ):
+                controlled_real_backend = getattr(
+                    backend,
+                    "_real_backend",
+                    None,
+                )
             if (
                 not isinstance(model_root, Path)
-                or type(backend) is not SupervisedLocalQwenBackend
+                or type(controlled_real_backend) is not SupervisedLocalQwenBackend
                 or type(load_receipt) is not LocalQwenLoadReceipt
                 or getattr(backend, "_real_runtime_capability", None)
                 is not _REAL_RUNTIME_CAPABILITY
@@ -8801,10 +9745,17 @@ class Phase4LocalQwenPilotRunner:
             or runtime_start_claim is not None
         ):
             raise Phase4LocalQwenContractError("fixture runner cannot carry real execution evidence")
-        elif (
-            type(backend) is not ScriptedFixtureBackend
-            or getattr(backend, "_fixture_capability", None)
-            is not _FIXTURE_BACKEND_CAPABILITY
+        elif not (
+            (
+                type(backend) is ScriptedFixtureBackend
+                and getattr(backend, "_fixture_capability", None)
+                is _FIXTURE_BACKEND_CAPABILITY
+            )
+            or (
+                fresh_integrated_only
+                and getattr(backend, "_fixture_capability", None)
+                is _FIXTURE_BACKEND_CAPABILITY
+            )
         ):
             raise Phase4LocalQwenContractError(
                 "fixture runner requires the controlled deterministic backend"
@@ -8844,6 +9795,9 @@ class Phase4LocalQwenPilotRunner:
             elif pilot.pilot_id == P4R6_PILOT_ID:
                 _, policy_raw = load_p4r6_policy_revision()
                 self._real_pilot_revision = "r6"
+            elif pilot.pilot_id.startswith(FRESH_INTEGRATED_PILOT_PREFIX):
+                policy_raw = b""
+                self._real_pilot_revision = "fresh_integrated"
             else:
                 raise Phase4LocalQwenContractError("real runner pilot revision is unknown")
             self._model_root = model_root.resolve(strict=True)
@@ -8892,6 +9846,14 @@ class Phase4LocalQwenPilotRunner:
         self._stopped = False
         self._model_calls = 0
         self._integrated_graph_events: list[str] = []
+        self._integrated_event_observer = integrated_event_observer
+        self._fresh_integrated_only = fresh_integrated_only
+        self._f4_normalizer = f4_normalizer
+        self._configured_integrated_run_id = integrated_run_id
+        self._normalization_records: dict[str, dict[str, object]] = {}
+        self._fresh_integrated_initial_authority_state_identity: dict[
+            str, object
+        ] | None = None
         self._integrated_node_pass_count = 0
         self._latest_result: AttemptResult | None = None
         self._mapping_record: dict[str, object] | None = None
@@ -8972,6 +9934,49 @@ class Phase4LocalQwenPilotRunner:
     @property
     def integrated_graph_events(self) -> tuple[str, ...]:
         return tuple(self._integrated_graph_events)
+
+    @property
+    def fresh_integrated_only(self) -> bool:
+        return self._fresh_integrated_only
+
+    @property
+    def source_kind(self) -> str:
+        return self._source_kind
+
+    @property
+    def model_calls(self) -> int:
+        return self._model_calls
+
+    @property
+    def latest_result(self) -> AttemptResult | None:
+        return (
+            None
+            if self._latest_result is None
+            else AttemptResult.from_dict(self._latest_result.to_dict())
+        )
+
+    @property
+    def fresh_integrated_initial_authority_state_identity(
+        self,
+    ) -> dict[str, object] | None:
+        return (
+            None
+            if self._fresh_integrated_initial_authority_state_identity is None
+            else copy.deepcopy(self._fresh_integrated_initial_authority_state_identity)
+        )
+
+    @property
+    def normalization_records(self) -> dict[str, dict[str, object]]:
+        return copy.deepcopy(self._normalization_records)
+
+    def _record_integrated_event(self, event: str) -> None:
+        if type(event) is not str or not event:
+            raise Phase4LocalQwenContractError(
+                "integrated graph event must be non-empty text"
+            )
+        self._integrated_graph_events.append(event)
+        if self._integrated_event_observer is not None:
+            self._integrated_event_observer(event)
 
     @property
     def latest_result(self) -> AttemptResult | None:
@@ -9211,13 +10216,19 @@ class Phase4LocalQwenPilotRunner:
             elif self._real_pilot_revision == "r6":
                 validate_p4r6_live_binding(model_root=self._model_root, result_root=self._result_root, b_input=self._b_input, pilot=self._pilot, profile=self._profile, policies=tuple(self._policies.values()))
                 _validate_p4r6_aggregate_budget(model_root=self._model_root, policy_raw=self._real_policy_raw, pilot=self._pilot, profile=self._profile)
-            else:
+            elif self._real_pilot_revision != "fresh_integrated":
                 raise Phase4LocalQwenContractError("real runner pilot revision drifted")
 
         # This is the exact generate-start count point: the immutable pre-call
         # record is already fsynced, then the ledger is fsynced, then generate
-        # is entered.  An exception after entry still consumes the call.
-        if self._source_kind == "real_local_qwen":
+        # is entered. A backend exception explicitly marked as
+        # ``worker_generate_started=False`` is handled below without consuming
+        # the call; every exception after the worker-acceptance boundary still
+        # consumes the call.
+        if (
+            self._source_kind == "real_local_qwen"
+            and self._real_pilot_revision != "fresh_integrated"
+        ):
             reserve = {
                 "r2": _reserve_p4r2_aggregate_generate_entry,
                 "r3": _reserve_p4r3_aggregate_generate_entry,
@@ -9270,8 +10281,57 @@ class Phase4LocalQwenPilotRunner:
                 result.canonical_bytes(),
             )
             return result
-        except Exception:
-            result = self._result(pre_call=pre_call, generate_started=generate_started, raw_status="not_captured", raw_relative=raw_relative, raw=None, parse_status="failed", node_contract_status="not_run", registry_status="not_run", failure_code="backend_exception", terminal=call_kind == "integrated" or (call_kind == "node_local" and attempt_index >= 2))
+        except Exception as exc:
+            if getattr(exc, "worker_generate_started", None) is False:
+                self._ledger = self._ledger.release_generate_started(
+                    node_id=node_id,
+                    call_kind=call_kind,
+                )
+                self._model_calls -= 1
+                result = self._result(
+                    pre_call=pre_call,
+                    generate_started=False,
+                    raw_status="not_captured",
+                    raw_relative=raw_relative,
+                    raw=None,
+                    parse_status="failed",
+                    node_contract_status="not_run",
+                    registry_status="not_run",
+                    failure_code="pre_worker_failure",
+                    terminal=(
+                        call_kind == "integrated"
+                        or (call_kind == "node_local" and attempt_index >= 2)
+                    ),
+                )
+                self._ledger = self._ledger.record_result(result)
+                self._latest_result = result
+                self._write_ledger()
+                _write_once(
+                    self._result_root,
+                    f"{pre_call.attempt_relative_path}/attempt_result.json",
+                    result.canonical_bytes(),
+                )
+                self._handle_failure(
+                    node_id=node_id,
+                    call_kind=call_kind,
+                    result=result,
+                )
+                return result
+            result = self._result(
+                pre_call=pre_call,
+                generate_started=generate_started,
+                raw_status="not_captured",
+                raw_relative=raw_relative,
+                raw=None,
+                parse_status="failed",
+                node_contract_status="not_run",
+                registry_status="not_run",
+                failure_code="backend_exception",
+                terminal=(
+                    call_kind == "integrated"
+                    or (call_kind == "node_local" and attempt_index >= 2)
+                ),
+            )
             self._ledger = self._ledger.record_result(result)
             self._latest_result = result
             self._write_ledger()
@@ -9297,8 +10357,44 @@ class Phase4LocalQwenPilotRunner:
 
             if self._active_authority_state is None:
                 raise Phase4LocalQwenContractError("authority state is missing")
+            validation_raw = raw
+            if node_id == "F4" and self._f4_normalizer is not None:
+                parsed_output = _strict_json(raw, require_canonical=False)
+                normalized_output, normalization_receipt = self._f4_normalizer(
+                    raw,
+                    parsed_output,
+                    self._active_authority_state,
+                )
+                if not isinstance(normalized_output, Mapping):
+                    raise Phase4LocalQwenContractError(
+                        "F4 normalized output must be an object"
+                    )
+                if not isinstance(normalization_receipt, Mapping):
+                    raise Phase4LocalQwenContractError(
+                        "F4 normalization receipt must be an object"
+                    )
+                validation_raw = json.dumps(
+                    normalized_output,
+                    ensure_ascii=False,
+                    separators=(",", ":"),
+                ).encode("utf-8")
+                normalized_artifact = _canonical_bytes(normalized_output)
+                normalization_payload = copy.deepcopy(
+                    dict(normalization_receipt)
+                )
+                self._normalization_records[node_id] = normalization_payload
+                _write_once(
+                    self._result_root,
+                    f"{pre_call.attempt_relative_path}/normalized_node_output.json",
+                    normalized_artifact,
+                )
+                _write_once(
+                    self._result_root,
+                    f"{pre_call.attempt_relative_path}/node_normalization_receipt.json",
+                    _canonical_bytes(normalization_payload),
+                )
             output = _validate_node_output_json(
-                raw,
+                validation_raw,
                 node_id=node_id,
                 authority_state=self._active_authority_state,
                 policy=policy,
@@ -9353,6 +10449,10 @@ class Phase4LocalQwenPilotRunner:
     def run_node_local(self, *, node_id: str, prompt_version: int = 1, change_reason: str | None = None) -> AttemptResult:
         """Run one explicit node-local attempt; a second call is never automatic."""
 
+        if self._fresh_integrated_only:
+            raise Phase4LocalQwenContractError(
+                "fresh integrated pilot forbids node-local generation"
+            )
         if self._stopped:
             raise Phase4LocalQwenContractError("pilot is stopped")
         if node_id not in NODE_ORDER:
@@ -9404,16 +10504,40 @@ class Phase4LocalQwenPilotRunner:
             raise Phase4LocalQwenContractError("pilot is stopped")
         if self._pilot.pilot_id in {P4R5_PILOT_ID, P4R6_PILOT_ID}:
             raise Phase4LocalQwenContractError("checkpoint recovery integrated execution is forbidden")
-        if any(self._node_local_status[node_id] != "passed" for node_id in NODE_ORDER):
+        if (
+            not self._fresh_integrated_only
+            and any(
+                self._node_local_status[node_id] != "passed"
+                for node_id in NODE_ORDER
+            )
+        ):
             raise Phase4LocalQwenContractError("all node-local contracts must pass before integrated run")
         if self._ledger.integrated_run_count >= 1:
             raise Phase4LocalQwenContractError("integrated run cap exhausted")
         self._active_call_kind = "integrated"
-        self._integrated_run_id = f"{self._pilot.pilot_id}-integrated-01"
+        self._integrated_run_id = (
+            self._configured_integrated_run_id
+            or f"{self._pilot.pilot_id}-integrated-01"
+        )
         self._active_run_id = self._integrated_run_id
         self._active_outputs = {}
         self._active_refs = {}
-        self._active_authority_state = self._authority_new()
+        initial_authority_state = self._authority_new()
+        if self._fresh_integrated_only:
+            if (
+                initial_authority_state.get("node_results")
+                or initial_authority_state.get("registry_inventory")
+                or initial_authority_state.get("pending_node_id") is not None
+                or initial_authority_state.get("pending_output") is not None
+            ):
+                raise Phase4LocalQwenContractError(
+                    "fresh integrated run authority state is not empty"
+                )
+            self._fresh_integrated_initial_authority_state_identity = _identity(
+                initial_authority_state,
+                revision=f"{P4_03_SCHEMA_PREFIX}.fresh_integrated.empty_authority.v1",
+            )
+        self._active_authority_state = initial_authority_state
         self._integrated_outcome = "running"
         self._ledger = self._ledger.begin_integrated_run()
         self._write_ledger()
@@ -9429,12 +10553,12 @@ class Phase4LocalQwenPilotRunner:
                 ) -> _IntegratedGraphState:
                     if state["terminal"]:
                         return state
-                    self._integrated_graph_events.append(f"{node_id}:started")
+                    self._record_integrated_event(f"{node_id}:started")
                     result = self._run_one(node_id=node_id, call_kind="integrated")
                     terminal = result.failure_code is not None
                     if not terminal:
                         self._integrated_node_pass_count += 1
-                    self._integrated_graph_events.append(
+                    self._record_integrated_event(
                         f"{node_id}:{'failed_closed' if terminal else 'passed'}"
                     )
                     return {
@@ -9447,7 +10571,7 @@ class Phase4LocalQwenPilotRunner:
             def map_use_cases(state: _IntegratedGraphState) -> _IntegratedGraphState:
                 if state["terminal"]:
                     return state
-                self._integrated_graph_events.append("map_use_cases:started")
+                self._record_integrated_event("map_use_cases:started")
                 try:
                     from req2web_orchestration.phase4_graph import phase4_create_mapping
 
@@ -9469,7 +10593,7 @@ class Phase4LocalQwenPilotRunner:
                     )
                     self._write_ledger()
                     terminal = True
-                self._integrated_graph_events.append(
+                self._record_integrated_event(
                     f"map_use_cases:{'failed_closed' if terminal else 'passed'}"
                 )
                 return {
@@ -9480,12 +10604,12 @@ class Phase4LocalQwenPilotRunner:
             def run_f4(state: _IntegratedGraphState) -> _IntegratedGraphState:
                 if state["terminal"]:
                     return state
-                self._integrated_graph_events.append("F4:started")
+                self._record_integrated_event("F4:started")
                 result = self._run_one(node_id="F4", call_kind="integrated")
                 terminal = result.failure_code is not None
                 if not terminal:
                     self._integrated_node_pass_count += 1
-                self._integrated_graph_events.append(
+                self._record_integrated_event(
                     f"F4:{'failed_closed' if terminal else 'passed'}"
                 )
                 return {
@@ -9496,7 +10620,7 @@ class Phase4LocalQwenPilotRunner:
             def compose_candidate(state: _IntegratedGraphState) -> _IntegratedGraphState:
                 if state["terminal"]:
                     return state
-                self._integrated_graph_events.append("compose_candidate:started")
+                self._record_integrated_event("compose_candidate:started")
                 try:
                     from req2web_orchestration.phase4_graph import (
                         phase4_compose_candidate,
@@ -9533,7 +10657,7 @@ class Phase4LocalQwenPilotRunner:
                     )
                     self._write_ledger()
                     terminal = True
-                self._integrated_graph_events.append(
+                self._record_integrated_event(
                     f"compose_candidate:{'failed_closed' if terminal else 'passed'}"
                 )
                 return {
@@ -9544,7 +10668,7 @@ class Phase4LocalQwenPilotRunner:
             def assemble_page_spec(state: _IntegratedGraphState) -> _IntegratedGraphState:
                 if state["terminal"]:
                     return state
-                self._integrated_graph_events.append("assemble_page_spec:started")
+                self._record_integrated_event("assemble_page_spec:started")
                 try:
                     from req2web_orchestration.phase4_graph import (
                         phase4_assemble_candidate,
@@ -9588,7 +10712,7 @@ class Phase4LocalQwenPilotRunner:
                     )
                     self._write_ledger()
                     terminal = True
-                self._integrated_graph_events.append(
+                self._record_integrated_event(
                     f"assemble_page_spec:{'failed_closed' if terminal else 'passed'}"
                 )
                 return {
@@ -9767,6 +10891,10 @@ __all__ = [
     "P4D1_TERMINAL_RECEIPT_SCHEMA_VERSION",
     "P4D1_TIMEOUT_SECONDS",
     "P4D1_WORKER_IPC_PROTOCOL",
+    "FRESH_INTEGRATED_PILOT_PREFIX",
+    "FRESH_INTEGRATED_RUNTIME_FACTS_NAME",
+    "FRESH_INTEGRATED_RUNTIME_FACTS_SCHEMA_VERSION",
+    "FRESH_INTEGRATED_WORKER_PROTOCOL",
     "P4R3_RESULT_BINDING_NAME",
     "P4R3_RESULT_POLICY_NAME",
     "P4R3_RESULT_R2_SUMMARY_NAME",
@@ -9822,6 +10950,7 @@ __all__ = [
     "SupervisedLocalQwenRuntime",
     "SupervisedWorkerFailure",
     "SupervisedWorkerStartFailure",
+    "start_supervised_local_qwen_fresh_integrated_runtime",
     "TRANSFORMERS_VERSION",
     "TORCH_VERSION",
     "WorkerStderrArtifact",

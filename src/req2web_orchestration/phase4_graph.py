@@ -49,6 +49,26 @@ DEPENDENCY_RECEIPT_REVISION = "req2web.phase4.langgraph_acquisition.p4_02a.v1"
 CANDIDATE_PROJECTION_STATUS = "candidate_composition_validated_only"
 ASSEMBLY_REVISION = "req2web.phase4.synthetic_assembly.p4_02a.v1"
 EVENT_REVISION = "req2web.phase4.node_event.p4_02a.v1"
+F4_AUDIT_REF_NORMALIZATION_REVISION = (
+    "req2web.phase4.f4_generic_audit_ref_normalization.p4_01a.v1"
+)
+F4_AUDIT_REF_NORMALIZATION_RECEIPT_SCHEMA_VERSION = (
+    "req2web.phase4.f4_generic_audit_ref_normalization_receipt.p4_01a.v1"
+)
+F4_AUDIT_REF_OWNERSHIP_NORMALIZATION_REVISION = (
+    "req2web.phase4.f4_generic_audit_ref_ownership_normalization.p4_01b.v1"
+)
+F4_AUDIT_REF_OWNERSHIP_RECEIPT_SCHEMA_VERSION = (
+    "req2web.phase4.f4_generic_audit_ref_ownership_normalization_receipt.p4_01b.v1"
+)
+F4_P4_01A_ORDER_FAILURE = (
+    "F4.acceptance_check.refs order or uniqueness is invalid"
+)
+F4_P4_01B_LEGACY_REF_TARGETS = {
+    "component": ("F1", "component", REGISTRY_REVISION + ".f1"),
+    "state": ("F2", "state", REGISTRY_REVISION + ".f2"),
+    "interaction": ("F3", "interaction", REGISTRY_REVISION + ".f3"),
+}
 NODE_ORDER = ("F1", "F2", "F3", "F4")
 GRAPH_NODE_ORDER = (
     "F1",
@@ -189,6 +209,19 @@ def _canonical_bytes(value: object) -> bytes:
         ).encode("utf-8")
     except (TypeError, ValueError) as exc:
         raise Phase4ContractError("value is not canonical JSON") from exc
+
+
+def _ordered_json_bytes(value: object) -> bytes:
+    try:
+        return json.dumps(
+            value,
+            ensure_ascii=False,
+            sort_keys=False,
+            separators=(",", ":"),
+            allow_nan=False,
+        ).encode("utf-8")
+    except (TypeError, ValueError) as exc:
+        raise Phase4ContractError("value is not serializable JSON") from exc
 
 
 def _canonical_value(value: object) -> object:
@@ -983,13 +1016,21 @@ def _validate_f4(output: object, state: Mapping[str, object]) -> dict[str, objec
             raise Phase4ContractError("F4 acceptance description is too short")
         refs = _refs(row["use_case_refs"], "F4.acceptance_check.use_case_refs")
         row_use_cases = [str(ref["ref_id"]) for ref in refs]
-        if not row_use_cases or any(ref["ref_type"] != "canonical_b_use_case" for ref in refs):
+        if not row_use_cases or any(
+            ref["ref_type"] != "canonical_b_use_case"
+            or ref["ref_revision"] != "canonical_b.use_case.v1"
+            for ref in refs
+        ):
             raise Phase4ContractError("F4 use-case ref type is invalid")
         if row_use_cases != [item for item in use_case_ids if item in set(row_use_cases)]:
             raise Phase4ContractError("F4 use-case order or membership is invalid")
         covered.update(row_use_cases)
         state_ref = _ref(row["state_ref"], "F4.acceptance_check.state_ref")
-        if state_ref["ref_type"] != "registry_stable" or state_ref["ref_id"] not in f2_stable:
+        if (
+            state_ref["ref_type"] != "registry_stable"
+            or state_ref["ref_revision"] != REGISTRY_REVISION
+            or state_ref["ref_id"] not in f2_stable
+        ):
             raise Phase4ContractError("F4 state ref is invalid")
     if len(seen_local) != len(set(seen_local)) or covered != set(use_case_ids):
         raise Phase4ContractError("F4 IDs or use-case coverage is invalid")
@@ -1894,6 +1935,1084 @@ def phase4_validate_node_output(
     """Reuse the existing F1-F4 validator without creating a second schema."""
 
     return _node_validator(node_id, output, state)
+
+
+def _parse_json_without_duplicate_keys(raw: bytes) -> object:
+    if not isinstance(raw, bytes) or not raw or raw.startswith(b"\xef\xbb\xbf"):
+        raise Phase4ContractError("F4 normalization raw bytes are invalid")
+
+    def object_pairs(pairs: list[tuple[str, object]]) -> dict[str, object]:
+        result: dict[str, object] = {}
+        for key, value in pairs:
+            if key in result:
+                raise Phase4ContractError(
+                    "F4 normalization raw JSON contains duplicate keys"
+                )
+            result[key] = value
+        return result
+
+    try:
+        return json.loads(raw.decode("utf-8"), object_pairs_hook=object_pairs)
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise Phase4ContractError("F4 normalization raw JSON is invalid") from exc
+
+
+def _raw_bytes_identity(raw: bytes, *, revision: str) -> dict[str, object]:
+    return {
+        "identity_kind": "raw_bytes",
+        "sha256": _sha256(raw),
+        "byte_length": len(raw),
+        "revision": revision,
+    }
+
+
+def _validate_raw_bytes_identity(
+    value: object,
+    raw: bytes,
+    *,
+    revision: str,
+    name: str,
+) -> dict[str, object]:
+    data = _object(value, _IDENTITY_KEYS, name)
+    if data != _raw_bytes_identity(raw, revision=revision):
+        raise Phase4ContractError(f"{name} drifted")
+    return data
+
+
+def _f4_ref_tuple(value: object, name: str) -> tuple[str, str, str]:
+    row = _ref(value, name)
+    return tuple(str(row[key]) for key in _REF_KEYS)  # type: ignore[return-value]
+
+
+def _validate_f4_audit_ref_target(
+    ref: Mapping[str, object],
+    state: Mapping[str, object],
+) -> None:
+    ref_type = str(ref["ref_type"])
+    ref_id = str(ref["ref_id"])
+    ref_revision = str(ref["ref_revision"])
+    if ref_type == "canonical_b_use_case":
+        valid_ids = {
+            str(row["use_case_id"])
+            for row in state["b_input"]["use_cases"]
+        }
+        if (
+            ref_revision != "canonical_b.use_case.v1"
+            or ref_id not in valid_ids
+        ):
+            raise Phase4ContractError("F4 audit use-case ref is invalid")
+        return
+
+    node_by_type = {
+        "section": ("F1", "section"),
+        "component": ("F1", "component"),
+        "state": ("F2", "state"),
+        "interaction": ("F3", "interaction"),
+    }
+    target = node_by_type.get(ref_type)
+    if target is None or ref_revision != REGISTRY_REVISION:
+        raise Phase4ContractError("F4 audit ref type or revision is invalid")
+    node_id, entity_type = target
+    matches = [
+        row
+        for row in state["registry_inventory"]
+        if (
+            row["node_id"] == node_id
+            and row["entity_type"] == entity_type
+            and row["stable_id"] == ref_id
+        )
+    ]
+    if len(matches) != 1:
+        raise Phase4ContractError("F4 audit ref target is invalid")
+
+
+def _normalize_f4_audit_refs(
+    output: object,
+    state: Mapping[str, object],
+) -> tuple[dict[str, object], list[dict[str, object]]]:
+    normalized = copy.deepcopy(output)
+    root = _object(
+        normalized,
+        ("acceptance_checks",),
+        "F4.normalization.output",
+    )
+    checks = root["acceptance_checks"]
+    if not isinstance(checks, list) or not checks:
+        raise Phase4ContractError(
+            "F4 normalization acceptance_checks are invalid"
+        )
+    operations: list[dict[str, object]] = []
+    for index, check in enumerate(checks):
+        if not isinstance(check, dict) or "refs" not in check:
+            raise Phase4ContractError(
+                "F4 normalization refs path is unavailable"
+            )
+        refs = check["refs"]
+        if not isinstance(refs, list):
+            raise Phase4ContractError("F4 normalization refs must be a list")
+        rows = [_ref(row, f"F4.normalization.refs[{index}]") for row in refs]
+        tuples = [
+            tuple(str(row[key]) for key in _REF_KEYS)
+            for row in rows
+        ]
+        if len(tuples) != len(set(tuples)):
+            raise Phase4ContractError("F4 normalization refs contain duplicates")
+        for row in rows:
+            _validate_f4_audit_ref_target(row, state)
+        ordered = sorted(tuples)
+        if tuples == ordered:
+            continue
+        check["refs"] = [
+            {
+                "ref_type": ref_type,
+                "ref_id": ref_id,
+                "ref_revision": ref_revision,
+            }
+            for ref_type, ref_id, ref_revision in ordered
+        ]
+        operations.append(
+            {
+                "json_pointer": f"/acceptance_checks/{index}/refs",
+                "before_order": [list(row) for row in tuples],
+                "after_order": [list(row) for row in ordered],
+            }
+        )
+    return normalized, operations
+
+
+def _phase4_normalize_and_validate_f4_p4_01a(
+    *,
+    raw_bytes: bytes,
+    output: object,
+    state: Mapping[str, object],
+) -> tuple[dict[str, object], dict[str, object]]:
+    """Normalize only F4 generic audit refs while preserving immutable raw."""
+
+    authority = _phase4_validate_authority_state(
+        state,
+        ("F1", "F2", "F3"),
+    )
+    parsed_raw = _parse_json_without_duplicate_keys(raw_bytes)
+    if parsed_raw != output:
+        raise Phase4ContractError(
+            "F4 normalization parsed output does not match raw bytes"
+        )
+
+    raw_contract_success = True
+    raw_failure_code: str | None = None
+    try:
+        _validate_f4(output, authority)
+    except Phase4ContractError as exc:
+        raw_contract_success = False
+        raw_failure_code = str(exc)
+
+    normalized, operations = _normalize_f4_audit_refs(output, authority)
+    validated = _validate_f4(normalized, authority)
+    if raw_contract_success and operations:
+        raise Phase4ContractError(
+            "F4 normalization changed an already valid raw output"
+        )
+    if not raw_contract_success and not operations:
+        raise Phase4ContractError(
+            "F4 normalization cannot repair a non-order contract failure"
+        )
+    if (
+        not raw_contract_success
+        and raw_failure_code
+        != "F4.acceptance_check.refs order or uniqueness is invalid"
+    ):
+        raise Phase4ContractError(
+            "F4 normalization raw failure is outside the approved boundary"
+        )
+
+    status = "not_needed" if not operations else "normalized"
+    receipt: dict[str, object] = {
+        "schema_version": F4_AUDIT_REF_NORMALIZATION_RECEIPT_SCHEMA_VERSION,
+        "receipt_id": "pending",
+        "normalizer_revision": F4_AUDIT_REF_NORMALIZATION_REVISION,
+        "node_id": "F4",
+        "case_id": authority["case_id"],
+        "request_id": authority["request_id"],
+        "contract_identity": copy.deepcopy(authority["contract_identity"]),
+        "status": status,
+        "raw_model_contract_success": raw_contract_success,
+        "raw_failure_code": raw_failure_code,
+        "raw_output_identity": _raw_bytes_identity(
+            raw_bytes,
+            revision=(
+                F4_AUDIT_REF_NORMALIZATION_REVISION + ".raw_output"
+            ),
+        ),
+        "normalized_output_identity": make_identity(
+            validated,
+            revision=(
+                F4_AUDIT_REF_NORMALIZATION_REVISION + ".normalized_output"
+            ),
+        ),
+        "operations": operations,
+        "normalization_count": len(operations),
+        "normalized_node_contract_success": True,
+        "semantic_arrays_unchanged": True,
+        "model_generate_calls": 0,
+        "normalization_counts_as_repair": False,
+    }
+    receipt["receipt_id"] = _sha256(
+        _canonical_bytes(
+            {
+                key: value
+                for key, value in receipt.items()
+                if key != "receipt_id"
+            }
+        )
+    )
+    phase4_validate_f4_normalization_receipt(
+        receipt,
+        raw_bytes=raw_bytes,
+        normalized_output=validated,
+        state=authority,
+    )
+    return validated, receipt
+
+
+def _p4_01b_authority_bindings(
+    state: Mapping[str, object],
+) -> tuple[Phase4GraphState, dict[str, object]]:
+    authority = _phase4_validate_authority_state(
+        state,
+        ("F1", "F2", "F3"),
+    )
+    mapping = _validate_mapping(_mapping_record(authority), authority)
+    identities: dict[str, object] = {
+        "b_identity": copy.deepcopy(authority["b_identity"]),
+        "f1_cumulative_registry_identity": copy.deepcopy(
+            authority["registry_identities"]["F1"]
+        ),
+        "f2_cumulative_registry_identity": copy.deepcopy(
+            authority["registry_identities"]["F2"]
+        ),
+        "f3_cumulative_registry_identity": copy.deepcopy(
+            authority["registry_identities"]["F3"]
+        ),
+        "mapping_identity": make_identity(
+            mapping,
+            revision=MAPPING_REVISION,
+        ),
+    }
+    for key, identity in identities.items():
+        _identity(identity, f"P4-01b.authority_identities.{key}")
+    return authority, identities
+
+
+def _p4_01b_registry_targets(
+    state: Mapping[str, object],
+) -> dict[str, dict[str, object]]:
+    targets: dict[str, dict[str, object]] = {}
+    for row in state["registry_inventory"]:
+        if row["node_id"] not in {"F1", "F2", "F3"}:
+            continue
+        stable_id = _text(row["stable_id"], "P4-01b.registry.stable_id")
+        if stable_id in targets:
+            raise Phase4ContractError(
+                "P4-01b registry stable ID is not globally unique"
+            )
+        targets[stable_id] = dict(row)
+    return targets
+
+
+def _p4_01b_normalize_generic_ref(
+    value: object,
+    *,
+    pointer: str,
+    state: Mapping[str, object],
+    targets: Mapping[str, Mapping[str, object]],
+) -> tuple[dict[str, object], dict[str, object] | None]:
+    before = _ref(value, f"P4-01b{pointer}")
+    ref_type = str(before["ref_type"])
+    ref_id = str(before["ref_id"])
+    ref_revision = str(before["ref_revision"])
+
+    if ref_type == "canonical_b_use_case":
+        valid_ids = {
+            str(row["use_case_id"])
+            for row in state["b_input"]["use_cases"]
+        }
+        if (
+            ref_revision != "canonical_b.use_case.v1"
+            or ref_id not in valid_ids
+        ):
+            raise Phase4ContractError(
+                "P4-01b canonical B ref is invalid"
+            )
+        return copy.deepcopy(before), None
+
+    if ref_revision == REGISTRY_REVISION:
+        _validate_f4_audit_ref_target(before, state)
+        return copy.deepcopy(before), None
+
+    legacy_target = F4_P4_01B_LEGACY_REF_TARGETS.get(ref_type)
+    if legacy_target is None or ref_revision != legacy_target[2]:
+        raise Phase4ContractError(
+            "P4-01b legacy generic ref alias is invalid"
+        )
+    node_id, entity_type, _ = legacy_target
+    target = targets.get(ref_id)
+    if (
+        target is None
+        or target["node_id"] != node_id
+        or target["entity_type"] != entity_type
+    ):
+        raise Phase4ContractError(
+            "P4-01b legacy generic ref target is invalid"
+        )
+    after = {
+        "ref_type": ref_type,
+        "ref_id": ref_id,
+        "ref_revision": REGISTRY_REVISION,
+    }
+    return after, {
+        "json_pointer": pointer,
+        "operation_kind": "normalize_legacy_registry_ref",
+        "before": copy.deepcopy(before),
+        "after": copy.deepcopy(after),
+    }
+
+
+def _p4_01b_normalize_ownership(
+    output: object,
+    state: Mapping[str, object],
+) -> tuple[dict[str, object], list[dict[str, object]], list[str]]:
+    normalized = copy.deepcopy(output)
+    root = _object(
+        normalized,
+        ("acceptance_checks",),
+        "P4-01b.normalization.output",
+    )
+    checks = root["acceptance_checks"]
+    if not isinstance(checks, list) or not checks:
+        raise Phase4ContractError(
+            "P4-01b acceptance_checks are invalid"
+        )
+    targets = _p4_01b_registry_targets(state)
+    use_case_ids = {
+        str(row["use_case_id"])
+        for row in state["b_input"]["use_cases"]
+    }
+    state_targets = {
+        stable_id: row
+        for stable_id, row in targets.items()
+        if row["node_id"] == "F2" and row["entity_type"] == "state"
+    }
+    operations: list[dict[str, object]] = []
+    allowlisted_pointers: list[str] = []
+    for check_index, raw_check in enumerate(checks):
+        check = _object(
+            raw_check,
+            (
+                "local_id",
+                "entity_type",
+                "description",
+                "use_case_refs",
+                "state_ref",
+                "refs",
+            ),
+            f"P4-01b.acceptance_checks[{check_index}]",
+        )
+        use_case_refs = check["use_case_refs"]
+        if not isinstance(use_case_refs, list) or not use_case_refs:
+            raise Phase4ContractError(
+                "P4-01b use_case_refs must be a non-empty string list"
+            )
+        for ref_index, raw_ref in enumerate(use_case_refs):
+            if not isinstance(raw_ref, str):
+                raise Phase4ContractError(
+                    "P4-01b use_case_refs must not mix ref shapes"
+                )
+            use_case_id = _text(
+                raw_ref,
+                f"P4-01b.acceptance_checks[{check_index}]"
+                f".use_case_refs[{ref_index}]",
+            )
+            if use_case_id not in use_case_ids:
+                raise Phase4ContractError(
+                    "P4-01b canonical B use-case target is invalid"
+                )
+            after = {
+                "ref_type": "canonical_b_use_case",
+                "ref_id": use_case_id,
+                "ref_revision": "canonical_b.use_case.v1",
+            }
+            pointer = (
+                f"/acceptance_checks/{check_index}"
+                f"/use_case_refs/{ref_index}"
+            )
+            check["use_case_refs"][ref_index] = after
+            allowlisted_pointers.append(pointer)
+            operations.append(
+                {
+                    "json_pointer": pointer,
+                    "operation_kind": "expand_canonical_b_use_case_ref",
+                    "before": raw_ref,
+                    "after": copy.deepcopy(after),
+                }
+            )
+
+        raw_state_ref = check["state_ref"]
+        if not isinstance(raw_state_ref, str):
+            raise Phase4ContractError(
+                "P4-01b state_ref must be a non-empty string"
+            )
+        state_id = _text(
+            raw_state_ref,
+            f"P4-01b.acceptance_checks[{check_index}].state_ref",
+        )
+        if state_id not in state_targets:
+            raise Phase4ContractError(
+                "P4-01b F2 state target is invalid"
+            )
+        state_after = {
+            "ref_type": "registry_stable",
+            "ref_id": state_id,
+            "ref_revision": REGISTRY_REVISION,
+        }
+        state_pointer = f"/acceptance_checks/{check_index}/state_ref"
+        check["state_ref"] = state_after
+        allowlisted_pointers.append(state_pointer)
+        operations.append(
+            {
+                "json_pointer": state_pointer,
+                "operation_kind": "expand_registry_stable_state_ref",
+                "before": raw_state_ref,
+                "after": copy.deepcopy(state_after),
+            }
+        )
+
+        refs = check["refs"]
+        if not isinstance(refs, list):
+            raise Phase4ContractError("P4-01b refs must be a ref list")
+        normalized_refs: list[dict[str, object]] = []
+        for ref_index, raw_ref in enumerate(refs):
+            pointer = (
+                f"/acceptance_checks/{check_index}"
+                f"/refs/{ref_index}"
+            )
+            after, operation = _p4_01b_normalize_generic_ref(
+                raw_ref,
+                pointer=pointer,
+                state=state,
+                targets=targets,
+            )
+            normalized_refs.append(after)
+            if operation is not None:
+                allowlisted_pointers.append(pointer)
+                operations.append(operation)
+        normalized_tuples = [
+            tuple(str(row[key]) for key in _REF_KEYS)
+            for row in normalized_refs
+        ]
+        if len(normalized_tuples) != len(set(normalized_tuples)):
+            raise Phase4ContractError(
+                "P4-01b normalized refs contain duplicates"
+            )
+        check["refs"] = normalized_refs
+    return normalized, operations, allowlisted_pointers
+
+
+def _replace_json_pointer(
+    value: object,
+    pointer: str,
+    replacement: object,
+) -> None:
+    if not pointer.startswith("/") or pointer == "/":
+        raise Phase4ContractError("P4-01b JSON pointer is invalid")
+    tokens = [
+        token.replace("~1", "/").replace("~0", "~")
+        for token in pointer[1:].split("/")
+    ]
+    current = value
+    for token in tokens[:-1]:
+        if isinstance(current, dict):
+            if token not in current:
+                raise Phase4ContractError(
+                    "P4-01b JSON pointer target is missing"
+                )
+            current = current[token]
+        elif isinstance(current, list):
+            try:
+                index = int(token)
+            except ValueError as exc:
+                raise Phase4ContractError(
+                    "P4-01b JSON pointer list index is invalid"
+                ) from exc
+            if index < 0 or index >= len(current):
+                raise Phase4ContractError(
+                    "P4-01b JSON pointer list index is out of range"
+                )
+            current = current[index]
+        else:
+            raise Phase4ContractError(
+                "P4-01b JSON pointer parent is invalid"
+            )
+    leaf = tokens[-1]
+    if isinstance(current, dict):
+        if leaf not in current:
+            raise Phase4ContractError(
+                "P4-01b JSON pointer target is missing"
+            )
+        current[leaf] = replacement
+    elif isinstance(current, list):
+        try:
+            index = int(leaf)
+        except ValueError as exc:
+            raise Phase4ContractError(
+                "P4-01b JSON pointer list index is invalid"
+            ) from exc
+        if index < 0 or index >= len(current):
+            raise Phase4ContractError(
+                "P4-01b JSON pointer list index is out of range"
+            )
+        current[index] = replacement
+    else:
+        raise Phase4ContractError(
+            "P4-01b JSON pointer target parent is invalid"
+        )
+
+
+def _p4_01b_non_allowlisted_tree(
+    value: object,
+    pointers: list[str],
+) -> object:
+    masked = copy.deepcopy(value)
+    effective_pointers: list[str] = []
+    for pointer in sorted(set(pointers), key=lambda item: (len(item), item)):
+        if any(
+            pointer == parent or pointer.startswith(parent + "/")
+            for parent in effective_pointers
+        ):
+            continue
+        effective_pointers.append(pointer)
+    for pointer in effective_pointers:
+        _replace_json_pointer(
+            masked,
+            pointer,
+            "__p4_01b_allowlisted_value__",
+        )
+    return masked
+
+
+def _p4_01b_sort_operations(
+    sort_operations: list[dict[str, object]],
+) -> list[dict[str, object]]:
+    return [
+        {
+            "json_pointer": operation["json_pointer"],
+            "operation_kind": "p4_01a_sort_generic_refs",
+            "before": copy.deepcopy(operation["before_order"]),
+            "after": copy.deepcopy(operation["after_order"]),
+        }
+        for operation in sort_operations
+    ]
+
+
+def _p4_01b_shape_hint(value: object) -> bool:
+    if not isinstance(value, dict):
+        return False
+    checks = value.get("acceptance_checks")
+    if not isinstance(checks, list):
+        return False
+    for check in checks:
+        if not isinstance(check, dict):
+            continue
+        use_case_refs = check.get("use_case_refs")
+        if isinstance(use_case_refs, list) and any(
+            isinstance(item, str) for item in use_case_refs
+        ):
+            return True
+        if isinstance(check.get("state_ref"), str):
+            return True
+    return False
+
+
+def _phase4_normalize_and_validate_f4_p4_01b(
+    *,
+    raw_bytes: bytes,
+    output: object,
+    state: Mapping[str, object],
+    raw_failure_code: str,
+) -> tuple[dict[str, object], dict[str, object]]:
+    authority, authority_identities = _p4_01b_authority_bindings(state)
+    ownership_output, ownership_operations, ownership_pointers = (
+        _p4_01b_normalize_ownership(output, authority)
+    )
+    try:
+        _validate_f4(ownership_output, authority)
+    except Phase4ContractError as exc:
+        if str(exc) != F4_P4_01A_ORDER_FAILURE:
+            raise
+    ownership_raw = _ordered_json_bytes(ownership_output)
+    normalized_output, p4_01a_receipt = (
+        _phase4_normalize_and_validate_f4_p4_01a(
+            raw_bytes=ownership_raw,
+            output=ownership_output,
+            state=authority,
+        )
+    )
+    sort_operations = _p4_01b_sort_operations(
+        p4_01a_receipt["operations"]
+    )
+    all_operations = [
+        *ownership_operations,
+        *sort_operations,
+    ]
+    all_pointers = [
+        *ownership_pointers,
+        *[
+            str(operation["json_pointer"])
+            for operation in sort_operations
+        ],
+    ]
+    before_tree = _p4_01b_non_allowlisted_tree(
+        _parse_json_without_duplicate_keys(raw_bytes),
+        all_pointers,
+    )
+    after_tree = _p4_01b_non_allowlisted_tree(
+        normalized_output,
+        all_pointers,
+    )
+    before_tree_identity = make_identity(
+        before_tree,
+        revision=(
+            F4_AUDIT_REF_OWNERSHIP_NORMALIZATION_REVISION
+            + ".non_allowlisted_tree"
+        ),
+    )
+    after_tree_identity = make_identity(
+        after_tree,
+        revision=(
+            F4_AUDIT_REF_OWNERSHIP_NORMALIZATION_REVISION
+            + ".non_allowlisted_tree"
+        ),
+    )
+    if before_tree_identity != after_tree_identity:
+        raise Phase4ContractError(
+            "P4-01b non-allowlisted tree drifted"
+        )
+    receipt: dict[str, object] = {
+        "schema_version": F4_AUDIT_REF_OWNERSHIP_RECEIPT_SCHEMA_VERSION,
+        "receipt_id": "pending",
+        "normalizer_revision": (
+            F4_AUDIT_REF_OWNERSHIP_NORMALIZATION_REVISION
+        ),
+        "node_id": "F4",
+        "case_id": authority["case_id"],
+        "request_id": authority["request_id"],
+        "contract_identity": copy.deepcopy(authority["contract_identity"]),
+        "authority_identities": authority_identities,
+        "status": "normalized",
+        "raw_model_contract_success": False,
+        "raw_failure_code": raw_failure_code,
+        "normalized_node_contract_success": True,
+        "raw_output_identity": _raw_bytes_identity(
+            raw_bytes,
+            revision=(
+                F4_AUDIT_REF_OWNERSHIP_NORMALIZATION_REVISION
+                + ".raw_output"
+            ),
+        ),
+        "ownership_output_identity": make_identity(
+            ownership_output,
+            revision=(
+                F4_AUDIT_REF_OWNERSHIP_NORMALIZATION_REVISION
+                + ".ownership_output"
+            ),
+        ),
+        "normalized_output_identity": make_identity(
+            normalized_output,
+            revision=(
+                F4_AUDIT_REF_OWNERSHIP_NORMALIZATION_REVISION
+                + ".normalized_output"
+            ),
+        ),
+        "operations": all_operations,
+        "ownership_operation_count": len(ownership_operations),
+        "sort_operation_count": len(sort_operations),
+        "normalization_count": len(all_operations),
+        "p4_01a_receipt": copy.deepcopy(p4_01a_receipt),
+        "non_allowlisted_tree_identity_before": before_tree_identity,
+        "non_allowlisted_tree_identity_after": after_tree_identity,
+        "semantic_arrays_unchanged": True,
+        "model_generate_calls": 0,
+        "retry_count": 0,
+        "repair_attempted": False,
+        "normalization_counts_as_repair": False,
+    }
+    receipt["receipt_id"] = _sha256(
+        _canonical_bytes(
+            {
+                key: value
+                for key, value in receipt.items()
+                if key != "receipt_id"
+            }
+        )
+    )
+    phase4_validate_f4_normalization_receipt(
+        receipt,
+        raw_bytes=raw_bytes,
+        normalized_output=normalized_output,
+        state=authority,
+    )
+    return normalized_output, receipt
+
+
+def phase4_normalize_and_validate_f4_output(
+    *,
+    raw_bytes: bytes,
+    output: object,
+    state: Mapping[str, object],
+) -> tuple[dict[str, object], dict[str, object]]:
+    """Dispatch P4-01a order-only or P4-01b ownership normalization."""
+
+    authority = _phase4_validate_authority_state(
+        state,
+        ("F1", "F2", "F3"),
+    )
+    parsed_raw = _parse_json_without_duplicate_keys(raw_bytes)
+    if parsed_raw != output:
+        raise Phase4ContractError(
+            "F4 normalization parsed output does not match raw bytes"
+        )
+    try:
+        _validate_f4(output, authority)
+    except Phase4ContractError as exc:
+        if _p4_01b_shape_hint(parsed_raw):
+            return _phase4_normalize_and_validate_f4_p4_01b(
+                raw_bytes=raw_bytes,
+                output=output,
+                state=authority,
+                raw_failure_code=str(exc),
+            )
+        if str(exc) == F4_P4_01A_ORDER_FAILURE:
+            return _phase4_normalize_and_validate_f4_p4_01a(
+                raw_bytes=raw_bytes,
+                output=output,
+                state=authority,
+            )
+        return _phase4_normalize_and_validate_f4_p4_01b(
+            raw_bytes=raw_bytes,
+            output=output,
+            state=authority,
+            raw_failure_code=str(exc),
+        )
+    return _phase4_normalize_and_validate_f4_p4_01a(
+        raw_bytes=raw_bytes,
+        output=output,
+        state=authority,
+    )
+
+
+def phase4_validate_f4_p4_01b_normalization_receipt(
+    value: object,
+    *,
+    raw_bytes: bytes,
+    normalized_output: object,
+    state: Mapping[str, object],
+) -> dict[str, object]:
+    """Replay the P4-01b ownership stage and its P4-01a sort stage."""
+
+    keys = (
+        "schema_version",
+        "receipt_id",
+        "normalizer_revision",
+        "node_id",
+        "case_id",
+        "request_id",
+        "contract_identity",
+        "authority_identities",
+        "status",
+        "raw_model_contract_success",
+        "raw_failure_code",
+        "normalized_node_contract_success",
+        "raw_output_identity",
+        "ownership_output_identity",
+        "normalized_output_identity",
+        "operations",
+        "ownership_operation_count",
+        "sort_operation_count",
+        "normalization_count",
+        "p4_01a_receipt",
+        "non_allowlisted_tree_identity_before",
+        "non_allowlisted_tree_identity_after",
+        "semantic_arrays_unchanged",
+        "model_generate_calls",
+        "retry_count",
+        "repair_attempted",
+        "normalization_counts_as_repair",
+    )
+    data = _object(value, keys, "F4.p4_01b_normalization_receipt")
+    authority, expected_authority_identities = _p4_01b_authority_bindings(
+        state
+    )
+    if (
+        data["schema_version"]
+        != F4_AUDIT_REF_OWNERSHIP_RECEIPT_SCHEMA_VERSION
+        or data["normalizer_revision"]
+        != F4_AUDIT_REF_OWNERSHIP_NORMALIZATION_REVISION
+        or data["node_id"] != "F4"
+        or data["case_id"] != authority["case_id"]
+        or data["request_id"] != authority["request_id"]
+        or data["contract_identity"] != authority["contract_identity"]
+        or data["authority_identities"]
+        != expected_authority_identities
+    ):
+        raise Phase4ContractError(
+            "P4-01b normalization receipt binding drifted"
+        )
+    _validate_raw_bytes_identity(
+        data["raw_output_identity"],
+        raw_bytes,
+        revision=(
+            F4_AUDIT_REF_OWNERSHIP_NORMALIZATION_REVISION
+            + ".raw_output"
+        ),
+        name="F4.p4_01b.raw_output_identity",
+    )
+    parsed_raw = _parse_json_without_duplicate_keys(raw_bytes)
+    ownership_output, ownership_operations, ownership_pointers = (
+        _p4_01b_normalize_ownership(parsed_raw, authority)
+    )
+    try:
+        _validate_f4(ownership_output, authority)
+    except Phase4ContractError as exc:
+        if str(exc) != F4_P4_01A_ORDER_FAILURE:
+            raise
+    ownership_raw = _ordered_json_bytes(ownership_output)
+    expected_output, expected_p4_01a_receipt = (
+        _phase4_normalize_and_validate_f4_p4_01a(
+            raw_bytes=ownership_raw,
+            output=ownership_output,
+            state=authority,
+        )
+    )
+    validated = _validate_f4(normalized_output, authority)
+    if expected_output != validated:
+        raise Phase4ContractError(
+            "P4-01b normalized output replay drifted"
+        )
+    expected_sort_operations = _p4_01b_sort_operations(
+        expected_p4_01a_receipt["operations"]
+    )
+    expected_operations = [
+        *ownership_operations,
+        *expected_sort_operations,
+    ]
+    all_pointers = [
+        *ownership_pointers,
+        *[
+            str(operation["json_pointer"])
+            for operation in expected_sort_operations
+        ],
+    ]
+    before_tree_identity = make_identity(
+        _p4_01b_non_allowlisted_tree(parsed_raw, all_pointers),
+        revision=(
+            F4_AUDIT_REF_OWNERSHIP_NORMALIZATION_REVISION
+            + ".non_allowlisted_tree"
+        ),
+    )
+    after_tree_identity = make_identity(
+        _p4_01b_non_allowlisted_tree(validated, all_pointers),
+        revision=(
+            F4_AUDIT_REF_OWNERSHIP_NORMALIZATION_REVISION
+            + ".non_allowlisted_tree"
+        ),
+    )
+    if (
+        data["ownership_output_identity"]
+        != make_identity(
+            ownership_output,
+            revision=(
+                F4_AUDIT_REF_OWNERSHIP_NORMALIZATION_REVISION
+                + ".ownership_output"
+            ),
+        )
+        or data["normalized_output_identity"]
+        != make_identity(
+            validated,
+            revision=(
+                F4_AUDIT_REF_OWNERSHIP_NORMALIZATION_REVISION
+                + ".normalized_output"
+            ),
+        )
+        or data["operations"] != expected_operations
+        or data["ownership_operation_count"]
+        != len(ownership_operations)
+        or data["sort_operation_count"]
+        != len(expected_sort_operations)
+        or data["normalization_count"] != len(expected_operations)
+        or data["p4_01a_receipt"] != expected_p4_01a_receipt
+        or data["non_allowlisted_tree_identity_before"]
+        != before_tree_identity
+        or data["non_allowlisted_tree_identity_after"]
+        != after_tree_identity
+        or before_tree_identity != after_tree_identity
+    ):
+        raise Phase4ContractError(
+            "P4-01b normalization receipt replay drifted"
+        )
+    phase4_validate_f4_normalization_receipt(
+        data["p4_01a_receipt"],
+        raw_bytes=ownership_raw,
+        normalized_output=expected_output,
+        state=authority,
+    )
+    if (
+        data["status"] != "normalized"
+        or data["raw_model_contract_success"] is not False
+        or not isinstance(data["raw_failure_code"], str)
+        or data["raw_failure_code"] == ""
+        or data["normalized_node_contract_success"] is not True
+        or data["semantic_arrays_unchanged"] is not True
+        or data["model_generate_calls"] != 0
+        or data["retry_count"] != 0
+        or data["repair_attempted"] is not False
+        or data["normalization_counts_as_repair"] is not False
+    ):
+        raise Phase4ContractError(
+            "P4-01b normalization receipt status drifted"
+        )
+    expected_receipt_id = _sha256(
+        _canonical_bytes(
+            {
+                key: data[key]
+                for key in keys
+                if key != "receipt_id"
+            }
+        )
+    )
+    if data["receipt_id"] != expected_receipt_id:
+        raise Phase4ContractError(
+            "P4-01b normalization receipt identity drifted"
+        )
+    return data
+
+
+def phase4_validate_f4_normalization_receipt(
+    value: object,
+    *,
+    raw_bytes: bytes,
+    normalized_output: object,
+    state: Mapping[str, object],
+) -> dict[str, object]:
+    """Replay the exact F4 raw-to-normalized transformation and receipt."""
+
+    if (
+        isinstance(value, dict)
+        and value.get("normalizer_revision")
+        == F4_AUDIT_REF_OWNERSHIP_NORMALIZATION_REVISION
+    ):
+        return phase4_validate_f4_p4_01b_normalization_receipt(
+            value,
+            raw_bytes=raw_bytes,
+            normalized_output=normalized_output,
+            state=state,
+        )
+
+    keys = (
+        "schema_version",
+        "receipt_id",
+        "normalizer_revision",
+        "node_id",
+        "case_id",
+        "request_id",
+        "contract_identity",
+        "status",
+        "raw_model_contract_success",
+        "raw_failure_code",
+        "raw_output_identity",
+        "normalized_output_identity",
+        "operations",
+        "normalization_count",
+        "normalized_node_contract_success",
+        "semantic_arrays_unchanged",
+        "model_generate_calls",
+        "normalization_counts_as_repair",
+    )
+    data = _object(value, keys, "F4.normalization_receipt")
+    authority = _phase4_validate_authority_state(
+        state,
+        ("F1", "F2", "F3"),
+    )
+    if (
+        data["schema_version"]
+        != F4_AUDIT_REF_NORMALIZATION_RECEIPT_SCHEMA_VERSION
+        or data["normalizer_revision"]
+        != F4_AUDIT_REF_NORMALIZATION_REVISION
+        or data["node_id"] != "F4"
+        or data["case_id"] != authority["case_id"]
+        or data["request_id"] != authority["request_id"]
+        or data["contract_identity"] != authority["contract_identity"]
+    ):
+        raise Phase4ContractError("F4 normalization receipt binding drifted")
+    _validate_raw_bytes_identity(
+        data["raw_output_identity"],
+        raw_bytes,
+        revision=F4_AUDIT_REF_NORMALIZATION_REVISION + ".raw_output",
+        name="F4.normalization_receipt.raw_output_identity",
+    )
+    validated = _validate_f4(normalized_output, authority)
+    expected_normalized_identity = make_identity(
+        validated,
+        revision=(
+            F4_AUDIT_REF_NORMALIZATION_REVISION + ".normalized_output"
+        ),
+    )
+    if data["normalized_output_identity"] != expected_normalized_identity:
+        raise Phase4ContractError(
+            "F4 normalized output identity drifted"
+        )
+
+    parsed_raw = _parse_json_without_duplicate_keys(raw_bytes)
+    recomputed, operations = _normalize_f4_audit_refs(
+        parsed_raw,
+        authority,
+    )
+    if recomputed != validated or data["operations"] != operations:
+        raise Phase4ContractError(
+            "F4 normalization replay drifted"
+        )
+    expected_status = "not_needed" if not operations else "normalized"
+    expected_raw_success = not operations
+    expected_raw_failure = (
+        None
+        if expected_raw_success
+        else "F4.acceptance_check.refs order or uniqueness is invalid"
+    )
+    if (
+        data["status"] != expected_status
+        or data["raw_model_contract_success"] is not expected_raw_success
+        or data["raw_failure_code"] != expected_raw_failure
+        or data["normalization_count"] != len(operations)
+        or data["normalized_node_contract_success"] is not True
+        or data["semantic_arrays_unchanged"] is not True
+        or data["model_generate_calls"] != 0
+        or data["normalization_counts_as_repair"] is not False
+    ):
+        raise Phase4ContractError(
+            "F4 normalization receipt status drifted"
+        )
+    expected_receipt_id = _sha256(
+        _canonical_bytes(
+            {
+                key: data[key]
+                for key in keys
+                if key != "receipt_id"
+            }
+        )
+    )
+    if data["receipt_id"] != expected_receipt_id:
+        raise Phase4ContractError(
+            "F4 normalization receipt identity drifted"
+        )
+    return data
 
 
 def phase4_register_node_output(
