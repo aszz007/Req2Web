@@ -28,7 +28,7 @@ def _sha(raw: bytes) -> str:
     return hashlib.sha256(raw).hexdigest()
 
 
-def _inventory_evidence(source_root: Path, files: list[tuple[str, bytes]]) -> bytes:
+def _inventory_evidence(source_root: Path | str, files: list[tuple[str, bytes]]) -> bytes:
     rows = []
     for relative, raw in files:
         digest = _sha(raw)
@@ -146,6 +146,21 @@ class RemoteQwenPolicyTests(unittest.TestCase):
 
 
 class RemoteInventoryTests(unittest.TestCase):
+    def test_source_evidence_accepts_absolute_windows_or_posix_path_syntax(self):
+        for source_root in (
+            r"D:\Models\Req2Web\Qwen3.5-9B",
+            "/root/autodl-tmp/source-model",
+        ):
+            self.assertTrue(
+                remote.PureWindowsPath(source_root).is_absolute()
+                or remote.PurePosixPath(source_root).is_absolute()
+            )
+        for relative in ("model", "models/qwen"):
+            self.assertFalse(
+                remote.PureWindowsPath(relative).is_absolute()
+                or remote.PurePosixPath(relative).is_absolute()
+            )
+
     def test_relocation_live_hashes_exactly_sixteen_files(self):
         with _temporary_directory() as directory:
             root = Path(directory)
@@ -168,6 +183,18 @@ class RemoteInventoryTests(unittest.TestCase):
             self.assertTrue(relocation["source_path_is_not_remote_identity"])
             self.assertNotEqual(
                 inventory["model_root_identity"]["identity_kind"], "canonical_json"
+            )
+            windows_evidence = root / "windows-integrity.json"
+            windows_evidence.write_bytes(
+                _inventory_evidence(r"D:\Models\Req2Web\Qwen3.5-9B", files)
+            )
+            relocated = remote.validate_remote_model_inventory(
+                model_root=target_root,
+                integrity_evidence=windows_evidence,
+            )
+            self.assertEqual(
+                relocated["relocation_binding"]["source_evidence_root"],
+                r"D:\Models\Req2Web\Qwen3.5-9B",
             )
             (target_root / "extra.bin").write_bytes(b"extra")
             with self.assertRaises(remote.Phase4RemoteQwenContractError):

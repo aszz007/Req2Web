@@ -21,7 +21,7 @@ import sys
 import threading
 import time
 import uuid
-from pathlib import Path
+from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Any, Callable, ClassVar, Mapping, NamedTuple
 
 from packaging.utils import canonicalize_name
@@ -1106,9 +1106,13 @@ def validate_remote_model_inventory(
         raise Phase4RemoteQwenContractError("remote integrity model identity drifted")
     source_root_text = _text(data["root"], "remote_integrity_evidence.root")
     source_root = Path(source_root_text)
-    if not source_root.is_absolute():
+    source_root_is_absolute = (
+        PurePosixPath(source_root_text).is_absolute()
+        or PureWindowsPath(source_root_text).is_absolute()
+    )
+    if not source_root_is_absolute:
         raise Phase4RemoteQwenContractError("integrity source root must be absolute")
-    if source_root.resolve() == model_root.resolve():
+    if source_root.is_absolute() and source_root.resolve() == model_root.resolve():
         raise Phase4RemoteQwenContractError("remote relocation cannot reuse source path identity")
     if data["missing"] != [] or data["extra"] != [] or data["all_sizes_match"] is not True or data["all_identities_match"] is not True:
         raise Phase4RemoteQwenContractError("remote integrity evidence is incomplete")
