@@ -469,6 +469,42 @@ class RemoteGenerationStopTests(unittest.TestCase):
         self.assertFalse(criteria(FakeTensor([prompt + complete[:-1]]), None))
 
 
+class RemoteReadableJsonTests(unittest.TestCase):
+    def test_pretty_printed_json_uses_existing_validator_and_registry(self):
+        raw = json.dumps(
+            {
+                "interactions": [
+                    {
+                        "local_id": "int-a",
+                        "entity_type": "interaction",
+                        "trigger_component_local_id": "comp-a",
+                        "source_state_local_id": "state-a",
+                        "action": "Continue",
+                        "target_state_local_id": "state-b",
+                        "user_feedback": "Done",
+                        "refs": [],
+                    }
+                ]
+            },
+            indent=2,
+        ).encode("utf-8")
+        checkpoint = SimpleNamespace(authority_state={"state": "f1-f2"})
+        registered = {"state": "f1-f2-f3"}
+        with patch(
+            "req2web_orchestration.phase4_graph.phase4_validate_node_output",
+            return_value=json.loads(raw),
+        ) as validate, patch(
+            "req2web_orchestration.phase4_graph.phase4_register_node_output",
+            return_value=registered,
+        ) as register:
+            result = remote._parse_and_register_remote_f3(raw, checkpoint)
+        self.assertEqual(
+            result, ("parsed", "passed", "passed", registered, None)
+        )
+        validate.assert_called_once()
+        register.assert_called_once()
+
+
 class RemoteCliTests(unittest.TestCase):
     def test_missing_confirmation_stops_before_action(self):
         from scripts import run_phase4_remote_qwen_stream_diagnostic as script

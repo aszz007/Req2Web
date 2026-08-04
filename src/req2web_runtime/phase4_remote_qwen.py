@@ -100,6 +100,7 @@ REMOTE_INVOCATION_SCHEMA_VERSION = f"{REMOTE_SCHEMA_PREFIX}.invocation.v1"
 REMOTE_LOAD_RECEIPT_SCHEMA_VERSION = f"{REMOTE_SCHEMA_PREFIX}.load_receipt.v1"
 REMOTE_SUPERVISOR_SCHEMA_VERSION = f"{REMOTE_SCHEMA_PREFIX}.supervisor.v1"
 REMOTE_RESULT_SCHEMA_VERSION = f"{REMOTE_SCHEMA_PREFIX}.result.v1"
+REMOTE_REVALIDATION_SCHEMA_VERSION = f"{REMOTE_SCHEMA_PREFIX}.revalidation.v1"
 REMOTE_STDERR_SCHEMA_VERSION = f"{REMOTE_SCHEMA_PREFIX}.stderr.v1"
 REMOTE_RAW_IDENTITY_REVISION = f"{REMOTE_SCHEMA_PREFIX}.complete_raw.v1"
 REMOTE_INPUT_REVISION = f"{REMOTE_SCHEMA_PREFIX}.f3_input.v1"
@@ -134,6 +135,9 @@ REMOTE_RAW_NAME = "raw_response.bin"
 REMOTE_STDERR_NAME = "worker_stderr.bin"
 REMOTE_SUPERVISOR_NAME = "supervisor_receipt.json"
 REMOTE_RESULT_NAME = "result.json"
+REMOTE_REVALIDATION_NAME = "revalidation_result.json"
+REMOTE_REVALIDATED_OUTPUT_NAME = "revalidated_f3_output.json"
+REMOTE_REVALIDATED_STATE_NAME = "revalidated_f3_authority_state.json"
 REMOTE_ROOT_MARKER_NAME = ".req2web-phase4-p4-03d3-result-root"
 
 REMOTE_TIMEOUT_SECONDS = 1200
@@ -2089,7 +2093,7 @@ class RemoteStreamMirror:
     def stage(self, label: str) -> None:
         label = _text(label, "remote stream stage")
         with self._lock:
-            self._target.write(f"\n[P4-03D2] {label}\n")  # type: ignore[union-attr]
+            self._target.write(f"\n[P4-03D3] {label}\n")  # type: ignore[union-attr]
             self._target.flush()  # type: ignore[union-attr]
 
     def feed(self, raw: bytes) -> None:
@@ -2942,7 +2946,10 @@ class RemoteResultRecord(_CanonicalRecord):
 
 def _parse_and_register_remote_f3(raw: bytes, checkpoint: RemoteCheckpointReplay) -> tuple[str, str, str, Mapping[str, object] | None, str | None]:
     try:
-        parsed = _strict_json(raw, require_canonical=True)
+        # Preserve the original bytes, then follow the existing P4-03 owning
+        # parser path: ordinary JSON syntax is accepted before exact contract
+        # and stable-ID validation.
+        parsed = _strict_json(raw, require_canonical=False)
     except Exception:
         return "failed", "not_executed", "not_executed", None, "node_contract_invalid"
     try:
@@ -2956,6 +2963,373 @@ def _parse_and_register_remote_f3(raw: bytes, checkpoint: RemoteCheckpointReplay
     except Exception:
         return "parsed", "passed", "failed", None, "node_contract_invalid"
     return "parsed", "passed", "passed", registered, None
+
+
+class RemoteRevalidationRecord(_CanonicalRecord):
+    """No-model replay of the immutable D3 raw bytes through owning authority."""
+
+    KEYS = (
+        "schema_version",
+        "revalidation_id",
+        "diagnostic_id",
+        "pilot_id",
+        "case_id",
+        "request_id",
+        "node_id",
+        "source_result_file_identity",
+        "source_result_id",
+        "source_raw_identity",
+        "checkpoint_binding_identity",
+        "d2_predecessor_binding_identity",
+        "parse",
+        "node_contract",
+        "registry",
+        "node_model_pass",
+        "revalidated_output_identity",
+        "revalidated_state_identity",
+        "source_generate_calls",
+        "revalidation_generate_calls",
+        "retry_count",
+        "source_model_action_occurred",
+        "revalidation_model_action_occurred",
+        "remote_action_occurred",
+        "historical_result_unchanged",
+        "f4",
+        "composition",
+        "assembler",
+        "downstream",
+        "formal_quality",
+        "h1_or_gold",
+        "training",
+        "data_authoring",
+        "failure_code",
+        "action_state",
+    )
+    SCHEMA_VERSION = REMOTE_REVALIDATION_SCHEMA_VERSION
+
+    @classmethod
+    def create(
+        cls,
+        *,
+        source_result_raw: bytes,
+        source_result: RemoteResultRecord,
+        source_raw: bytes,
+        checkpoint: RemoteCheckpointReplay,
+        d2_predecessor: RemoteD2PredecessorBinding,
+        parse_status: str,
+        contract_status: str,
+        registry_status: str,
+        revalidated_output_identity: Mapping[str, object] | None,
+        revalidated_state_identity: Mapping[str, object] | None,
+        failure_code: str | None,
+    ) -> "RemoteRevalidationRecord":
+        passed = (
+            parse_status == "parsed"
+            and contract_status == "passed"
+            and registry_status == "passed"
+            and revalidated_output_identity is not None
+            and revalidated_state_identity is not None
+        )
+        root: dict[str, object] = {
+            "schema_version": cls.SCHEMA_VERSION,
+            "revalidation_id": "pending",
+            "diagnostic_id": REMOTE_DIAGNOSTIC_ID,
+            "pilot_id": REMOTE_PILOT_ID,
+            "case_id": REMOTE_CASE_ID,
+            "request_id": REMOTE_REQUEST_ID,
+            "node_id": REMOTE_NODE_ID,
+            "source_result_file_identity": _identity(
+                source_result_raw,
+                revision=f"{REMOTE_SCHEMA_PREFIX}.result_file.v1",
+                identity_kind="raw_bytes",
+            ),
+            "source_result_id": source_result.result_id,
+            "source_raw_identity": _identity(
+                source_raw,
+                revision=REMOTE_RAW_IDENTITY_REVISION,
+                identity_kind="raw_bytes",
+            ),
+            "checkpoint_binding_identity": _identity(
+                checkpoint.binding.to_dict(),
+                revision=REMOTE_CHECKPOINT_SCHEMA_VERSION,
+            ),
+            "d2_predecessor_binding_identity": _identity(
+                d2_predecessor.to_dict(),
+                revision=REMOTE_PREDECESSOR_SCHEMA_VERSION,
+            ),
+            "parse": {"status": parse_status},
+            "node_contract": {"status": contract_status},
+            "registry": {"status": registry_status},
+            "node_model_pass": passed,
+            "revalidated_output_identity": (
+                None
+                if revalidated_output_identity is None
+                else dict(revalidated_output_identity)
+            ),
+            "revalidated_state_identity": (
+                None
+                if revalidated_state_identity is None
+                else dict(revalidated_state_identity)
+            ),
+            "source_generate_calls": 1,
+            "revalidation_generate_calls": 0,
+            "retry_count": 0,
+            "source_model_action_occurred": True,
+            "revalidation_model_action_occurred": False,
+            "remote_action_occurred": True,
+            "historical_result_unchanged": True,
+            "f4": "not_executed",
+            "composition": "not_executed",
+            "assembler": "not_executed",
+            "downstream": "not_executed",
+            "formal_quality": False,
+            "h1_or_gold": False,
+            "training": False,
+            "data_authoring": False,
+            "failure_code": failure_code,
+            "action_state": _remote_action_state(
+                model_action=False, remote_action=True
+            ),
+        }
+        root["revalidation_id"] = _identity(
+            {
+                key: value
+                for key, value in root.items()
+                if key != "revalidation_id"
+            },
+            revision=cls.SCHEMA_VERSION,
+        )["sha256"]
+        return cls._from_payload(root)  # type: ignore[return-value]
+
+    @classmethod
+    def _validate_payload(cls, data: Mapping[str, object]) -> None:
+        _local._common_record(
+            data, schema=cls.SCHEMA_VERSION, name="RemoteRevalidationRecord"
+        )
+        _sha(data["revalidation_id"], "RemoteRevalidationRecord.revalidation_id")
+        if (
+            data["diagnostic_id"] != REMOTE_DIAGNOSTIC_ID
+            or data["pilot_id"] != REMOTE_PILOT_ID
+            or data["case_id"] != REMOTE_CASE_ID
+            or data["request_id"] != REMOTE_REQUEST_ID
+            or data["node_id"] != REMOTE_NODE_ID
+        ):
+            raise Phase4RemoteQwenContractError(
+                "remote revalidation scope drifted"
+            )
+        for key in (
+            "source_result_file_identity",
+            "source_raw_identity",
+            "checkpoint_binding_identity",
+            "d2_predecessor_binding_identity",
+        ):
+            _validate_identity(data[key], f"RemoteRevalidationRecord.{key}")
+        _sha(data["source_result_id"], "RemoteRevalidationRecord.source_result_id")
+        parse = _exact(data["parse"], ("status",), "RemoteRevalidationRecord.parse")
+        contract = _exact(
+            data["node_contract"],
+            ("status",),
+            "RemoteRevalidationRecord.node_contract",
+        )
+        registry = _exact(
+            data["registry"], ("status",), "RemoteRevalidationRecord.registry"
+        )
+        passed = (
+            parse["status"] == "parsed"
+            and contract["status"] == "passed"
+            and registry["status"] == "passed"
+        )
+        if data["node_model_pass"] is not passed:
+            raise Phase4RemoteQwenContractError(
+                "remote revalidation pass state drifted"
+            )
+        if passed:
+            _validate_identity(
+                data["revalidated_output_identity"],
+                "RemoteRevalidationRecord.revalidated_output_identity",
+            )
+            _validate_identity(
+                data["revalidated_state_identity"],
+                "RemoteRevalidationRecord.revalidated_state_identity",
+            )
+            if data["failure_code"] is not None:
+                raise Phase4RemoteQwenContractError(
+                    "passing remote revalidation carries failure"
+                )
+        elif (
+            data["revalidated_output_identity"] is not None
+            or data["revalidated_state_identity"] is not None
+            or type(data["failure_code"]) is not str
+            or not data["failure_code"]
+        ):
+            raise Phase4RemoteQwenContractError(
+                "failed remote revalidation boundary drifted"
+            )
+        if (
+            data["source_generate_calls"] != 1
+            or data["revalidation_generate_calls"] != 0
+            or data["retry_count"] != 0
+            or data["source_model_action_occurred"] is not True
+            or data["revalidation_model_action_occurred"] is not False
+            or data["remote_action_occurred"] is not True
+            or data["historical_result_unchanged"] is not True
+            or data["f4"] != "not_executed"
+            or data["composition"] != "not_executed"
+            or data["assembler"] != "not_executed"
+            or data["downstream"] != "not_executed"
+        ):
+            raise Phase4RemoteQwenContractError(
+                "remote revalidation execution boundary drifted"
+            )
+        for key in (
+            "formal_quality",
+            "h1_or_gold",
+            "training",
+            "data_authoring",
+        ):
+            if data[key] is not False:
+                raise Phase4RemoteQwenContractError(
+                    "remote revalidation claim boundary drifted"
+                )
+        _validate_remote_action_state(
+            data["action_state"],
+            "RemoteRevalidationRecord.action_state",
+            model_action=False,
+            remote_action=True,
+        )
+        expected = _identity(
+            {
+                key: value
+                for key, value in data.items()
+                if key != "revalidation_id"
+            },
+            revision=cls.SCHEMA_VERSION,
+        )["sha256"]
+        if data["revalidation_id"] != expected:
+            raise Phase4RemoteQwenContractError(
+                "remote revalidation identity drifted"
+            )
+
+
+def revalidate_remote_qwen_bf16_f3_result(
+    *, result_root: Path
+) -> RemoteRevalidationRecord:
+    """Revalidate immutable D3 raw bytes without another model generate."""
+
+    _offline_process()
+    if (
+        not isinstance(result_root, Path)
+        or not result_root.is_absolute()
+        or result_root.is_symlink()
+        or not result_root.is_dir()
+        or not (result_root / REMOTE_ROOT_MARKER_NAME).is_file()
+    ):
+        raise Phase4RemoteQwenContractError(
+            "remote D3 result root is unavailable or unsafe"
+        )
+    source_result_raw = _read_input_file(result_root / REMOTE_RESULT_NAME, "D3 result")
+    source_result = RemoteResultRecord.from_bytes(source_result_raw)
+    if (
+        source_result.generation_terminal != "generation_completed"
+        or source_result.node_model_pass is not False
+        or source_result.failure_code != "node_contract_invalid"
+        or source_result.raw_capture["status"]
+        != "captured_authoritative_complete"
+    ):
+        raise Phase4RemoteQwenContractError(
+            "D3 source result is not the eligible parser-failure outcome"
+        )
+    source_raw = _read_input_file(result_root / REMOTE_RAW_NAME, "D3 raw response")
+    if source_result.raw_capture["identity"] != _identity(
+        source_raw,
+        revision=REMOTE_RAW_IDENTITY_REVISION,
+        identity_kind="raw_bytes",
+    ):
+        raise Phase4RemoteQwenContractError(
+            "D3 source result does not bind live raw bytes"
+        )
+    checkpoint = replay_remote_checkpoint(
+        checkpoint_packet=result_root / REMOTE_CHECKPOINT_PACKET_NAME,
+        checkpoint_receipt=result_root / REMOTE_CHECKPOINT_RECEIPT_NAME,
+        prior_f3_failure=result_root / REMOTE_PRIOR_FAILURE_NAME,
+    )
+    d2_result_raw = _read_input_file(
+        result_root / REMOTE_PREDECESSOR_RESULT_NAME, "D2 predecessor result"
+    )
+    d2_raw = _read_input_file(
+        result_root / REMOTE_PREDECESSOR_RAW_NAME, "D2 predecessor raw"
+    )
+    d2_predecessor = RemoteD2PredecessorBinding.from_bytes(
+        _read_input_file(
+            result_root / REMOTE_PREDECESSOR_BINDING_NAME,
+            "D2 predecessor binding",
+        )
+    )
+    d2_predecessor.validate_against(
+        result_raw=d2_result_raw, raw_response=d2_raw
+    )
+    if (
+        source_result.checkpoint_binding_identity
+        != _identity(
+            checkpoint.binding.to_dict(),
+            revision=REMOTE_CHECKPOINT_SCHEMA_VERSION,
+        )
+        or source_result.d2_predecessor_binding_identity
+        != _identity(
+            d2_predecessor.to_dict(),
+            revision=REMOTE_PREDECESSOR_SCHEMA_VERSION,
+        )
+    ):
+        raise Phase4RemoteQwenContractError(
+            "D3 source result replay binding drifted"
+        )
+    (
+        parse_status,
+        contract_status,
+        registry_status,
+        registered_state,
+        failure_code,
+    ) = _parse_and_register_remote_f3(source_raw, checkpoint)
+    output_identity: Mapping[str, object] | None = None
+    state_identity: Mapping[str, object] | None = None
+    if registered_state is not None:
+        revalidated_output = _canonical_bytes(
+            _strict_json(source_raw, require_canonical=False)
+        )
+        revalidated_state = _canonical_bytes(registered_state)
+        output_identity = _identity(
+            revalidated_output,
+            revision=f"{REMOTE_SCHEMA_PREFIX}.revalidated_f3_output.v1",
+            identity_kind="raw_bytes",
+        )
+        state_identity = _identity(
+            revalidated_state,
+            revision=f"{REMOTE_SCHEMA_PREFIX}.revalidated_f3_state.v1",
+            identity_kind="raw_bytes",
+        )
+        _write_remote_once(
+            result_root, REMOTE_REVALIDATED_OUTPUT_NAME, revalidated_output
+        )
+        _write_remote_once(
+            result_root, REMOTE_REVALIDATED_STATE_NAME, revalidated_state
+        )
+    record = RemoteRevalidationRecord.create(
+        source_result_raw=source_result_raw,
+        source_result=source_result,
+        source_raw=source_raw,
+        checkpoint=checkpoint,
+        d2_predecessor=d2_predecessor,
+        parse_status=parse_status,
+        contract_status=contract_status,
+        registry_status=registry_status,
+        revalidated_output_identity=output_identity,
+        revalidated_state_identity=state_identity,
+        failure_code=failure_code,
+    )
+    _write_remote_once(
+        result_root, REMOTE_REVALIDATION_NAME, record.canonical_bytes()
+    )
+    return record
 
 
 def _stderr_identity(stderr_bytes: bytes | None) -> dict[str, object] | None:
@@ -3185,7 +3559,9 @@ __all__ = [
     "RemoteInvocationRecord",
     "RemoteSupervisorReceipt",
     "RemoteResultRecord",
+    "RemoteRevalidationRecord",
     "execute_remote_qwen_bf16_f3",
+    "revalidate_remote_qwen_bf16_f3_result",
     "run_remote_qwen_bf16_f3",
     "_run_remote_worker_protocol",
 ]
