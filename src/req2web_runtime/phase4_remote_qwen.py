@@ -1,10 +1,10 @@
-"""P4-03D2 remote Qwen3.5-9B BF16 F3 pilot.
+"""P4-03D3 remote Qwen3.5-9B BF16 F3 completion pilot.
 
-This module is deliberately a new action-time identity.  It does not touch
-the historical P4R ledgers or the P4D1 local diagnostic.  The F1/F2/F3
-semantic and registry authorities remain the existing ``phase4_graph``
-validators; this file owns only the remote relocation, runtime, supervision,
-and result-boundary records around them.
+This module preserves the historical P4-03D2 result as an immutable failed
+predecessor and creates a fresh one-call action-time identity.  The D3 worker
+uses the full RTX 5090 BF16 profile with no quantization or CPU offload.  It
+stops on a complete JSON object, model EOS, the model context boundary, or the
+parent-owned wall-clock deadline; it has no fixed short output-token cap.
 """
 
 from __future__ import annotations
@@ -13,6 +13,7 @@ import copy
 import datetime as dt
 import importlib
 import importlib.metadata
+import json
 import os
 import platform
 import queue
@@ -54,15 +55,15 @@ _WorkerStderrCapture = _local._WorkerStderrCapture
 SupervisedWorkerFailure = _local.SupervisedWorkerFailure
 
 
-REMOTE_SCHEMA_PREFIX = "req2web.phase4.p4_03d2"
-REMOTE_DIAGNOSTIC_ID = "p4-03d2-remote-qwen-9b-bf16-f3-pilot"
+REMOTE_SCHEMA_PREFIX = "req2web.phase4.p4_03d3"
+REMOTE_DIAGNOSTIC_ID = "p4-03d3-remote-qwen-9b-bf16-f3-completion-pilot"
 REMOTE_POLICY_SCHEMA_VERSION = (
     f"{REMOTE_SCHEMA_PREFIX}.remote_qwen_bf16_policy.v1"
 )
-REMOTE_POLICY_RELATIVE_PATH = "docs/phase4_remote_qwen_bf16_policy.json"
+REMOTE_POLICY_RELATIVE_PATH = "docs/phase4_remote_qwen_bf16_d3_policy.json"
 REMOTE_POLICY_PATH = Path(__file__).resolve().parents[2] / REMOTE_POLICY_RELATIVE_PATH
 
-REMOTE_PILOT_ID = "p4-03d2-remote-qwen-9b-bf16"
+REMOTE_PILOT_ID = "p4-03d3-remote-qwen-9b-bf16"
 REMOTE_MODEL_ID = _local.QWEN_MODEL_ID
 REMOTE_MODEL_REVISION = _local.QWEN_MODEL_REVISION
 REMOTE_NODE_ID = "F3"
@@ -70,6 +71,22 @@ REMOTE_CASE_ID = "path3-commerce-checkout"
 REMOTE_REQUEST_ID = "p4-02a-synthetic-request-001"
 REMOTE_SOURCE_PILOT_ID = _local.P4R5_PILOT_ID
 REMOTE_PRIOR_PILOT_ID = _local.P4R6_PILOT_ID
+
+D2_SCHEMA_PREFIX = "req2web.phase4.p4_03d2"
+D2_DIAGNOSTIC_ID = "p4-03d2-remote-qwen-9b-bf16-f3-pilot"
+D2_PILOT_ID = "p4-03d2-remote-qwen-9b-bf16"
+D2_RESULT_SCHEMA_VERSION = f"{D2_SCHEMA_PREFIX}.result.v1"
+D2_RAW_IDENTITY_REVISION = f"{D2_SCHEMA_PREFIX}.complete_raw.v1"
+D2_ACTION_STATE_VERSION = f"{D2_SCHEMA_PREFIX}.action_state.v1"
+D2_RESULT_FILE_SHA256 = (
+    "sha256:fbdb1b9a36f6893a9a572a2127f8c73b095820642acaa0231960a5cd33594e11"
+)
+D2_RAW_FILE_SHA256 = (
+    "sha256:12ec0f8e0d19a20448bb25feb311f2165b9ea3eb3ec188ee51b5e98b7cefe198"
+)
+D2_RESULT_ID = (
+    "sha256:cf94f6c4da4d7c9082ef6ac7e616d1c29c4efb60ef54d748f1673453c77e49cd"
+)
 
 REMOTE_PROFILE_SCHEMA_VERSION = f"{REMOTE_SCHEMA_PREFIX}.profile.v1"
 REMOTE_INVENTORY_SCHEMA_VERSION = f"{REMOTE_SCHEMA_PREFIX}.inventory.v1"
@@ -93,11 +110,15 @@ REMOTE_WORKER_IPC_PROTOCOL = f"{REMOTE_SCHEMA_PREFIX}.worker-ipc.v1"
 REMOTE_STREAM_EVENT_SCHEMA_VERSION = f"{REMOTE_SCHEMA_PREFIX}.stream_event.v1"
 REMOTE_MODEL_ROOT_IDENTITY_REVISION = f"{REMOTE_SCHEMA_PREFIX}.model_root.v1"
 REMOTE_INVENTORY_ROWS_REVISION = f"{REMOTE_SCHEMA_PREFIX}.inventory.rows.v1"
+REMOTE_PREDECESSOR_SCHEMA_VERSION = f"{REMOTE_SCHEMA_PREFIX}.d2_predecessor.v1"
 
 REMOTE_POLICY_COPY_NAME = "remote_policy.json"
 REMOTE_CHECKPOINT_PACKET_NAME = "checkpoint_packet.json"
 REMOTE_CHECKPOINT_RECEIPT_NAME = "checkpoint_receipt.json"
 REMOTE_PRIOR_FAILURE_NAME = "prior_f3_failure.json"
+REMOTE_PREDECESSOR_RESULT_NAME = "predecessor_d2_result.json"
+REMOTE_PREDECESSOR_RAW_NAME = "predecessor_d2_raw_response.bin"
+REMOTE_PREDECESSOR_BINDING_NAME = "predecessor_d2_binding.json"
 REMOTE_RELOCATION_NAME = "relocation_binding.json"
 REMOTE_INVENTORY_NAME = "model_inventory.json"
 REMOTE_PROFILE_NAME = "remote_profile.json"
@@ -113,7 +134,7 @@ REMOTE_RAW_NAME = "raw_response.bin"
 REMOTE_STDERR_NAME = "worker_stderr.bin"
 REMOTE_SUPERVISOR_NAME = "supervisor_receipt.json"
 REMOTE_RESULT_NAME = "result.json"
-REMOTE_ROOT_MARKER_NAME = ".req2web-phase4-p4-03d2-result-root"
+REMOTE_ROOT_MARKER_NAME = ".req2web-phase4-p4-03d3-result-root"
 
 REMOTE_TIMEOUT_SECONDS = 1200
 REMOTE_LOAD_TIMEOUT_SECONDS = 600
@@ -124,12 +145,21 @@ REMOTE_RETRY_COUNT = 0
 REMOTE_FORMAL_FILE_COUNT = 16
 REMOTE_MIN_VRAM_BYTES = 30_000_000_000
 REMOTE_DEVICE_NAME = "NVIDIA GeForce RTX 5090"
+REMOTE_MODEL_CONTEXT_TOKENS = 262_144
 REMOTE_TRANSFORMERS_VERSION = "5.14.1"
 REMOTE_TORCH_VERSION = "2.7.1+cu128"
 REMOTE_ACCELERATE_VERSION = "1.14.0"
 REMOTE_DTYPE = "bfloat16"
 REMOTE_QUANTIZATION = "none"
 REMOTE_DEVICE_MAP = {"": 0}
+REMOTE_FIXED_MAX_NEW_TOKENS = None
+REMOTE_GENERATION_STOP_POLICY = {
+    "fixed_max_new_tokens": False,
+    "stop_on_complete_json_object": True,
+    "stop_on_model_eos": True,
+    "model_context_limit_enforced": True,
+    "parent_wall_clock_timeout_enforced": True,
+}
 REMOTE_PROJECTION_REVISION = _local.P4R6_PROJECTION_REVISION
 REMOTE_OUTPUT_KEY_ORDER = [
     "local_id",
@@ -315,6 +345,14 @@ class RemoteQwenPolicy(_CanonicalRecord):
                 "requires_explicit_packet",
                 "requires_explicit_receipt",
                 "requires_prior_f3_failure",
+                "requires_d2_predecessor_result",
+                "requires_d2_predecessor_raw",
+                "d2_predecessor_result_sha256",
+                "d2_predecessor_raw_sha256",
+                "d2_predecessor_result_id",
+                "d2_predecessor_is_immutable_failure",
+                "d3_is_not_retry",
+                "d3_has_independent_call_budget",
                 "source_pilot_id",
                 "replay_authority",
                 "replay_order",
@@ -328,6 +366,14 @@ class RemoteQwenPolicy(_CanonicalRecord):
             "requires_explicit_packet": True,
             "requires_explicit_receipt": True,
             "requires_prior_f3_failure": True,
+            "requires_d2_predecessor_result": True,
+            "requires_d2_predecessor_raw": True,
+            "d2_predecessor_result_sha256": D2_RESULT_FILE_SHA256,
+            "d2_predecessor_raw_sha256": D2_RAW_FILE_SHA256,
+            "d2_predecessor_result_id": D2_RESULT_ID,
+            "d2_predecessor_is_immutable_failure": True,
+            "d3_is_not_retry": True,
+            "d3_has_independent_call_budget": True,
             "source_pilot_id": REMOTE_SOURCE_PILOT_ID,
             "replay_authority": "phase4_validate_node_output_then_phase4_register_node_output",
             "replay_order": ["F1", "F2"],
@@ -338,7 +384,16 @@ class RemoteQwenPolicy(_CanonicalRecord):
             raise Phase4RemoteQwenContractError("remote policy checkpoint boundary drifted")
         call_budget = _exact(
             data["call_budget"],
-            ("automatic_retry", "generate_call_cap", "retry_count", "timeout_seconds"),
+            (
+                "automatic_retry",
+                "generate_call_cap",
+                "retry_count",
+                "timeout_seconds",
+                "fixed_output_token_cap",
+                "complete_json_stop",
+                "model_eos_stop",
+                "model_context_boundary_stop",
+            ),
             "RemoteQwenPolicy.call_budget",
         )
         if call_budget != {
@@ -346,6 +401,10 @@ class RemoteQwenPolicy(_CanonicalRecord):
             "generate_call_cap": REMOTE_GENERATE_CALL_CAP,
             "retry_count": REMOTE_RETRY_COUNT,
             "timeout_seconds": REMOTE_TIMEOUT_SECONDS,
+            "fixed_output_token_cap": False,
+            "complete_json_stop": True,
+            "model_eos_stop": True,
+            "model_context_boundary_stop": True,
         }:
             raise Phase4RemoteQwenContractError("remote policy call budget drifted")
         streaming = _exact(
@@ -429,6 +488,324 @@ def load_remote_qwen_policy() -> tuple[RemoteQwenPolicy, bytes]:
     return RemoteQwenPolicy.from_dict(payload), raw  # type: ignore[return-value]
 
 
+def _validate_d2_predecessor(
+    *, result_raw: bytes, raw_response: bytes
+) -> Mapping[str, object]:
+    if _local._sha256(result_raw) != D2_RESULT_FILE_SHA256:
+        raise Phase4RemoteQwenContractError(
+            "D2 predecessor result file identity drifted"
+        )
+    if _local._sha256(raw_response) != D2_RAW_FILE_SHA256:
+        raise Phase4RemoteQwenContractError(
+            "D2 predecessor raw file identity drifted"
+        )
+    result = _exact(
+        _strict_json(result_raw, require_canonical=True),
+        (
+            "schema_version",
+            "result_id",
+            "diagnostic_id",
+            "pilot_id",
+            "case_id",
+            "request_id",
+            "node_id",
+            "generation_terminal",
+            "supervisor_terminal_status",
+            "call",
+            "raw_capture",
+            "parse",
+            "node_contract",
+            "registry",
+            "node_model_pass",
+            "integrated",
+            "f4",
+            "composition",
+            "assembler",
+            "downstream",
+            "formal_quality",
+            "h1_or_gold",
+            "training",
+            "data_authoring",
+            "remote_action_occurred",
+            "model_action_occurred",
+            "checkpoint_binding_identity",
+            "prior_failure_identity",
+            "load_receipt_identity",
+            "supervisor_identity",
+            "failure_code",
+            "source_kind",
+            "action_state",
+        ),
+        "D2 predecessor result",
+    )
+    if (
+        result["schema_version"] != D2_RESULT_SCHEMA_VERSION
+        or result["result_id"] != D2_RESULT_ID
+        or result["diagnostic_id"] != D2_DIAGNOSTIC_ID
+        or result["pilot_id"] != D2_PILOT_ID
+        or result["case_id"] != REMOTE_CASE_ID
+        or result["request_id"] != REMOTE_REQUEST_ID
+        or result["node_id"] != REMOTE_NODE_ID
+        or result["generation_terminal"] != "generation_completed"
+        or result["supervisor_terminal_status"] != "normal_completed"
+        or result["failure_code"] != "node_contract_invalid"
+        or result["source_kind"] != "remote_qwen_bf16"
+    ):
+        raise Phase4RemoteQwenContractError(
+            "D2 predecessor scope/outcome drifted"
+        )
+    expected_result_id = _identity(
+        {key: value for key, value in result.items() if key != "result_id"},
+        revision=D2_RESULT_SCHEMA_VERSION,
+    )["sha256"]
+    if result["result_id"] != expected_result_id:
+        raise Phase4RemoteQwenContractError(
+            "D2 predecessor result identity is invalid"
+        )
+    call = _exact(
+        result["call"],
+        ("generate_calls", "generate_call_cap", "retry_count", "timeout_seconds"),
+        "D2 predecessor call",
+    )
+    if call != {
+        "generate_calls": 1,
+        "generate_call_cap": 1,
+        "retry_count": 0,
+        "timeout_seconds": REMOTE_TIMEOUT_SECONDS,
+    }:
+        raise Phase4RemoteQwenContractError(
+            "D2 predecessor call envelope drifted"
+        )
+    raw_capture = _exact(
+        result["raw_capture"],
+        ("status", "relative_path", "identity"),
+        "D2 predecessor raw capture",
+    )
+    raw_identity = _validate_identity(
+        raw_capture["identity"], "D2 predecessor raw identity"
+    )
+    if (
+        raw_capture["status"] != "captured_authoritative_complete"
+        or raw_capture["relative_path"] != "raw_response.bin"
+        or raw_identity
+        != _identity(
+            raw_response,
+            revision=D2_RAW_IDENTITY_REVISION,
+            identity_kind="raw_bytes",
+        )
+    ):
+        raise Phase4RemoteQwenContractError(
+            "D2 predecessor raw binding drifted"
+        )
+    if (
+        result["parse"] != {"status": "failed"}
+        or result["node_contract"] != {"status": "not_executed"}
+        or result["registry"] != {"status": "not_executed"}
+        or result["node_model_pass"] is not False
+        or result["integrated"] is not False
+        or result["f4"] != "not_executed"
+        or result["composition"] != "not_executed"
+        or result["assembler"] != "not_executed"
+        or result["downstream"] != "not_executed"
+    ):
+        raise Phase4RemoteQwenContractError(
+            "D2 predecessor failure boundary drifted"
+        )
+    for key in (
+        "formal_quality",
+        "h1_or_gold",
+        "training",
+        "data_authoring",
+    ):
+        if result[key] is not False:
+            raise Phase4RemoteQwenContractError(
+                "D2 predecessor claim boundary drifted"
+            )
+    if (
+        result["remote_action_occurred"] is not True
+        or result["model_action_occurred"] is not True
+    ):
+        raise Phase4RemoteQwenContractError(
+            "D2 predecessor action facts drifted"
+        )
+    action_state = _exact(
+        result["action_state"],
+        (
+            "action_state_version",
+            "runtime_kind",
+            "model_action",
+            "graph_runtime_execution",
+            "dependency_installation",
+            "training",
+            "data_authoring",
+            "remote_action",
+            "network",
+            "telemetry",
+            "tracing",
+            "offline",
+            "local_files_only",
+        ),
+        "D2 predecessor action state",
+    )
+    if action_state != {
+        "action_state_version": D2_ACTION_STATE_VERSION,
+        "runtime_kind": "remote_qwen_bf16_f3",
+        "model_action": True,
+        "graph_runtime_execution": False,
+        "dependency_installation": False,
+        "training": False,
+        "data_authoring": False,
+        "remote_action": True,
+        "network": False,
+        "telemetry": False,
+        "tracing": False,
+        "offline": True,
+        "local_files_only": True,
+    }:
+        raise Phase4RemoteQwenContractError(
+            "D2 predecessor action state drifted"
+        )
+    return result
+
+
+class RemoteD2PredecessorBinding(_CanonicalRecord):
+    """Exact immutable binding to the completed-but-truncated D2 attempt."""
+
+    KEYS = (
+        "schema_version",
+        "binding_id",
+        "diagnostic_id",
+        "pilot_id",
+        "case_id",
+        "request_id",
+        "node_id",
+        "predecessor_result_file_identity",
+        "predecessor_raw_identity",
+        "predecessor_result_id",
+        "predecessor_generation_terminal",
+        "predecessor_failure_code",
+        "predecessor_node_model_pass",
+        "immutable_predecessor_failure",
+        "d3_is_not_retry",
+        "d3_has_independent_call_budget",
+        "action_state",
+    )
+    SCHEMA_VERSION = REMOTE_PREDECESSOR_SCHEMA_VERSION
+
+    @classmethod
+    def create(
+        cls, *, result_raw: bytes, raw_response: bytes
+    ) -> "RemoteD2PredecessorBinding":
+        result = _validate_d2_predecessor(
+            result_raw=result_raw, raw_response=raw_response
+        )
+        root: dict[str, object] = {
+            "schema_version": cls.SCHEMA_VERSION,
+            "binding_id": "pending",
+            "diagnostic_id": REMOTE_DIAGNOSTIC_ID,
+            "pilot_id": REMOTE_PILOT_ID,
+            "case_id": REMOTE_CASE_ID,
+            "request_id": REMOTE_REQUEST_ID,
+            "node_id": REMOTE_NODE_ID,
+            "predecessor_result_file_identity": _identity(
+                result_raw,
+                revision=f"{D2_SCHEMA_PREFIX}.result_file.v1",
+                identity_kind="raw_bytes",
+            ),
+            "predecessor_raw_identity": _identity(
+                raw_response,
+                revision=D2_RAW_IDENTITY_REVISION,
+                identity_kind="raw_bytes",
+            ),
+            "predecessor_result_id": result["result_id"],
+            "predecessor_generation_terminal": result[
+                "generation_terminal"
+            ],
+            "predecessor_failure_code": result["failure_code"],
+            "predecessor_node_model_pass": result["node_model_pass"],
+            "immutable_predecessor_failure": True,
+            "d3_is_not_retry": True,
+            "d3_has_independent_call_budget": True,
+            "action_state": _remote_action_state(
+                model_action=False, remote_action=False
+            ),
+        }
+        root["binding_id"] = _identity(
+            {key: value for key, value in root.items() if key != "binding_id"},
+            revision=cls.SCHEMA_VERSION,
+        )["sha256"]
+        return cls._from_payload(root)  # type: ignore[return-value]
+
+    @classmethod
+    def _validate_payload(cls, data: Mapping[str, object]) -> None:
+        _local._common_record(
+            data, schema=cls.SCHEMA_VERSION, name="RemoteD2PredecessorBinding"
+        )
+        _sha(data["binding_id"], "RemoteD2PredecessorBinding.binding_id")
+        if (
+            data["diagnostic_id"] != REMOTE_DIAGNOSTIC_ID
+            or data["pilot_id"] != REMOTE_PILOT_ID
+            or data["case_id"] != REMOTE_CASE_ID
+            or data["request_id"] != REMOTE_REQUEST_ID
+            or data["node_id"] != REMOTE_NODE_ID
+            or data["predecessor_result_id"] != D2_RESULT_ID
+            or data["predecessor_generation_terminal"]
+            != "generation_completed"
+            or data["predecessor_failure_code"] != "node_contract_invalid"
+            or data["predecessor_node_model_pass"] is not False
+            or data["immutable_predecessor_failure"] is not True
+            or data["d3_is_not_retry"] is not True
+            or data["d3_has_independent_call_budget"] is not True
+        ):
+            raise Phase4RemoteQwenContractError(
+                "D2 predecessor binding drifted"
+            )
+        result_identity = _validate_identity(
+            data["predecessor_result_file_identity"],
+            "RemoteD2PredecessorBinding.predecessor_result_file_identity",
+        )
+        raw_identity = _validate_identity(
+            data["predecessor_raw_identity"],
+            "RemoteD2PredecessorBinding.predecessor_raw_identity",
+        )
+        if (
+            result_identity["sha256"] != D2_RESULT_FILE_SHA256
+            or raw_identity["sha256"] != D2_RAW_FILE_SHA256
+            or result_identity["identity_kind"] != "raw_bytes"
+            or raw_identity["identity_kind"] != "raw_bytes"
+            or raw_identity["revision"] != D2_RAW_IDENTITY_REVISION
+        ):
+            raise Phase4RemoteQwenContractError(
+                "D2 predecessor file identity drifted"
+            )
+        _validate_remote_action_state(
+            data["action_state"],
+            "RemoteD2PredecessorBinding.action_state",
+            model_action=False,
+            remote_action=False,
+        )
+        expected = _identity(
+            {key: value for key, value in data.items() if key != "binding_id"},
+            revision=cls.SCHEMA_VERSION,
+        )["sha256"]
+        if data["binding_id"] != expected:
+            raise Phase4RemoteQwenContractError(
+                "D2 predecessor binding identity drifted"
+            )
+
+    def validate_against(
+        self, *, result_raw: bytes, raw_response: bytes
+    ) -> None:
+        self.validate()
+        expected = type(self).create(
+            result_raw=result_raw, raw_response=raw_response
+        )
+        if self.to_dict() != expected.to_dict():
+            raise Phase4RemoteQwenContractError(
+                "D2 predecessor live binding drifted"
+            )
+
+
 class RemoteQwenProfile(_CanonicalRecord):
     """Action-time BF16 profile; model-root identity is content-only."""
 
@@ -464,7 +841,9 @@ class RemoteQwenProfile(_CanonicalRecord):
         "telemetry",
         "tracing",
         "max_input_tokens",
-        "max_new_tokens",
+        "model_context_tokens",
+        "fixed_max_new_tokens",
+        "generation_stop_policy",
         "timeout_seconds",
         "seed",
         "decode",
@@ -483,7 +862,7 @@ class RemoteQwenProfile(_CanonicalRecord):
         runtime_facts: Mapping[str, object],
         gpu_facts: Mapping[str, object],
         max_input_tokens: int = 8192,
-        max_new_tokens: int = 512,
+        model_context_tokens: int = REMOTE_MODEL_CONTEXT_TOKENS,
         timeout_seconds: int = REMOTE_TIMEOUT_SECONDS,
         seed: int = 0,
     ) -> "RemoteQwenProfile":
@@ -519,7 +898,11 @@ class RemoteQwenProfile(_CanonicalRecord):
             "telemetry": False,
             "tracing": False,
             "max_input_tokens": max_input_tokens,
-            "max_new_tokens": max_new_tokens,
+            "model_context_tokens": model_context_tokens,
+            "fixed_max_new_tokens": REMOTE_FIXED_MAX_NEW_TOKENS,
+            "generation_stop_policy": copy.deepcopy(
+                REMOTE_GENERATION_STOP_POLICY
+            ),
             "timeout_seconds": timeout_seconds,
             "seed": seed,
             "decode": {"do_sample": False, "temperature": 0.0, "top_p": 1.0},
@@ -601,9 +984,14 @@ class RemoteQwenProfile(_CanonicalRecord):
         ):
             if type(data[key]) is not type(expected) or data[key] != expected:
                 raise Phase4RemoteQwenContractError(f"RemoteQwenProfile.{key} drifted")
-        for key in ("max_input_tokens", "max_new_tokens", "timeout_seconds"):
+        for key in ("max_input_tokens", "model_context_tokens", "timeout_seconds"):
             _integer(data[key], f"RemoteQwenProfile.{key}", minimum=1)
-        if data["max_new_tokens"] != 512 or data["timeout_seconds"] != REMOTE_TIMEOUT_SECONDS:
+        if (
+            data["model_context_tokens"] != REMOTE_MODEL_CONTEXT_TOKENS
+            or data["fixed_max_new_tokens"] is not REMOTE_FIXED_MAX_NEW_TOKENS
+            or data["generation_stop_policy"] != REMOTE_GENERATION_STOP_POLICY
+            or data["timeout_seconds"] != REMOTE_TIMEOUT_SECONDS
+        ):
             raise Phase4RemoteQwenContractError("remote profile generation caps drifted")
         _integer(data["seed"], "RemoteQwenProfile.seed", minimum=0)
         decode = _exact(data["decode"], ("do_sample", "temperature", "top_p"), "RemoteQwenProfile.decode")
@@ -678,6 +1066,7 @@ class RemoteLoadReceipt(_CanonicalRecord):
                 "cpu_offload",
                 "device",
                 "dtype",
+                "model_context_tokens",
                 "model_root_identity",
             ),
             "RemoteLoadReceipt.loaded_facts",
@@ -696,6 +1085,7 @@ class RemoteLoadReceipt(_CanonicalRecord):
             or facts["cpu_offload"] is not False
             or facts["device"] != "cuda:0"
             or facts["dtype"] != "torch.bfloat16"
+            or facts["model_context_tokens"] != REMOTE_MODEL_CONTEXT_TOKENS
         ):
             raise Phase4RemoteQwenContractError("remote loaded BF16 facts drifted")
         _validate_identity(facts["model_root_identity"], "RemoteLoadReceipt.model_root_identity")
@@ -1315,6 +1705,7 @@ class RemotePreflightManifest(_CanonicalRecord):
         "inventory_identity",
         "checkpoint_binding_identity",
         "prior_failure_identity",
+        "d2_predecessor_binding_identity",
         "f3",
         "execution",
         "action_state",
@@ -1331,6 +1722,7 @@ class RemotePreflightManifest(_CanonicalRecord):
         inventory: Mapping[str, object],
         checkpoint: RemoteCheckpointBinding,
         prior_failure: _local.AttemptResult,
+        d2_predecessor: RemoteD2PredecessorBinding,
         input_bytes: bytes,
         prompt_bytes: bytes,
         config_bytes: bytes,
@@ -1339,6 +1731,7 @@ class RemotePreflightManifest(_CanonicalRecord):
         profile.validate()
         checkpoint.validate()
         prior_failure.validate()
+        d2_predecessor.validate()
         root: dict[str, object] = {
             "schema_version": cls.SCHEMA_VERSION,
             "manifest_id": "pending",
@@ -1350,6 +1743,10 @@ class RemotePreflightManifest(_CanonicalRecord):
             "inventory_identity": dict(inventory["inventory_identity"]),
             "checkpoint_binding_identity": _identity(checkpoint.to_dict(), revision=REMOTE_CHECKPOINT_SCHEMA_VERSION),
             "prior_failure_identity": _identity(prior_failure.to_dict(), revision=_local.ATTEMPT_RESULT_SCHEMA_VERSION),
+            "d2_predecessor_binding_identity": _identity(
+                d2_predecessor.to_dict(),
+                revision=REMOTE_PREDECESSOR_SCHEMA_VERSION,
+            ),
             "f3": {
                 "node_id": REMOTE_NODE_ID,
                 "projection_revision": REMOTE_PROJECTION_REVISION,
@@ -1392,6 +1789,10 @@ class RemotePreflightManifest(_CanonicalRecord):
         _validate_identity(data["inventory_identity"], "RemotePreflightManifest.inventory_identity")
         _validate_identity(data["checkpoint_binding_identity"], "RemotePreflightManifest.checkpoint_binding_identity")
         _validate_identity(data["prior_failure_identity"], "RemotePreflightManifest.prior_failure_identity")
+        _validate_identity(
+            data["d2_predecessor_binding_identity"],
+            "RemotePreflightManifest.d2_predecessor_binding_identity",
+        )
         f3 = _exact(data["f3"], ("node_id", "projection_revision", "input_identity", "prompt_identity", "config_identity", "request_identity"), "RemotePreflightManifest.f3")
         if f3["node_id"] != REMOTE_NODE_ID or f3["projection_revision"] != REMOTE_PROJECTION_REVISION:
             raise Phase4RemoteQwenContractError("remote manifest F3 scope drifted")
@@ -1414,6 +1815,9 @@ class RemotePreparedExperiment(NamedTuple):
     profile: RemoteQwenProfile
     inventory: Mapping[str, object]
     checkpoint: RemoteCheckpointReplay
+    d2_predecessor: RemoteD2PredecessorBinding
+    d2_predecessor_result_raw: bytes
+    d2_predecessor_raw_response: bytes
     manifest: RemotePreflightManifest
     input_bytes: bytes
     prompt_bytes: bytes
@@ -1497,7 +1901,9 @@ def _build_remote_config(*, profile: RemoteQwenProfile, policy: _local.NodeProje
         "tracing": profile.tracing,
         "decode": profile.decode,
         "max_input_tokens": profile.max_input_tokens,
-        "max_new_tokens": profile.max_new_tokens,
+        "model_context_tokens": profile.model_context_tokens,
+        "fixed_max_new_tokens": profile.fixed_max_new_tokens,
+        "generation_stop_policy": profile.generation_stop_policy,
         "timeout_seconds": profile.timeout_seconds,
         "seed": profile.seed,
     }
@@ -1532,6 +1938,8 @@ def prepare_remote_qwen_bf16_f3(
     checkpoint_packet: Path,
     checkpoint_receipt: Path,
     prior_f3_failure: Path,
+    predecessor_d2_result: Path,
+    predecessor_d2_raw: Path,
     result_root: Path,
 ) -> RemotePreparedExperiment:
     """Prepare and fsync all no-generation records for one fresh result root."""
@@ -1545,6 +1953,16 @@ def prepare_remote_qwen_bf16_f3(
             checkpoint_packet=checkpoint_packet,
             checkpoint_receipt=checkpoint_receipt,
             prior_f3_failure=prior_f3_failure,
+        )
+        predecessor_result_raw = _read_input_file(
+            predecessor_d2_result, "D2 predecessor result"
+        )
+        predecessor_raw_response = _read_input_file(
+            predecessor_d2_raw, "D2 predecessor raw response"
+        )
+        d2_predecessor = RemoteD2PredecessorBinding.create(
+            result_raw=predecessor_result_raw,
+            raw_response=predecessor_raw_response,
         )
         inventory = validate_remote_model_inventory(
             model_root=model_root,
@@ -1592,6 +2010,7 @@ def prepare_remote_qwen_bf16_f3(
             inventory=inventory,
             checkpoint=checkpoint.binding,
             prior_failure=checkpoint.prior_failure,
+            d2_predecessor=d2_predecessor,
             input_bytes=input_bytes,
             prompt_bytes=prompt_bytes,
             config_bytes=config_bytes,
@@ -1600,6 +2019,21 @@ def prepare_remote_qwen_bf16_f3(
         _write_remote_once(result_root, REMOTE_CHECKPOINT_PACKET_NAME, checkpoint.packet_raw)
         _write_remote_once(result_root, REMOTE_CHECKPOINT_RECEIPT_NAME, checkpoint.receipt_raw)
         _write_remote_once(result_root, REMOTE_PRIOR_FAILURE_NAME, checkpoint.prior_raw)
+        _write_remote_once(
+            result_root,
+            REMOTE_PREDECESSOR_RESULT_NAME,
+            predecessor_result_raw,
+        )
+        _write_remote_once(
+            result_root,
+            REMOTE_PREDECESSOR_RAW_NAME,
+            predecessor_raw_response,
+        )
+        _write_remote_once(
+            result_root,
+            REMOTE_PREDECESSOR_BINDING_NAME,
+            d2_predecessor.canonical_bytes(),
+        )
         _write_remote_once(result_root, REMOTE_RELOCATION_NAME, _canonical_bytes(inventory["relocation_binding"]))
         _write_remote_once(result_root, REMOTE_INVENTORY_NAME, _canonical_bytes(inventory))
         _write_remote_once(result_root, REMOTE_PROFILE_NAME, profile.canonical_bytes())
@@ -1631,6 +2065,9 @@ def prepare_remote_qwen_bf16_f3(
         profile=profile,
         inventory=inventory,
         checkpoint=checkpoint,
+        d2_predecessor=d2_predecessor,
+        d2_predecessor_result_raw=predecessor_result_raw,
+        d2_predecessor_raw_response=predecessor_raw_response,
         manifest=manifest,
         input_bytes=input_bytes,
         prompt_bytes=prompt_bytes,
@@ -1728,6 +2165,61 @@ def _emit_remote_worker_event(event: str, delta: bytes = b"") -> None:
     )
 
 
+def _is_complete_json_object(text: str) -> bool:
+    if type(text) is not str:
+        return False
+    candidate = text.lstrip()
+    if not candidate.startswith("{"):
+        return False
+    try:
+        value, end = json.JSONDecoder().raw_decode(candidate)
+    except json.JSONDecodeError:
+        return False
+    return isinstance(value, Mapping) and not candidate[end:].strip()
+
+
+class _RemoteCompleteJsonStoppingCriteria:
+    """Stop immediately after one complete top-level JSON object."""
+
+    def __init__(self, *, tokenizer: object, prompt_length: int) -> None:
+        if not callable(getattr(tokenizer, "decode", None)):
+            raise Phase4RemoteQwenContractError(
+                "remote JSON stopping tokenizer is invalid"
+            )
+        self._tokenizer = tokenizer
+        self._prompt_length = _integer(
+            prompt_length, "remote JSON stopping prompt length", minimum=1
+        )
+
+    def __call__(
+        self, input_ids: object, scores: object, **_: object
+    ) -> bool:
+        del scores
+        if not callable(getattr(input_ids, "tolist", None)):
+            raise Phase4RemoteQwenContractError(
+                "remote JSON stopping token tensor is invalid"
+            )
+        rows = input_ids.tolist()  # type: ignore[union-attr]
+        if (
+            type(rows) is not list
+            or len(rows) != 1
+            or type(rows[0]) is not list
+            or len(rows[0]) < self._prompt_length
+        ):
+            raise Phase4RemoteQwenContractError(
+                "remote JSON stopping token batch drifted"
+            )
+        generated_ids = rows[0][self._prompt_length :]
+        if not generated_ids:
+            return False
+        text = self._tokenizer.decode(  # type: ignore[union-attr]
+            generated_ids,
+            skip_special_tokens=True,
+            clean_up_tokenization_spaces=False,
+        )
+        return _is_complete_json_object(text)
+
+
 class _RemoteTransformersBackend:
     """Lazy worker-only Transformers backend with no quantization path."""
 
@@ -1740,6 +2232,7 @@ class _RemoteTransformersBackend:
         self._processor: Any = None
         self._model: Any = None
         self._torch: Any = None
+        self._transformers: Any = None
         self._loaded_facts: dict[str, object] | None = None
 
     @property
@@ -1784,6 +2277,17 @@ class _RemoteTransformersBackend:
                 raise Phase4RemoteQwenContractError("remote model compute dtype drifted")
             if parameter_devices != {"cuda:0"}:
                 raise Phase4RemoteQwenContractError("remote model escaped cuda:0")
+            text_config = getattr(model.config, "text_config", model.config)
+            model_context_tokens = getattr(
+                text_config, "max_position_embeddings", None
+            )
+            if (
+                type(model_context_tokens) is not int
+                or model_context_tokens != self._profile.model_context_tokens
+            ):
+                raise Phase4RemoteQwenContractError(
+                    "remote model context boundary drifted"
+                )
             model.eval()
         except Phase4RemoteQwenContractError:
             raise
@@ -1792,6 +2296,7 @@ class _RemoteTransformersBackend:
         self._processor = processor
         self._model = model
         self._torch = torch
+        self._transformers = transformers
         self._loaded_facts = {
             "model_class": type(model).__name__,
             "processor_class": type(processor).__name__,
@@ -1805,6 +2310,7 @@ class _RemoteTransformersBackend:
             "cpu_offload": False,
             "device": "cuda:0",
             "dtype": "torch.bfloat16",
+            "model_context_tokens": model_context_tokens,
             "model_root_identity": self._profile.model_root_identity,
         }
 
@@ -1821,7 +2327,12 @@ class _RemoteTransformersBackend:
         return tuple(sorted(str(key) for key in keys))
 
     def generate_stream(self, *, input_bytes: bytes, prompt_bytes: bytes, config_bytes: bytes, request_bytes: bytes, emit_delta: Callable[[bytes], None]) -> bytes:
-        if self._model is None or self._processor is None or self._torch is None:
+        if (
+            self._model is None
+            or self._processor is None
+            or self._torch is None
+            or self._transformers is None
+        ):
             raise Phase4RemoteQwenContractError("remote backend was not loaded")
         if not callable(emit_delta):
             raise Phase4RemoteQwenContractError("remote token emitter is invalid")
@@ -1832,7 +2343,17 @@ class _RemoteTransformersBackend:
             request = _strict_json(request_bytes)
             if request.get("diagnostic_id") != REMOTE_DIAGNOSTIC_ID or request.get("node_id") != REMOTE_NODE_ID:
                 raise Phase4RemoteQwenContractError("remote request identity drifted")
-            if config.get("quantization") != REMOTE_QUANTIZATION or config.get("dtype") != REMOTE_DTYPE or config.get("device_map") != REMOTE_DEVICE_MAP or config.get("cpu_offload") is not False:
+            if (
+                config.get("quantization") != REMOTE_QUANTIZATION
+                or config.get("dtype") != REMOTE_DTYPE
+                or config.get("device_map") != REMOTE_DEVICE_MAP
+                or config.get("cpu_offload") is not False
+                or config.get("model_context_tokens")
+                != REMOTE_MODEL_CONTEXT_TOKENS
+                or config.get("fixed_max_new_tokens") is not None
+                or config.get("generation_stop_policy")
+                != REMOTE_GENERATION_STOP_POLICY
+            ):
                 raise Phase4RemoteQwenContractError("remote runtime config drifted")
             model_text = "PROMPT_CONTRACT_JSON\n" + _canonical_bytes(prompt_contract).decode("utf-8") + "\nACTUAL_NODE_INPUT_JSON\n" + _canonical_bytes(actual_input).decode("utf-8")
             rendered = self._processor.apply_chat_template(
@@ -1849,12 +2370,28 @@ class _RemoteTransformersBackend:
                 raise Phase4RemoteQwenContractError("remote model input token cap exceeded")
             tokenizer = getattr(self._processor, "tokenizer", self._processor)
             streamer = _local._P4D1TokenDeltaStreamer(tokenizer=tokenizer, emit_delta=emit_delta)
+            remaining_context_tokens = (
+                self._profile.model_context_tokens - input_length
+            )
+            if remaining_context_tokens < 1:
+                raise Phase4RemoteQwenContractError(
+                    "remote model context boundary was exhausted by input"
+                )
+            stopping_criteria = self._transformers.StoppingCriteriaList(
+                [
+                    _RemoteCompleteJsonStoppingCriteria(
+                        tokenizer=tokenizer,
+                        prompt_length=input_length,
+                    )
+                ]
+            )
             self._torch.manual_seed(self._profile.seed)
             self._torch.cuda.manual_seed_all(self._profile.seed)
             generated = self._model.generate(
                 **encoded,
                 streamer=streamer,
-                max_new_tokens=self._profile.max_new_tokens,
+                max_new_tokens=remaining_context_tokens,
+                stopping_criteria=stopping_criteria,
                 do_sample=False,
                 num_return_sequences=1,
             )
@@ -2200,6 +2737,7 @@ class RemoteInvocationRecord(_CanonicalRecord):
     KEYS = (
         "schema_version", "record_id", "diagnostic_id", "pilot_id", "case_id", "request_id", "node_id",
         "manifest_identity", "policy_identity", "checkpoint_binding_identity", "prior_failure_identity",
+        "d2_predecessor_binding_identity",
         "input_identity", "prompt_identity", "config_identity", "request_identity", "generate_call_index",
         "generate_call_cap", "retry_count", "record_fsync_required", "source_kind", "action_state",
     )
@@ -2219,6 +2757,10 @@ class RemoteInvocationRecord(_CanonicalRecord):
             "policy_identity": _build_remote_policy_ref(prepared.policy_raw),
             "checkpoint_binding_identity": _identity(prepared.checkpoint.binding.to_dict(), revision=REMOTE_CHECKPOINT_SCHEMA_VERSION),
             "prior_failure_identity": _identity(prepared.checkpoint.prior_failure.to_dict(), revision=_local.ATTEMPT_RESULT_SCHEMA_VERSION),
+            "d2_predecessor_binding_identity": _identity(
+                prepared.d2_predecessor.to_dict(),
+                revision=REMOTE_PREDECESSOR_SCHEMA_VERSION,
+            ),
             "input_identity": _identity(prepared.input_bytes, revision=REMOTE_INPUT_REVISION, identity_kind="raw_bytes"),
             "prompt_identity": _identity(prepared.prompt_bytes, revision=REMOTE_PROMPT_REVISION, identity_kind="raw_bytes"),
             "config_identity": _identity(prepared.config_bytes, revision=REMOTE_CONFIG_REVISION, identity_kind="raw_bytes"),
@@ -2239,7 +2781,17 @@ class RemoteInvocationRecord(_CanonicalRecord):
         _sha(data["record_id"], "RemoteInvocationRecord.record_id")
         if data["diagnostic_id"] != REMOTE_DIAGNOSTIC_ID or data["pilot_id"] != REMOTE_PILOT_ID or data["case_id"] != REMOTE_CASE_ID or data["request_id"] != REMOTE_REQUEST_ID or data["node_id"] != REMOTE_NODE_ID:
             raise Phase4RemoteQwenContractError("remote invocation scope drifted")
-        for key in ("manifest_identity", "policy_identity", "checkpoint_binding_identity", "prior_failure_identity", "input_identity", "prompt_identity", "config_identity", "request_identity"):
+        for key in (
+            "manifest_identity",
+            "policy_identity",
+            "checkpoint_binding_identity",
+            "prior_failure_identity",
+            "d2_predecessor_binding_identity",
+            "input_identity",
+            "prompt_identity",
+            "config_identity",
+            "request_identity",
+        ):
             _validate_identity(data[key], f"RemoteInvocationRecord.{key}")
         if data["generate_call_index"] != 1 or data["generate_call_cap"] != 1 or data["retry_count"] != 0 or data["record_fsync_required"] is not True or data["source_kind"] != "remote_qwen_bf16":
             raise Phase4RemoteQwenContractError("remote invocation call envelope drifted")
@@ -2317,7 +2869,8 @@ class RemoteResultRecord(_CanonicalRecord):
         "generation_terminal", "supervisor_terminal_status", "call", "raw_capture", "parse", "node_contract", "registry",
         "node_model_pass", "integrated", "f4", "composition", "assembler", "downstream", "formal_quality", "h1_or_gold",
         "training", "data_authoring", "remote_action_occurred", "model_action_occurred", "checkpoint_binding_identity",
-        "prior_failure_identity", "load_receipt_identity", "supervisor_identity", "failure_code", "source_kind", "action_state",
+        "prior_failure_identity", "d2_predecessor_binding_identity", "load_receipt_identity", "supervisor_identity",
+        "failure_code", "source_kind", "action_state",
     )
     SCHEMA_VERSION = REMOTE_RESULT_SCHEMA_VERSION
 
@@ -2364,7 +2917,11 @@ class RemoteResultRecord(_CanonicalRecord):
             raise Phase4RemoteQwenContractError("remote result downstream boundary drifted")
         for key in ("formal_quality", "h1_or_gold", "training", "data_authoring", "remote_action_occurred", "model_action_occurred"):
             _bool(data[key], f"RemoteResultRecord.{key}")
-        for key in ("checkpoint_binding_identity", "prior_failure_identity"):
+        for key in (
+            "checkpoint_binding_identity",
+            "prior_failure_identity",
+            "d2_predecessor_binding_identity",
+        ):
             _validate_identity(data[key], f"RemoteResultRecord.{key}")
         if data["load_receipt_identity"] is not None:
             _validate_identity(data["load_receipt_identity"], "RemoteResultRecord.load_receipt_identity")
@@ -2500,6 +3057,10 @@ def execute_remote_qwen_bf16_f3(*, prepared: RemotePreparedExperiment, runtime: 
         model_action_occurred=runtime.client.generation_started,
         checkpoint_binding_identity=_identity(prepared.checkpoint.binding.to_dict(), revision=REMOTE_CHECKPOINT_SCHEMA_VERSION),
         prior_failure_identity=_identity(prepared.checkpoint.prior_failure.to_dict(), revision=_local.ATTEMPT_RESULT_SCHEMA_VERSION),
+        d2_predecessor_binding_identity=_identity(
+            prepared.d2_predecessor.to_dict(),
+            revision=REMOTE_PREDECESSOR_SCHEMA_VERSION,
+        ),
         load_receipt_identity=_identity(runtime.load_receipt.to_dict(), revision=REMOTE_LOAD_RECEIPT_SCHEMA_VERSION),
         supervisor_identity=_identity(supervisor.to_dict(), revision=REMOTE_SUPERVISOR_SCHEMA_VERSION),
         failure_code=failure_code,
@@ -2546,6 +3107,10 @@ def _result_after_start_failure(prepared: RemotePreparedExperiment, failure: Rem
         model_action_occurred=False,
         checkpoint_binding_identity=_identity(prepared.checkpoint.binding.to_dict(), revision=REMOTE_CHECKPOINT_SCHEMA_VERSION),
         prior_failure_identity=_identity(prepared.checkpoint.prior_failure.to_dict(), revision=_local.ATTEMPT_RESULT_SCHEMA_VERSION),
+        d2_predecessor_binding_identity=_identity(
+            prepared.d2_predecessor.to_dict(),
+            revision=REMOTE_PREDECESSOR_SCHEMA_VERSION,
+        ),
         load_receipt_identity=None,
         supervisor_identity=_identity(supervisor.to_dict(), revision=REMOTE_SUPERVISOR_SCHEMA_VERSION),
         failure_code="load_failed",
@@ -2563,6 +3128,8 @@ def run_remote_qwen_bf16_f3(
     checkpoint_packet: Path,
     checkpoint_receipt: Path,
     prior_f3_failure: Path,
+    predecessor_d2_result: Path,
+    predecessor_d2_raw: Path,
     result_root: Path,
     confirm_one_remote_generate: bool,
     console: object | None = None,
@@ -2580,6 +3147,8 @@ def run_remote_qwen_bf16_f3(
         checkpoint_packet=checkpoint_packet,
         checkpoint_receipt=checkpoint_receipt,
         prior_f3_failure=prior_f3_failure,
+        predecessor_d2_result=predecessor_d2_result,
+        predecessor_d2_raw=predecessor_d2_raw,
         result_root=result_root,
     )
     mirror.stage("preflight completed")

@@ -1,4 +1,4 @@
-"""Focused no-model tests for the P4-03D2 remote Qwen adapter."""
+"""Focused no-model tests for the P4-03D3 remote Qwen adapter."""
 
 from __future__ import annotations
 
@@ -68,7 +68,7 @@ def _inventory_evidence(source_root: Path | str, files: list[tuple[str, bytes]])
 def _temporary_directory() -> Iterator[str]:
     # Use ordinary mkdir instead of TemporaryDirectory's Windows 0700 ACL.
     scratch_parent = Path(tempfile.gettempdir())
-    directory = scratch_parent / f".p4-03d2-test-{uuid.uuid4().hex}"
+    directory = scratch_parent / f".p4-03d3-test-{uuid.uuid4().hex}"
     directory.mkdir()
     try:
         yield str(directory)
@@ -135,6 +135,13 @@ class RemoteQwenPolicyTests(unittest.TestCase):
         )
         self.assertEqual(profile.quantization, "none")
         self.assertFalse(profile.bitsandbytes_required)
+        self.assertEqual(
+            profile.model_context_tokens, remote.REMOTE_MODEL_CONTEXT_TOKENS
+        )
+        self.assertIsNone(profile.fixed_max_new_tokens)
+        self.assertTrue(
+            profile.generation_stop_policy["stop_on_complete_json_object"]
+        )
         tampered = profile.to_dict()
         tampered["quantization"] = "4bit_nf4_double_quant"
         tampered["profile_id"] = remote._identity(
@@ -334,12 +341,16 @@ class RemoteRawFirstTests(unittest.TestCase):
             authority_state=state,
             outputs={"F1": b"f1", "F2": b"f2"},
         )
+        fake_predecessor = SimpleNamespace(
+            to_dict=lambda: {"predecessor": "d2-failed"}
+        )
         fake_manifest = SimpleNamespace(to_dict=lambda: {"manifest": "preflight"})
         prepared = SimpleNamespace(
             result_root=root,
             policy_raw=b"policy",
             manifest=fake_manifest,
             checkpoint=checkpoint,
+            d2_predecessor=fake_predecessor,
             input_bytes=b"{}",
             prompt_bytes=b"{}",
             config_bytes=b"{}",
@@ -428,6 +439,36 @@ class RemoteRawFirstTests(unittest.TestCase):
             self.assertFalse((root / "repaired_raw_response.bin").exists())
 
 
+class RemoteGenerationStopTests(unittest.TestCase):
+    def test_complete_json_detector_requires_one_finished_object(self):
+        self.assertTrue(remote._is_complete_json_object(' {"ok":true} '))
+        self.assertFalse(remote._is_complete_json_object('{"ok":'))
+        self.assertFalse(remote._is_complete_json_object('{"ok":true} trailing'))
+        self.assertFalse(
+            remote._is_complete_json_object('```json\n{"ok":true}\n```')
+        )
+
+    def test_stopping_criteria_uses_generated_tokens_only(self):
+        class FakeTokenizer:
+            def decode(self, token_ids, **_):
+                return "".join(chr(token_id) for token_id in token_ids)
+
+        class FakeTensor:
+            def __init__(self, rows):
+                self._rows = rows
+
+            def tolist(self):
+                return self._rows
+
+        prompt = [1, 2, 3]
+        complete = [ord(char) for char in '{"ok":true}']
+        criteria = remote._RemoteCompleteJsonStoppingCriteria(
+            tokenizer=FakeTokenizer(), prompt_length=len(prompt)
+        )
+        self.assertTrue(criteria(FakeTensor([prompt + complete]), None))
+        self.assertFalse(criteria(FakeTensor([prompt + complete[:-1]]), None))
+
+
 class RemoteCliTests(unittest.TestCase):
     def test_missing_confirmation_stops_before_action(self):
         from scripts import run_phase4_remote_qwen_stream_diagnostic as script
@@ -438,6 +479,8 @@ class RemoteCliTests(unittest.TestCase):
             "--checkpoint-packet", "packet.json",
             "--checkpoint-receipt", "receipt.json",
             "--prior-f3-failure", "prior.json",
+            "--predecessor-d2-result", "d2-result.json",
+            "--predecessor-d2-raw", "d2-raw.bin",
             "--result-root", "new-result",
         ]
         with patch.object(script, "run_remote_qwen_bf16_f3") as run:

@@ -1,4 +1,4 @@
-"""Run the owner-confirmed one-call remote Qwen3.5-9B BF16 F3 pilot."""
+"""Run the owner-confirmed one-call P4-03D3 remote Qwen BF16 F3 pilot."""
 
 from __future__ import annotations
 
@@ -24,6 +24,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description=(
             "Run exactly one supervised remote Qwen3.5-9B BF16 F3 generation. "
+            "The immutable D2 truncation failure is required as predecessor evidence. "
             "The result is a node-local, non-H1 experiment and never runs F4, "
             "composition, assembly, or downstream gates."
         )
@@ -33,13 +34,16 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--checkpoint-packet", required=True, type=Path)
     parser.add_argument("--checkpoint-receipt", required=True, type=Path)
     parser.add_argument("--prior-f3-failure", required=True, type=Path)
+    parser.add_argument("--predecessor-d2-result", required=True, type=Path)
+    parser.add_argument("--predecessor-d2-raw", required=True, type=Path)
     parser.add_argument("--result-root", required=True, type=Path)
     parser.add_argument(
         "--confirm-one-remote-generate",
         action="store_true",
         help=(
             "Explicitly authorize this invocation's single remote generate call; "
-            "retry remains zero and the 20-minute deadline remains fixed."
+            "retry remains zero, the output has no fixed short token cap, and "
+            "the 20-minute parent deadline remains fixed."
         ),
     )
     return parser
@@ -75,6 +79,8 @@ def main(argv: list[str] | None = None) -> int:
             checkpoint_packet=args.checkpoint_packet.resolve(strict=True),
             checkpoint_receipt=args.checkpoint_receipt.resolve(strict=True),
             prior_f3_failure=args.prior_f3_failure.resolve(strict=True),
+            predecessor_d2_result=args.predecessor_d2_result.resolve(strict=True),
+            predecessor_d2_raw=args.predecessor_d2_raw.resolve(strict=True),
             result_root=args.result_root.resolve(strict=False),
             confirm_one_remote_generate=True,
             console=sys.stderr,
