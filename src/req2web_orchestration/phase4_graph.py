@@ -668,7 +668,11 @@ def _validate_action_state(value: object) -> dict[str, object]:
     return _validate_exact_action_state(value, _ACTION_STATE, "action_state")
 
 
-def create_initial_state(b_input: Mapping[str, object]) -> Phase4GraphState:
+def _create_initial_state(
+    b_input: Mapping[str, object],
+    *,
+    verify_installed_files: bool,
+) -> Phase4GraphState:
     validated = validate_b_input(dict(b_input))
     contract_root = {
         "contract_revision": CONTRACT_REVISION,
@@ -676,6 +680,9 @@ def create_initial_state(b_input: Mapping[str, object]) -> Phase4GraphState:
         "node_order": list(NODE_ORDER),
     }
     constraints = validated["constraints"]
+    dependency_receipt = _validate_dependency_acquisition_receipt(
+        verify_installed_files=verify_installed_files
+    )
     return Phase4GraphState(
         schema_version=STATE_SCHEMA_VERSION,
         graph_revision=GRAPH_REVISION,
@@ -686,7 +693,7 @@ def create_initial_state(b_input: Mapping[str, object]) -> Phase4GraphState:
             contract_root, revision=CONTRACT_REVISION
         ),
         dependency_receipt_identity=make_identity(
-            validate_dependency_acquisition_receipt(),
+            dependency_receipt,
             revision=DEPENDENCY_RECEIPT_REVISION,
         ),
         b_input=copy.deepcopy(validated),
@@ -712,6 +719,10 @@ def create_initial_state(b_input: Mapping[str, object]) -> Phase4GraphState:
         failure=None,
         action_state=dict(_ACTION_STATE),
     )
+
+
+def create_initial_state(b_input: Mapping[str, object]) -> Phase4GraphState:
+    return _create_initial_state(b_input, verify_installed_files=True)
 
 
 def _state_identity(state: Mapping[str, object]) -> dict[str, object]:
@@ -1803,6 +1814,21 @@ def phase4_create_authority_state(
     """
 
     state = create_initial_state(b_input)
+    _phase4_validate_authority_state(state, ())
+    return state
+
+
+def phase4_create_portable_authority_state(
+    b_input: Mapping[str, object],
+) -> Phase4GraphState:
+    """Create the same authority state without platform-local RECORD checks.
+
+    The local synthetic runtime remains strict through ``create_initial_state``.
+    Remote replay validates the frozen receipt and its live dependency names and
+    versions separately, because installed RECORD files are platform-specific.
+    """
+
+    state = _create_initial_state(b_input, verify_installed_files=False)
     _phase4_validate_authority_state(state, ())
     return state
 

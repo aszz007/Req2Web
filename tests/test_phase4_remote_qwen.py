@@ -177,6 +177,116 @@ class RemoteInventoryTests(unittest.TestCase):
                 )
 
 
+class RemoteDependencyRuntimeTests(unittest.TestCase):
+    def test_portable_authority_state_keeps_local_receipt_identity_without_record_replay(self):
+        import req2web_orchestration.phase4_graph as graph
+
+        receipt = graph._validate_dependency_acquisition_receipt(
+            verify_installed_files=False
+        )
+
+        def validate(*, verify_installed_files):
+            if verify_installed_files:
+                raise AssertionError("portable replay requested platform RECORD authority")
+            return receipt
+
+        with patch.object(
+            graph,
+            "_validate_dependency_acquisition_receipt",
+            side_effect=validate,
+        ):
+            state = graph.phase4_create_portable_authority_state(
+                graph.synthetic_commerce_b_input()
+            )
+        self.assertEqual(state["status"], "ready")
+        self.assertEqual(state["node_results"], {})
+
+    def test_platform_specific_record_hashes_do_not_replace_name_version_authority(self):
+        receipt = {
+            "resolved_closure": [
+                {
+                    "distribution": "langgraph",
+                    "version": "1.2.9",
+                    "record_sha256": "sha256:" + "1" * 64,
+                },
+                {
+                    "distribution": "typing_extensions",
+                    "version": "4.16.0",
+                    "record_sha256": "sha256:" + "2" * 64,
+                },
+            ]
+        }
+        installed = [
+            {
+                "distribution": "langgraph",
+                "version": "1.2.9",
+                "record_sha256": "sha256:" + "a" * 64,
+            },
+            {
+                "distribution": "typing-extensions",
+                "version": "4.16.0",
+                "record_sha256": "sha256:" + "b" * 64,
+            },
+        ]
+        with patch(
+            "req2web_orchestration.phase4_graph._validate_dependency_acquisition_receipt",
+            return_value=receipt,
+        ), patch(
+            "req2web_orchestration.phase4_graph._installed_langgraph_state",
+            return_value=(installed, [{"distribution": "langgraph", "relative_path": "remote"}]),
+        ):
+            evidence = remote._validate_remote_langgraph_closure()
+        self.assertEqual(
+            evidence["expected_name_version_identity"],
+            evidence["live_name_version_identity"],
+        )
+        self.assertTrue(
+            evidence["platform_record_digests_are_not_receipt_authority"]
+        )
+
+    def test_remote_dependency_name_version_drift_fails_closed(self):
+        receipt = {
+            "resolved_closure": [
+                {
+                    "distribution": "langgraph",
+                    "version": "1.2.9",
+                    "record_sha256": "sha256:" + "1" * 64,
+                }
+            ]
+        }
+        bad_closures = (
+            [
+                {
+                    "distribution": "langgraph",
+                    "version": "0.0.0",
+                    "record_sha256": "sha256:" + "a" * 64,
+                }
+            ],
+            [
+                {
+                    "distribution": "langgraph",
+                    "version": "1.2.9",
+                    "record_sha256": "sha256:" + "a" * 64,
+                },
+                {
+                    "distribution": "unexpected-extra",
+                    "version": "1.0.0",
+                    "record_sha256": "sha256:" + "b" * 64,
+                },
+            ],
+        )
+        for installed in bad_closures:
+            with self.subTest(installed=installed), patch(
+                "req2web_orchestration.phase4_graph._validate_dependency_acquisition_receipt",
+                return_value=receipt,
+            ), patch(
+                "req2web_orchestration.phase4_graph._installed_langgraph_state",
+                return_value=(installed, []),
+            ):
+                with self.assertRaises(remote.Phase4RemoteQwenContractError):
+                    remote._validate_remote_langgraph_closure()
+
+
 class RemoteRawFirstTests(unittest.TestCase):
     def _prepared(self, root: Path, raw: bytes) -> tuple[remote.RemotePreparedExperiment, object, object]:
         # The production parser lazily imports the optional LangGraph runtime.

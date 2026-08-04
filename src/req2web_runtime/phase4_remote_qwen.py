@@ -24,6 +24,8 @@ import uuid
 from pathlib import Path
 from typing import Any, Callable, ClassVar, Mapping, NamedTuple
 
+from packaging.utils import canonicalize_name
+
 from req2web_runtime import phase4_local_qwen as _local
 
 
@@ -72,7 +74,10 @@ REMOTE_PRIOR_PILOT_ID = _local.P4R6_PILOT_ID
 REMOTE_PROFILE_SCHEMA_VERSION = f"{REMOTE_SCHEMA_PREFIX}.profile.v1"
 REMOTE_INVENTORY_SCHEMA_VERSION = f"{REMOTE_SCHEMA_PREFIX}.inventory.v1"
 REMOTE_RELOCATION_SCHEMA_VERSION = f"{REMOTE_SCHEMA_PREFIX}.relocation.v1"
-REMOTE_CHECKPOINT_SCHEMA_VERSION = f"{REMOTE_SCHEMA_PREFIX}.checkpoint.v1"
+REMOTE_CHECKPOINT_SCHEMA_VERSION = f"{REMOTE_SCHEMA_PREFIX}.checkpoint.v2"
+REMOTE_DEPENDENCY_RUNTIME_SCHEMA_VERSION = (
+    f"{REMOTE_SCHEMA_PREFIX}.langgraph_runtime.v1"
+)
 REMOTE_MANIFEST_SCHEMA_VERSION = f"{REMOTE_SCHEMA_PREFIX}.manifest.v1"
 REMOTE_INVOCATION_SCHEMA_VERSION = f"{REMOTE_SCHEMA_PREFIX}.invocation.v1"
 REMOTE_LOAD_RECEIPT_SCHEMA_VERSION = f"{REMOTE_SCHEMA_PREFIX}.load_receipt.v1"
@@ -728,6 +733,7 @@ class RemoteCheckpointBinding(_CanonicalRecord):
         "case",
         "source",
         "relocation",
+        "dependency_runtime",
         "prior_failure",
         "authority_state_identity",
         "node_raw_identities",
@@ -746,6 +752,7 @@ class RemoteCheckpointBinding(_CanonicalRecord):
         prior_failure: _local.AttemptResult,
         prior_raw: bytes,
         authority_state: Mapping[str, object],
+        dependency_runtime: Mapping[str, object],
     ) -> "RemoteCheckpointBinding":
         root: dict[str, object] = {
             "schema_version": cls.SCHEMA_VERSION,
@@ -777,6 +784,7 @@ class RemoteCheckpointBinding(_CanonicalRecord):
                 "source_path_is_not_remote_identity": True,
                 "remote_identity_basis": "live_target_content_hashes_and_checkpoint_bytes",
             },
+            "dependency_runtime": copy.deepcopy(dict(dependency_runtime)),
             "prior_failure": {
                 "result_identity": _identity(prior_raw, revision=_local.ATTEMPT_RESULT_SCHEMA_VERSION, identity_kind="raw_bytes"),
                 "result_id": prior_failure.result_id,
@@ -839,6 +847,48 @@ class RemoteCheckpointBinding(_CanonicalRecord):
             "remote_identity_basis": "live_target_content_hashes_and_checkpoint_bytes",
         }:
             raise Phase4RemoteQwenContractError("remote checkpoint relocation drifted")
+        dependency_runtime = _exact(
+            data["dependency_runtime"],
+            (
+                "schema_version",
+                "receipt_identity",
+                "expected_name_version_identity",
+                "live_name_version_identity",
+                "live_record_closure_identity",
+                "live_file_inventory_identity",
+                "platform_record_digests_are_not_receipt_authority",
+            ),
+            "RemoteCheckpointBinding.dependency_runtime",
+        )
+        if (
+            dependency_runtime["schema_version"]
+            != REMOTE_DEPENDENCY_RUNTIME_SCHEMA_VERSION
+            or dependency_runtime[
+                "platform_record_digests_are_not_receipt_authority"
+            ]
+            is not True
+        ):
+            raise Phase4RemoteQwenContractError(
+                "remote dependency runtime scope drifted"
+            )
+        for key in (
+            "receipt_identity",
+            "expected_name_version_identity",
+            "live_name_version_identity",
+            "live_record_closure_identity",
+            "live_file_inventory_identity",
+        ):
+            _validate_identity(
+                dependency_runtime[key],
+                f"RemoteCheckpointBinding.dependency_runtime.{key}",
+            )
+        if (
+            dependency_runtime["expected_name_version_identity"]
+            != dependency_runtime["live_name_version_identity"]
+        ):
+            raise Phase4RemoteQwenContractError(
+                "remote dependency name/version identity drifted"
+            )
         prior = _exact(data["prior_failure"], ("result_identity", "result_id", "failure_code", "attempt_index", "raw_status"), "RemoteCheckpointBinding.prior_failure")
         _validate_identity(prior["result_identity"], "RemoteCheckpointBinding.prior_failure.result_identity")
         _sha(prior["result_id"], "RemoteCheckpointBinding.prior_failure.result_id")
@@ -891,6 +941,73 @@ def _validate_remote_prior_failure(prior: _local.AttemptResult) -> _local.Attemp
     return _local._validate_p4r6_timeout_prior_attempt(prior)
 
 
+def _validate_remote_langgraph_closure() -> dict[str, object]:
+    """Validate remote LangGraph by portable package identity, not RECORD bytes."""
+
+    from req2web_orchestration.phase4_graph import (
+        DEPENDENCY_RECEIPT_REVISION,
+        _installed_langgraph_state,
+        _validate_dependency_acquisition_receipt,
+    )
+
+    receipt = _validate_dependency_acquisition_receipt(verify_installed_files=False)
+    installed, file_inventory = _installed_langgraph_state()
+    expected_pairs = sorted(
+        [
+            {
+            "distribution": canonicalize_name(str(row["distribution"])),
+            "version": str(row["version"]),
+            }
+            for row in receipt["resolved_closure"]
+        ],
+        key=lambda row: (row["distribution"], row["version"]),
+    )
+    actual_pairs = sorted(
+        [
+            {
+                "distribution": canonicalize_name(str(row["distribution"])),
+                "version": str(row["version"]),
+            }
+            for row in installed
+        ],
+        key=lambda row: (row["distribution"], row["version"]),
+    )
+    if actual_pairs != expected_pairs:
+        raise Phase4RemoteQwenContractError(
+            "remote LangGraph dependency names or versions drifted"
+        )
+    expected_identity = _identity(
+        expected_pairs,
+        revision=f"{REMOTE_SCHEMA_PREFIX}.langgraph-name-version.v1",
+        identity_kind="canonical_row_list",
+    )
+    live_identity = _identity(
+        actual_pairs,
+        revision=f"{REMOTE_SCHEMA_PREFIX}.langgraph-name-version.v1",
+        identity_kind="canonical_row_list",
+    )
+    return {
+        "schema_version": REMOTE_DEPENDENCY_RUNTIME_SCHEMA_VERSION,
+        "receipt_identity": _identity(
+            receipt,
+            revision=DEPENDENCY_RECEIPT_REVISION,
+        ),
+        "expected_name_version_identity": expected_identity,
+        "live_name_version_identity": live_identity,
+        "live_record_closure_identity": _identity(
+            installed,
+            revision=f"{REMOTE_SCHEMA_PREFIX}.langgraph-live-closure.v1",
+            identity_kind="canonical_row_list",
+        ),
+        "live_file_inventory_identity": _identity(
+            file_inventory,
+            revision=f"{REMOTE_SCHEMA_PREFIX}.langgraph-live-files.v1",
+            identity_kind="canonical_row_list",
+        ),
+        "platform_record_digests_are_not_receipt_authority": True,
+    }
+
+
 def replay_remote_checkpoint(
     *,
     checkpoint_packet: Path,
@@ -918,7 +1035,7 @@ def replay_remote_checkpoint(
     if prior.case_id != REMOTE_CASE_ID or prior.request_id != REMOTE_REQUEST_ID or prior.node_id != REMOTE_NODE_ID:
         raise Phase4RemoteQwenContractError("prior F3 failure scope drifted")
     from req2web_orchestration.phase4_graph import (
-        phase4_create_authority_state,
+        phase4_create_portable_authority_state,
         phase4_register_node_output,
         phase4_validate_node_output,
         synthetic_commerce_b_input,
@@ -928,7 +1045,8 @@ def replay_remote_checkpoint(
     b_input = validate_b_input(synthetic_commerce_b_input())
     if packet.case_id != b_input["case_id"] or packet.request_id != b_input["request_id"]:
         raise Phase4RemoteQwenContractError("checkpoint does not bind the canonical case")
-    state: Mapping[str, object] = phase4_create_authority_state(b_input)
+    dependency_runtime = _validate_remote_langgraph_closure()
+    state: Mapping[str, object] = phase4_create_portable_authority_state(b_input)
     outputs: dict[str, bytes] = {}
     for node_id, row in zip(("F1", "F2"), packet.nodes, strict=True):
         raw = _decode_b64(row["raw_b64"], f"checkpoint.{node_id}.raw_b64")
@@ -949,6 +1067,7 @@ def replay_remote_checkpoint(
         prior_failure=prior,
         prior_raw=prior_raw,
         authority_state=state,
+        dependency_runtime=dependency_runtime,
     )
     return RemoteCheckpointReplay(
         packet=packet,
