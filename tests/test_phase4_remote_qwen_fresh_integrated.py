@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import copy
 import io
 import json
 from pathlib import Path
@@ -205,6 +206,28 @@ class Phase4RemoteFreshIntegratedProfileTests(unittest.TestCase):
         with self.assertRaises(remote.Phase4RemoteFreshIntegratedError):
             remote.RemoteFreshIntegratedProfile.from_dict(tampered)
 
+    def test_stability_profile_binding_excludes_only_dynamic_free_vram(self) -> None:
+        profile = remote.RemoteFreshIntegratedProfile.create(
+            inventory=_fake_inventory(),
+            runtime_facts=_fake_runtime(),
+            gpu_facts=_fake_gpu(),
+        )
+        stable = profile.to_dict()
+        stable.pop("profile_id")
+        stable.pop("free_vram_bytes_at_preflight")
+        expected = remote._identity(
+            stable,
+            revision=remote.P4_05_STABILITY_PROFILE_BINDING_SCHEMA_VERSION,
+        )
+
+        self.assertTrue(
+            remote._profile_matches_expected_identity(
+                profile,
+                {"full_profile_identity": "intentionally-not-compared"},
+                expected,
+            )
+        )
+
         tampered = profile.to_dict()
         tampered["torch_version"] = "drifted"
         with self.assertRaises(remote.Phase4RemoteFreshIntegratedError):
@@ -239,6 +262,47 @@ class Phase4RemoteFreshIntegratedPolicyTests(unittest.TestCase):
                 revision=remote.P4_05_POLICY_SCHEMA_VERSION,
             )["sha256"],
         )
+
+    def test_policy_binds_an_explicit_parent_stability_experiment(self) -> None:
+        profile = remote.RemoteFreshIntegratedProfile.create(
+            inventory=_fake_inventory(),
+            runtime_facts=_fake_runtime(),
+            gpu_facts=_fake_gpu(),
+        )
+        parent = {
+            "schema_version": remote.P4_05_PARENT_BINDING_SCHEMA_VERSION,
+            "experiment_id": "p4-05-commerce-stability-10",
+            "experiment_run_id": "p4-05-stability-run-test",
+            "experiment_policy_identity": remote._identity(
+                {"policy": "stability-test"},
+                revision="req2web.phase4.p4_05.remote_qwen_stability.policy.v1",
+            ),
+            "case_index": 1,
+            "case_id": "p4-05-stability-01-grocery",
+            "request_id": "p4-05-stability-request-01",
+        }
+
+        policy = remote.create_p4_05_policy(
+            run_id=f"{remote.P4_05_RUN_PREFIX}stability-child",
+            result_root_marker=remote.P4_05_ROOT_MARKER,
+            profile=profile,
+            case_id=str(parent["case_id"]),
+            request_id=str(parent["request_id"]),
+            parent_experiment_binding=parent,
+        )
+
+        self.assertEqual(policy["parent_experiment_binding"], parent)
+        invalid = copy.deepcopy(parent)
+        invalid["case_id"] = "wrong-case"
+        with self.assertRaises(remote.Phase4RemoteFreshIntegratedError):
+            remote.create_p4_05_policy(
+                run_id=f"{remote.P4_05_RUN_PREFIX}stability-child-invalid",
+                result_root_marker=remote.P4_05_ROOT_MARKER,
+                profile=profile,
+                case_id=str(parent["case_id"]),
+                request_id=str(parent["request_id"]),
+                parent_experiment_binding=invalid,
+            )
 
 
 class Phase4RemoteFreshIntegratedArtifactTests(unittest.TestCase):
@@ -553,6 +617,57 @@ class Phase4RemoteFreshIntegratedWorkerBoundaryTests(unittest.TestCase):
                 )
 
         prepare_fixed.assert_called_once()
+        worker.assert_not_called()
+
+    def test_parent_profile_drift_precedes_model_worker(self) -> None:
+        profile = remote.RemoteFreshIntegratedProfile.create(
+            inventory=_fake_inventory(),
+            runtime_facts=_fake_runtime(),
+            gpu_facts=_fake_gpu(),
+        )
+        b_input = synthetic_commerce_b_input(
+            case_id=remote.P4_05_CASE_ID,
+            request_id=remote.P4_05_REQUEST_ID,
+        )
+        prepared = {
+            "result_root": Path("C:/p4-05-test-only/profile-drift"),
+            "profile": profile,
+            "run_id": f"{remote.P4_05_RUN_PREFIX}profile-drift",
+            "b_input": b_input,
+            "parent_experiment_binding": None,
+            "preflight": {
+                "profile_identity": remote._identity(
+                    profile.to_dict(),
+                    revision=remote.P4_05_PROFILE_SCHEMA_VERSION,
+                ),
+                "model_inventory_identity": _fake_inventory()[
+                    "inventory_identity"
+                ],
+            },
+        }
+        with patch.object(
+            remote,
+            "prepare_phase4_remote_qwen_fresh_integrated",
+            return_value=prepared,
+        ), patch.object(
+            remote,
+            "FreshIntegratedRemoteWorker",
+        ) as worker:
+            with self.assertRaisesRegex(
+                remote.Phase4RemoteFreshIntegratedError,
+                "profile identity drifted",
+            ):
+                remote.run_phase4_remote_qwen_fresh_integrated(
+                    model_root=_ROOT,
+                    integrity_evidence=_ROOT / "AGENTS.md",
+                    result_root=Path("C:/p4-05-test-only/profile-drift"),
+                    confirm_one_remote_fresh_integrated_run=True,
+                    expected_profile_identity=remote._identity(
+                        {"profile": "different"},
+                        revision=remote.P4_05_PROFILE_SCHEMA_VERSION,
+                    ),
+                )
+
         worker.assert_not_called()
 
 

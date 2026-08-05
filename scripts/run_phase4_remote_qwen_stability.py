@@ -12,6 +12,7 @@ if str(_SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(_SRC_ROOT))
 
 from req2web_runtime import phase4_remote_qwen_stability as runtime
+from req2web_runtime import phase4_remote_qwen_fresh_integrated as fresh
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -34,6 +35,14 @@ def build_parser() -> argparse.ArgumentParser:
         "--confirm-ten-case-baseline",
         action="store_true",
         help="Confirm all ten bounded baseline cases and their model calls.",
+    )
+    parser.add_argument(
+        "--resume-existing",
+        action="store_true",
+        help=(
+            "Resume the explicitly identified existing result root after "
+            "validating its marker, policy, progress, and call ledger."
+        ),
     )
     return parser
 
@@ -72,7 +81,10 @@ def _summary_line(result: dict[str, object]) -> str:
         f"{aggregate.get('total_model_generate_calls', 0)} "
         f"f4_raw_direct_pass={aggregate.get('f4_raw_direct_pass_count', 0)} "
         f"normalization={aggregate.get('f4_normalized_case_count', 0)} "
-        f"repair={aggregate.get('deterministic_repair_count', 0)} "
+        f"repair_attempted={aggregate.get('repair_attempted_count', 0)} "
+        f"repair_success={aggregate.get('repair_success_count', 0)} "
+        f"repair_failed={aggregate.get('repair_failed_count', 0)} "
+        f"fallback_attempted={aggregate.get('fallback_attempted_count', 0)} "
         f"fallback={aggregate.get('g0_fallback_count', 0)} "
         f"delivery={aggregate.get('delivery_success_count', 0)} "
         f"failed_closed={aggregate.get('failed_closed_count', 0)}"
@@ -102,10 +114,12 @@ def main(argv: list[str] | None = None) -> int:
                 integrity_evidence=integrity_evidence,
                 result_root=result_root,
                 run_id=args.run_id,
+                resume_existing=args.resume_existing,
             )
             print(
                 "[P4-05-STABILITY] "
-                f"status=prepared_no_model run_id={prepared['run_id']} "
+                f"status={('existing_summary_validated' if prepared.get('summary') is not None else 'prepared_no_model')} "
+                f"run_id={prepared['run_id']} "
                 f"result_root={result_root}",
                 flush=True,
             )
@@ -124,8 +138,13 @@ def main(argv: list[str] | None = None) -> int:
             confirm_ten_case_baseline=True,
             run_id=args.run_id,
             console=sys.stderr,
+            resume_existing=args.resume_existing,
         )
-    except (OSError, runtime.Phase4RemoteQwenStabilityError) as exc:
+    except (
+        OSError,
+        runtime.Phase4RemoteQwenStabilityError,
+        fresh.Phase4RemoteFreshIntegratedError,
+    ) as exc:
         print(
             f"[P4-05-STABILITY] failed closed: {exc}",
             file=sys.stderr,

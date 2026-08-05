@@ -68,6 +68,12 @@ P4_05_AGGREGATE_LEDGER_SCHEMA_VERSION = (
 P4_05_SUPERVISOR_SCHEMA_VERSION = f"{P4_05_SCHEMA_PREFIX}.supervisor.v2"
 P4_05_STREAM_SCHEMA_VERSION = f"{P4_05_SCHEMA_PREFIX}.stream.v1"
 P4_05_WORKER_PROTOCOL = f"{P4_05_SCHEMA_PREFIX}.worker.v1"
+P4_05_PARENT_BINDING_SCHEMA_VERSION = (
+    f"{P4_05_SCHEMA_PREFIX}.parent_experiment_binding.v1"
+)
+P4_05_STABILITY_PROFILE_BINDING_SCHEMA_VERSION = (
+    "req2web.phase4.p4_05.remote_qwen_stability.profile_binding.v1"
+)
 P4_05_PILOT_ID = "p4-05-remote-qwen-fresh-integrated-v7"
 P4_05_RUN_PREFIX = "p4-05-remote-qwen-fresh-integrated-run-"
 P4_05_CASE_ID = "path3-commerce-checkout"
@@ -233,6 +239,83 @@ def _identity(
         "byte_length": len(raw),
         "revision": revision,
     }
+
+
+def _validate_parent_experiment_binding(
+    value: Mapping[str, object] | None,
+    *,
+    case_id: str,
+    request_id: str,
+) -> dict[str, object] | None:
+    if value is None:
+        return None
+    data = copy.deepcopy(dict(value))
+    expected_keys = (
+        "schema_version",
+        "experiment_id",
+        "experiment_run_id",
+        "experiment_policy_identity",
+        "case_index",
+        "case_id",
+        "request_id",
+    )
+    if tuple(data) != expected_keys:
+        raise Phase4RemoteFreshIntegratedError(
+            "parent experiment binding exact keys drifted"
+        )
+    if (
+        data["schema_version"] != P4_05_PARENT_BINDING_SCHEMA_VERSION
+        or not isinstance(data["experiment_id"], str)
+        or not data["experiment_id"]
+        or not isinstance(data["experiment_run_id"], str)
+        or not data["experiment_run_id"]
+        or not isinstance(data["case_index"], int)
+        or isinstance(data["case_index"], bool)
+        or not 1 <= int(data["case_index"]) <= 10
+        or data["case_id"] != case_id
+        or data["request_id"] != request_id
+    ):
+        raise Phase4RemoteFreshIntegratedError(
+            "parent experiment binding identity drifted"
+        )
+    policy_identity = data["experiment_policy_identity"]
+    if (
+        not isinstance(policy_identity, dict)
+        or tuple(policy_identity)
+        != ("identity_kind", "sha256", "byte_length", "revision")
+        or policy_identity["identity_kind"] != "canonical_json"
+        or not isinstance(policy_identity["sha256"], str)
+        or not str(policy_identity["sha256"]).startswith("sha256:")
+        or not isinstance(policy_identity["byte_length"], int)
+        or isinstance(policy_identity["byte_length"], bool)
+        or int(policy_identity["byte_length"]) <= 0
+        or not isinstance(policy_identity["revision"], str)
+        or not policy_identity["revision"]
+    ):
+        raise Phase4RemoteFreshIntegratedError(
+            "parent experiment policy identity is invalid"
+        )
+    return data
+
+
+def _profile_matches_expected_identity(
+    profile: "RemoteFreshIntegratedProfile",
+    actual_identity: object,
+    expected_identity: Mapping[str, object],
+) -> bool:
+    expected = dict(expected_identity)
+    if (
+        expected.get("revision")
+        == P4_05_STABILITY_PROFILE_BINDING_SCHEMA_VERSION
+    ):
+        stable_profile = profile.to_dict()
+        stable_profile.pop("profile_id", None)
+        stable_profile.pop("free_vram_bytes_at_preflight", None)
+        actual_identity = _identity(
+            stable_profile,
+            revision=P4_05_STABILITY_PROFILE_BINDING_SCHEMA_VERSION,
+        )
+    return _canonical_bytes(actual_identity) == _canonical_bytes(expected)
 
 
 def _expected_input_classes(node_id: str) -> tuple[str, ...]:
@@ -924,8 +1007,14 @@ def create_p4_05_policy(
     profile: RemoteFreshIntegratedProfile,
     case_id: str = P4_05_CASE_ID,
     request_id: str = P4_05_REQUEST_ID,
+    parent_experiment_binding: Mapping[str, object] | None = None,
 ) -> dict[str, object]:
     profile.validate()
+    parent_binding = _validate_parent_experiment_binding(
+        parent_experiment_binding,
+        case_id=case_id,
+        request_id=request_id,
+    )
     if list(_fresh.NODE_ORDER) != list(NODE_ORDER):
         raise Phase4RemoteFreshIntegratedError(
             "fresh local/remote node order authority drifted"
@@ -936,6 +1025,7 @@ def create_p4_05_policy(
         "run_id": run_id,
         "case_id": case_id,
         "request_id": request_id,
+        "parent_experiment_binding": parent_binding,
         "node_order": list(NODE_ORDER),
         "fresh_graph_contract": {
             "schema_version": _fresh.FRESH_INTEGRATED_POLICY_SCHEMA_VERSION,
@@ -1778,7 +1868,13 @@ def _node_request(
     request_id: str,
     node_id: str,
     index: int,
+    parent_experiment_binding: Mapping[str, object] | None = None,
 ) -> bytes:
+    parent_binding = _validate_parent_experiment_binding(
+        parent_experiment_binding,
+        case_id=case_id,
+        request_id=request_id,
+    )
     return _canonical_bytes(
         {
             "schema_version": f"{P4_05_SCHEMA_PREFIX}.request.v1",
@@ -1791,6 +1887,7 @@ def _node_request(
             "generate_call_cap": P4_05_GENERATE_CALL_CAP,
             "retry_count": P4_05_RETRY_COUNT,
             "source_kind": "remote_qwen_bf16_fresh_integrated",
+            "parent_experiment_binding": parent_binding,
         }
     )
 
@@ -1809,7 +1906,13 @@ def _pre_call_record(
     request_bytes: bytes,
     worker_id: str | None,
     worker_pid: int | None,
+    parent_experiment_binding: Mapping[str, object] | None = None,
 ) -> dict[str, object]:
+    parent_binding = _validate_parent_experiment_binding(
+        parent_experiment_binding,
+        case_id=case_id,
+        request_id=request_id,
+    )
     record: dict[str, object] = {
         "schema_version": P4_05_PRE_CALL_SCHEMA_VERSION,
         "record_id": "pending",
@@ -1817,6 +1920,7 @@ def _pre_call_record(
         "run_id": run_id,
         "case_id": case_id,
         "request_id": request_id,
+        "parent_experiment_binding": parent_binding,
         "node_id": node_id,
         "attempt_index": 1,
         "generate_call_index": index,
@@ -1882,13 +1986,20 @@ def _attempt_record(
     generate_started: bool,
     status: str,
     failure_code: str | None,
+    parent_experiment_binding: Mapping[str, object] | None = None,
 ) -> dict[str, object]:
+    parent_binding = _validate_parent_experiment_binding(
+        parent_experiment_binding,
+        case_id=case_id,
+        request_id=request_id,
+    )
     return {
         "schema_version": P4_05_ATTEMPT_SCHEMA_VERSION,
         "pilot_id": P4_05_PILOT_ID,
         "run_id": run_id,
         "case_id": case_id,
         "request_id": request_id,
+        "parent_experiment_binding": parent_binding,
         "node_id": node_id,
         "attempt_index": 1,
         "call_kind": "integrated",
@@ -2410,6 +2521,7 @@ def prepare_phase4_remote_qwen_fresh_integrated(
     result_root: Path,
     run_id: str | None = None,
     b_input: Mapping[str, object] | None = None,
+    parent_experiment_binding: Mapping[str, object] | None = None,
 ) -> dict[str, object]:
     """Create the no-generation P4-05 preflight and profile artifacts."""
 
@@ -2458,12 +2570,18 @@ def prepare_phase4_remote_qwen_fresh_integrated(
         gpu_facts=gpu_facts,
     )
     selected_run_id = run_id or f"{P4_05_RUN_PREFIX}{uuid.uuid4().hex[:16]}"
+    parent_binding = _validate_parent_experiment_binding(
+        parent_experiment_binding,
+        case_id=str(selected_b_input["case_id"]),
+        request_id=str(selected_b_input["request_id"]),
+    )
     policy = create_p4_05_policy(
         run_id=selected_run_id,
         result_root_marker=marker,
         profile=profile,
         case_id=str(selected_b_input["case_id"]),
         request_id=str(selected_b_input["request_id"]),
+        parent_experiment_binding=parent_binding,
     )
     preflight = {
         "schema_version": f"{P4_05_SCHEMA_PREFIX}.preflight.v1",
@@ -2482,6 +2600,7 @@ def prepare_phase4_remote_qwen_fresh_integrated(
         ),
         "case_id": selected_b_input["case_id"],
         "request_id": selected_b_input["request_id"],
+        "parent_experiment_binding": parent_binding,
         "node_order": list(NODE_ORDER),
         "graph_bound_delivery_materials_binding": graph_bound_delivery[
             "binding"
@@ -2508,6 +2627,7 @@ def prepare_phase4_remote_qwen_fresh_integrated(
         "policy": policy,
         "preflight": preflight,
         "b_input": selected_b_input,
+        "parent_experiment_binding": parent_binding,
         "state": state,
         "graph_bound_delivery": graph_bound_delivery,
     }
@@ -2524,6 +2644,9 @@ def run_phase4_remote_qwen_fresh_integrated(
     history_result_roots: tuple[Path, ...] = (),
     resume_from_result_root: Path | None = None,
     b_input: Mapping[str, object] | None = None,
+    expected_profile_identity: Mapping[str, object] | None = None,
+    expected_model_inventory_identity: Mapping[str, object] | None = None,
+    parent_experiment_binding: Mapping[str, object] | None = None,
 ) -> dict[str, object]:
     """Run one fresh F1-F4 BF16 experiment through terminal local delivery."""
 
@@ -2538,11 +2661,34 @@ def run_phase4_remote_qwen_fresh_integrated(
         result_root=result_root,
         run_id=run_id,
         b_input=b_input,
+        parent_experiment_binding=parent_experiment_binding,
     )
     result_root = prepared["result_root"]
     profile: RemoteFreshIntegratedProfile = prepared["profile"]
     run_id = str(prepared["run_id"])
     b_input = prepared["b_input"]
+    parent_binding = prepared["parent_experiment_binding"]
+    if expected_profile_identity is not None:
+        if (
+            not isinstance(expected_profile_identity, Mapping)
+            or not _profile_matches_expected_identity(
+                profile,
+                prepared["preflight"]["profile_identity"],
+                expected_profile_identity,
+            )
+        ):
+            raise Phase4RemoteFreshIntegratedError(
+                "prepared profile identity drifted from the parent experiment"
+            )
+    if expected_model_inventory_identity is not None:
+        if (
+            not isinstance(expected_model_inventory_identity, Mapping)
+            or _canonical_bytes(prepared["preflight"]["model_inventory_identity"])
+            != _canonical_bytes(dict(expected_model_inventory_identity))
+        ):
+            raise Phase4RemoteFreshIntegratedError(
+                "prepared model inventory identity drifted from the parent experiment"
+            )
     state = copy.deepcopy(dict(prepared["state"]))
     history_receipt = _build_call_history(
         history_result_roots=history_result_roots,
@@ -2605,6 +2751,7 @@ def run_phase4_remote_qwen_fresh_integrated(
             _canonical_bytes(
                 {
                     "schema_version": f"{P4_05_SCHEMA_PREFIX}.load_receipt.v1",
+                    "parent_experiment_binding": parent_binding,
                     "profile_identity": _identity(
                         profile.to_dict(),
                         revision=P4_05_PROFILE_SCHEMA_VERSION,
@@ -2648,6 +2795,7 @@ def run_phase4_remote_qwen_fresh_integrated(
                 request_id=str(b_input["request_id"]),
                 node_id=node_id,
                 index=index,
+                parent_experiment_binding=parent_binding,
             )
             pre_call = _pre_call_record(
                 profile=profile,
@@ -2662,6 +2810,7 @@ def run_phase4_remote_qwen_fresh_integrated(
                 request_bytes=request_bytes,
                 worker_id=worker.worker_id,
                 worker_pid=worker.worker_pid,
+                parent_experiment_binding=parent_binding,
             )
             attempt_root = result_root / "attempts" / node_id
             _write_fsync(attempt_root / "input.json", input_bytes)
@@ -2737,6 +2886,7 @@ def run_phase4_remote_qwen_fresh_integrated(
                     generate_started=True,
                     status="validated",
                     failure_code=None,
+                    parent_experiment_binding=parent_binding,
                 )
                 node_results[node_id] = attempt
                 _write_fsync(
@@ -2779,6 +2929,7 @@ def run_phase4_remote_qwen_fresh_integrated(
                     generate_started=generate_started,
                     status="failed_closed",
                     failure_code=failure_code,
+                    parent_experiment_binding=parent_binding,
                 )
                 node_results[node_id] = attempt
                 _write_fsync(
@@ -2840,6 +2991,7 @@ def run_phase4_remote_qwen_fresh_integrated(
                 "run_id": run_id,
                 "case_id": b_input["case_id"],
                 "request_id": b_input["request_id"],
+                "parent_experiment_binding": parent_binding,
                 "source_kind": "remote_qwen_bf16_fresh_integrated",
                 "status": "assembled",
                 "model_generate_calls": aggregate_ledger[
@@ -3013,6 +3165,7 @@ def run_phase4_remote_qwen_fresh_integrated(
             "schema_version": P4_05_SUPERVISOR_SCHEMA_VERSION,
             "pilot_id": P4_05_PILOT_ID,
             "run_id": run_id,
+            "parent_experiment_binding": parent_binding,
             "terminal_status": teardown["terminal_status"],
             "worker_id": teardown["worker_id"],
             "worker_pid": teardown["worker_pid"],
@@ -3067,6 +3220,7 @@ def run_phase4_remote_qwen_fresh_integrated(
         "schema_version": P4_05_RESULT_SCHEMA_VERSION,
         "pilot_id": P4_05_PILOT_ID,
         "run_id": run_id,
+        "parent_experiment_binding": parent_binding,
         "status": terminal_status,
         "node_results": node_results,
         "failure": failure,
@@ -3117,11 +3271,13 @@ __all__ = [
     "P4_05_INPUT_SCHEMA_VERSION",
     "P4_05_LEDGER_SCHEMA_VERSION",
     "P4_05_MODEL_CONTEXT_TOKENS",
+    "P4_05_PARENT_BINDING_SCHEMA_VERSION",
     "P4_05_PILOT_ID",
     "P4_05_PRE_CALL_SCHEMA_VERSION",
     "P4_05_QUANTIZATION",
     "P4_05_REQUEST_ID",
     "P4_05_RUN_PREFIX",
+    "P4_05_STABILITY_PROFILE_BINDING_SCHEMA_VERSION",
     "P4_05_SUPERVISOR_SCHEMA_VERSION",
     "P4_05_TIMEOUT_SECONDS",
     "Phase4RemoteFreshIntegratedError",
