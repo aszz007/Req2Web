@@ -39,6 +39,7 @@ from req2web_orchestration.phase4_graph import (
     phase4_synthetic_assembler_bindings,
     phase4_validate_node_output,
     synthetic_commerce_b_input,
+    validate_b_input,
 )
 from req2web_runtime import phase4_local_qwen as _local
 from req2web_runtime import phase4_local_qwen_fresh_integrated as _fresh
@@ -921,6 +922,8 @@ def create_p4_05_policy(
     run_id: str,
     result_root_marker: str,
     profile: RemoteFreshIntegratedProfile,
+    case_id: str = P4_05_CASE_ID,
+    request_id: str = P4_05_REQUEST_ID,
 ) -> dict[str, object]:
     profile.validate()
     if list(_fresh.NODE_ORDER) != list(NODE_ORDER):
@@ -931,8 +934,8 @@ def create_p4_05_policy(
         "schema_version": P4_05_POLICY_SCHEMA_VERSION,
         "pilot_id": P4_05_PILOT_ID,
         "run_id": run_id,
-        "case_id": P4_05_CASE_ID,
-        "request_id": P4_05_REQUEST_ID,
+        "case_id": case_id,
+        "request_id": request_id,
         "node_order": list(NODE_ORDER),
         "fresh_graph_contract": {
             "schema_version": _fresh.FRESH_INTEGRATED_POLICY_SCHEMA_VERSION,
@@ -2406,6 +2409,7 @@ def prepare_phase4_remote_qwen_fresh_integrated(
     integrity_evidence: Path,
     result_root: Path,
     run_id: str | None = None,
+    b_input: Mapping[str, object] | None = None,
 ) -> dict[str, object]:
     """Create the no-generation P4-05 preflight and profile artifacts."""
 
@@ -2425,11 +2429,15 @@ def prepare_phase4_remote_qwen_fresh_integrated(
     result_root.mkdir(parents=True, exist_ok=False)
     marker = P4_05_ROOT_MARKER
     _write_fsync(result_root / P4_05_ROOT_MARKER, marker.encode("ascii"))
-    b_input = synthetic_commerce_b_input(
-        case_id=P4_05_CASE_ID,
-        request_id=P4_05_REQUEST_ID,
+    selected_b_input = (
+        synthetic_commerce_b_input(
+            case_id=P4_05_CASE_ID,
+            request_id=P4_05_REQUEST_ID,
+        )
+        if b_input is None
+        else copy.deepcopy(validate_b_input(copy.deepcopy(dict(b_input))))
     )
-    state = phase4_create_portable_authority_state(b_input)
+    state = phase4_create_portable_authority_state(selected_b_input)
     graph_bound_delivery = _prepare_graph_bound_delivery_materials(
         result_root=result_root,
         graph_state=state,
@@ -2454,6 +2462,8 @@ def prepare_phase4_remote_qwen_fresh_integrated(
         run_id=selected_run_id,
         result_root_marker=marker,
         profile=profile,
+        case_id=str(selected_b_input["case_id"]),
+        request_id=str(selected_b_input["request_id"]),
     )
     preflight = {
         "schema_version": f"{P4_05_SCHEMA_PREFIX}.preflight.v1",
@@ -2470,8 +2480,8 @@ def prepare_phase4_remote_qwen_fresh_integrated(
             policy,
             revision=P4_05_POLICY_SCHEMA_VERSION,
         ),
-        "case_id": b_input["case_id"],
-        "request_id": b_input["request_id"],
+        "case_id": selected_b_input["case_id"],
+        "request_id": selected_b_input["request_id"],
         "node_order": list(NODE_ORDER),
         "graph_bound_delivery_materials_binding": graph_bound_delivery[
             "binding"
@@ -2485,7 +2495,10 @@ def prepare_phase4_remote_qwen_fresh_integrated(
     _write_fsync(result_root / "remote_profile.json", profile.canonical_bytes())
     _write_fsync(result_root / "p4_05_policy.json", _canonical_bytes(policy))
     _write_fsync(result_root / "preflight_manifest.json", _canonical_bytes(preflight))
-    _write_fsync(result_root / "b_input.json", _canonical_bytes(b_input))
+    _write_fsync(
+        result_root / "b_input.json",
+        _canonical_bytes(selected_b_input),
+    )
     return {
         "result_root": result_root,
         "run_id": selected_run_id,
@@ -2494,7 +2507,7 @@ def prepare_phase4_remote_qwen_fresh_integrated(
         "profile": profile,
         "policy": policy,
         "preflight": preflight,
-        "b_input": b_input,
+        "b_input": selected_b_input,
         "state": state,
         "graph_bound_delivery": graph_bound_delivery,
     }
@@ -2510,6 +2523,7 @@ def run_phase4_remote_qwen_fresh_integrated(
     console: object | None = None,
     history_result_roots: tuple[Path, ...] = (),
     resume_from_result_root: Path | None = None,
+    b_input: Mapping[str, object] | None = None,
 ) -> dict[str, object]:
     """Run one fresh F1-F4 BF16 experiment through terminal local delivery."""
 
@@ -2523,6 +2537,7 @@ def run_phase4_remote_qwen_fresh_integrated(
         integrity_evidence=integrity_evidence,
         result_root=result_root,
         run_id=run_id,
+        b_input=b_input,
     )
     result_root = prepared["result_root"]
     profile: RemoteFreshIntegratedProfile = prepared["profile"]
