@@ -118,6 +118,7 @@ SCRIPTED_FIXTURE_ASSEMBLY_INVALID_KEY = "synthetic_assembly_invalid_v1"
 _BRANCH_NOT_SELECTED = "not_selected"
 _BRANCH_AUTHORIZATION_PROBE = "tier_b_authorization_probe"
 _BRANCH_SCRIPTED_FIXTURE = "scripted_local_fixture"
+PHASE4_FRESH_INTEGRATED_DISPOSITION = "phase4_fresh_integrated_assembled"
 _ALLOWED_REQUEST_BRANCHES = (_BRANCH_AUTHORIZATION_PROBE, _BRANCH_SCRIPTED_FIXTURE)
 _OUTCOME_BRANCHES = (_BRANCH_NOT_SELECTED, *_ALLOWED_REQUEST_BRANCHES)
 
@@ -3363,7 +3364,11 @@ class TierA07aGateDeliveryOutcome:
             not _07a_safe_id(self.model_route_binding["outcome_id"])
             or not _is_sha256(self.model_route_binding["outcome_sha256"])
             or self.model_route_binding["disposition"]
-            not in {"scripted_fixture_assembled", "fail_closed"}
+            not in {
+                "scripted_fixture_assembled",
+                PHASE4_FRESH_INTEGRATED_DISPOSITION,
+                "fail_closed",
+            }
         ):
             raise TierA07aGateDeliveryOutcomeError("outcome_state_invalid")
         failure_code = self.model_route_binding["failure_code"]
@@ -3376,7 +3381,10 @@ class TierA07aGateDeliveryOutcome:
         assembled_sha256 = self.model_route_binding[
             "assembled_page_spec_sha256"
         ]
-        if disposition == "scripted_fixture_assembled":
+        if disposition in {
+            "scripted_fixture_assembled",
+            PHASE4_FRESH_INTEGRATED_DISPOSITION,
+        }:
             if (
                 not _07a_safe_id(assembled_page_id)
                 or not _is_sha256(assembled_sha256)
@@ -4036,6 +4044,7 @@ def _build_tier_a_07a_run(
     package_projection,
     load_fallback_report,
     fallback_report_projection,
+    assembled_page_authority=None,
 ):
     empty_model_binding = {
         "verified": False,
@@ -4390,7 +4399,19 @@ def _build_tier_a_07a_run(
 
         base_steps = _07A_DIRECT_FALLBACK_PREFIX
         assembled = None
-        if model_route_outcome.disposition == "scripted_fixture_assembled":
+        if assembled_page_authority is not None:
+            try:
+                assembled = assembled_page_authority(
+                    model_route_outcome,
+                    context,
+                    guidance,
+                )
+                if not isinstance(assembled, AssembledPageSpec):
+                    raise TypeError("assembled page authority returned the wrong type")
+                assembled.validate()
+            except Exception:
+                assembled = None
+        elif model_route_outcome.disposition == "scripted_fixture_assembled":
             try:
                 live_fixture = model_fixture_authority(scripted_local_fixture)
                 assembled = assembly_authority(
@@ -5720,12 +5741,12 @@ def _07b_validate_model_route_binding(value: object, _safe_id=_07a_safe_id,
         if any(item is not None for key, item in value.items() if key != "verified"):
             raise TierA07bGateDeliveryOutcomeError("outcome_state_invalid")
         return "unverified"
-    if not _safe_id(value["outcome_id"]) or not _is_sha256_fn(value["outcome_sha256"]) or value["disposition"] not in {"scripted_fixture_assembled", "fail_closed"}:
+    if not _safe_id(value["outcome_id"]) or not _is_sha256_fn(value["outcome_sha256"]) or value["disposition"] not in {"scripted_fixture_assembled", PHASE4_FRESH_INTEGRATED_DISPOSITION, "fail_closed"}:
         raise TierA07bGateDeliveryOutcomeError("outcome_state_invalid")
     failure_code = value["failure_code"]
     assembled_id = value["assembled_page_id"]
     assembled_sha256 = value["assembled_page_spec_sha256"]
-    if value["disposition"] == "scripted_fixture_assembled":
+    if value["disposition"] in {"scripted_fixture_assembled", PHASE4_FRESH_INTEGRATED_DISPOSITION}:
         if failure_code is not None or not _safe_id(assembled_id) or not _is_sha256_fn(assembled_sha256):
             raise TierA07bGateDeliveryOutcomeError("outcome_state_invalid")
         return "assembled"
@@ -6080,9 +6101,15 @@ class TierA07bGateDeliveryOutcome:
         return result
 
 
-def _build_tier_a_07b_run(*, outcome_type, report_type, patch_type, model_type, model_validate, model_structural, model_bytes, model_binding_projection=_07b_model_binding, g0_projection=_07a_g0_binding, fallback_binding_projection=_07b_binding_projection, early_failure_factory=_07b_make_early_failure_outcome, empty_model_binding=_07b_empty_model_binding, empty_binding=_07b_empty, empty_counts=_07b_empty_counts, page_binding_projection=_07b_page_binding, report_binding_projection=_07b_report_binding, scope_intersection=_07b_intersection, fallback_prefix=_07b_fallback_prefix, fixture_authority, assembly_authority, field_gate_authority, renderer_type, render_result_type, render_projection, consistency_type, consistency_projection, requirement_projector, requirement_projection, plan_compiler, plan_projection, binding_compiler, binding_projection, acceptance_fixture_authority, acceptance_executor, browser_projection, count_projection, packager_type, package_type, package_projection, fallback_binding_authority, fallback_deliverer, load_fallback_report, fallback_projection, path_preflight, staging_path, cleanup, commit, rollback, _safe_id=_07a_safe_id, _g0_binding_keys=_07A_G0_BINDING_KEYS, _fallback_binding_keys=_07A_FALLBACK_BINDING_KEYS, _first_keys=_07B_FIRST_KEYS, _report_keys=_07B_REPORT_KEYS, _patch_keys=_07B_PATCH_KEYS, _success=_07B_SUCCESS, _step_fallback=_07B_STEP_FALLBACK):
+def _build_tier_a_07b_run(*, outcome_type, report_type, patch_type, model_type, model_validate, model_structural, model_bytes, model_binding_projection=_07b_model_binding, g0_projection=_07a_g0_binding, fallback_binding_projection=_07b_binding_projection, early_failure_factory=_07b_make_early_failure_outcome, empty_model_binding=_07b_empty_model_binding, empty_binding=_07b_empty, empty_counts=_07b_empty_counts, page_binding_projection=_07b_page_binding, report_binding_projection=_07b_report_binding, scope_intersection=_07b_intersection, fallback_prefix=_07b_fallback_prefix, fixture_authority, assembly_authority, field_gate_authority, renderer_type, render_result_type, render_projection, consistency_type, consistency_projection, requirement_projector, requirement_projection, plan_compiler, plan_projection, binding_compiler, binding_projection, acceptance_fixture_authority, acceptance_executor, browser_projection, count_projection, packager_type, package_type, package_projection, fallback_binding_authority, fallback_deliverer, load_fallback_report, fallback_projection, path_preflight, staging_path, cleanup, commit, rollback, assembled_page_authority=None, _safe_id=_07a_safe_id, _g0_binding_keys=_07A_G0_BINDING_KEYS, _fallback_binding_keys=_07A_FALLBACK_BINDING_KEYS, _first_keys=_07B_FIRST_KEYS, _report_keys=_07B_REPORT_KEYS, _patch_keys=_07B_PATCH_KEYS, _success=_07B_SUCCESS, _step_fallback=_07B_STEP_FALLBACK):
     def live_first(outcome: object, fixture: object, context: object, guidance: object) -> PageSpec:
         if type(outcome) is not model_type: raise TierA07bGateDeliveryOutcomeError("model_route_invalid")
+        if assembled_page_authority is not None:
+            assembled = assembled_page_authority(outcome, context, guidance)
+            if not isinstance(assembled, AssembledPageSpec):
+                raise TierA07bGateDeliveryOutcomeError("model_route_invalid")
+            assembled.validate()
+            return assembled.page_spec
         live_fixture = fixture_authority(fixture); assembled = assembly_authority(live_fixture.raw_response, context, guidance)
         expected = {"raw_response_sha256": live_fixture.raw_response.sha256, "raw_response_byte_length": len(live_fixture.raw_response.raw_bytes), "model_semantic_candidate_sha256": assembled.candidate.sha256(), "assembled_page_id": assembled.page_spec.page_id, "assembly_report_id": assembled.report.report_id, "assembly_report_sha256": assembled.report.sha256(), "assembled_page_spec_sha256": assembled.report.assembled_page_spec_sha256}
         if outcome.disposition != "scripted_fixture_assembled" or dict(outcome.artifacts) != expected: raise TierA07bGateDeliveryOutcomeError("model_route_invalid")
@@ -6238,6 +6265,110 @@ class TierA07bOneRepairOrchestrator:
     """Captured local deterministic/synthetic one-repair route; no model call."""
     __slots__ = ()
     run = _build_tier_a_07b_run(outcome_type=TierA07bGateDeliveryOutcome, report_type=TierA07bFieldGateReport, patch_type=TierA07bRepairPatch, model_type=ModelRouteOutcome, model_validate=ModelRouteOutcome.validate_against, model_structural=ModelRouteOutcome.validate, model_bytes=ModelRouteOutcome.canonical_bytes, model_binding_projection=_07b_model_binding, g0_projection=_07a_g0_binding, fallback_binding_projection=_07b_binding_projection, early_failure_factory=_07b_make_early_failure_outcome, empty_model_binding=_07b_empty_model_binding, empty_binding=_07b_empty, empty_counts=_07b_empty_counts, page_binding_projection=_07b_page_binding, report_binding_projection=_07b_report_binding, scope_intersection=_07b_intersection, fallback_prefix=_07b_fallback_prefix, fixture_authority=_FIXED_LIVE_FIXTURE_AUTHORITY, assembly_authority=_FIXED_CANONICAL_ASSEMBLY_AUTHORITY, field_gate_authority=_FIXED_07B_FIELD_GATE_AUTHORITY, renderer_type=DeterministicPageRenderer, render_result_type=RenderResult, render_projection=_FIXED_07A_RENDER_PROJECTION, consistency_type=MinimalConsistencyChecker, consistency_projection=_FIXED_07A_CONSISTENCY_PROJECTION, requirement_projector=project_requirement_view, requirement_projection=_FIXED_07A_REQUIREMENT_PROJECTION, plan_compiler=compile_acceptance_plan, plan_projection=_FIXED_07A_PLAN_PROJECTION, binding_compiler=compile_acceptance_binding, binding_projection=_FIXED_07A_BINDING_PROJECTION, acceptance_fixture_authority=_FIXED_ACCEPTANCE_FIXTURE_AUTHORITY, acceptance_executor=_FIXED_ACCEPTANCE_EXECUTION_AUTHORITY, browser_projection=_FIXED_07A_BROWSER_PROJECTION, count_projection=_FIXED_07A_ACCEPTANCE_COUNTS, packager_type=DeterministicResultPackager, package_type=ResultPackage, package_projection=_FIXED_07A_PACKAGE_PROJECTION, fallback_binding_authority=_FIXED_07A_FALLBACK_BINDING_AUTHORITY, fallback_deliverer=deliver_frozen_g0_fallback, load_fallback_report=_FIXED_07A_LOAD_FALLBACK_REPORT, fallback_projection=_FIXED_07A_FALLBACK_REPORT_PROJECTION, path_preflight=_FIXED_07A_PATH_PREFLIGHT, staging_path=_FIXED_07A_STAGING_PATH, cleanup=_FIXED_07A_CLEANUP_DIRECTORY, commit=_FIXED_07A_COMMIT_STAGING, rollback=_FIXED_07A_ROLLBACK_COMMIT)
+
+
+def _build_phase4_fresh_delivery_runners(
+    *,
+    model_route_type,
+    model_route_validate,
+    model_route_structural_validate,
+    model_route_canonical_bytes,
+    assembled_page_authority,
+):
+    """Bind the existing A-07 authorities to a non-scripted source adapter."""
+
+    first_pass = _build_tier_a_07a_run(
+        outcome_type=TierA07aGateDeliveryOutcome,
+        failure_type=TierA07aGateDeliveryFailure,
+        model_route_type=model_route_type,
+        model_route_validate=model_route_validate,
+        model_route_structural_validate=model_route_structural_validate,
+        model_route_canonical_bytes=model_route_canonical_bytes,
+        model_fixture_authority=_FIXED_LIVE_FIXTURE_AUTHORITY,
+        assembly_authority=_FIXED_CANONICAL_ASSEMBLY_AUTHORITY,
+        renderer_type=DeterministicPageRenderer,
+        render_result_type=RenderResult,
+        consistency_checker_type=MinimalConsistencyChecker,
+        requirement_projector=project_requirement_view,
+        acceptance_plan_compiler=compile_acceptance_plan,
+        acceptance_binding_compiler=compile_acceptance_binding,
+        acceptance_fixture_authority=_FIXED_ACCEPTANCE_FIXTURE_AUTHORITY,
+        acceptance_executor=_FIXED_ACCEPTANCE_EXECUTION_AUTHORITY,
+        packager_type=DeterministicResultPackager,
+        result_package_type=ResultPackage,
+        fallback_deliverer=deliver_frozen_g0_fallback,
+        fallback_binding_authority=_FIXED_07A_FALLBACK_BINDING_AUTHORITY,
+        path_preflight=_FIXED_07A_PATH_PREFLIGHT,
+        staging_path=_FIXED_07A_STAGING_PATH,
+        cleanup_directory=_FIXED_07A_CLEANUP_DIRECTORY,
+        commit_staging=_FIXED_07A_COMMIT_STAGING,
+        rollback_commit=_FIXED_07A_ROLLBACK_COMMIT,
+        page_spec_projection=_07a_page_spec_artifacts,
+        g0_projection=_07a_g0_binding,
+        render_projection=_FIXED_07A_RENDER_PROJECTION,
+        consistency_projection=_FIXED_07A_CONSISTENCY_PROJECTION,
+        requirement_projection=_FIXED_07A_REQUIREMENT_PROJECTION,
+        plan_projection=_FIXED_07A_PLAN_PROJECTION,
+        binding_projection=_FIXED_07A_BINDING_PROJECTION,
+        browser_projection=_FIXED_07A_BROWSER_PROJECTION,
+        acceptance_counts_projection=_FIXED_07A_ACCEPTANCE_COUNTS,
+        package_projection=_FIXED_07A_PACKAGE_PROJECTION,
+        load_fallback_report=_FIXED_07A_LOAD_FALLBACK_REPORT,
+        fallback_report_projection=_FIXED_07A_FALLBACK_REPORT_PROJECTION,
+        assembled_page_authority=assembled_page_authority,
+    )
+    one_repair = _build_tier_a_07b_run(
+        outcome_type=TierA07bGateDeliveryOutcome,
+        report_type=TierA07bFieldGateReport,
+        patch_type=TierA07bRepairPatch,
+        model_type=model_route_type,
+        model_validate=model_route_validate,
+        model_structural=model_route_structural_validate,
+        model_bytes=model_route_canonical_bytes,
+        model_binding_projection=_07b_model_binding,
+        g0_projection=_07a_g0_binding,
+        fallback_binding_projection=_07b_binding_projection,
+        early_failure_factory=_07b_make_early_failure_outcome,
+        empty_model_binding=_07b_empty_model_binding,
+        empty_binding=_07b_empty,
+        empty_counts=_07b_empty_counts,
+        page_binding_projection=_07b_page_binding,
+        report_binding_projection=_07b_report_binding,
+        scope_intersection=_07b_intersection,
+        fallback_prefix=_07b_fallback_prefix,
+        fixture_authority=_FIXED_LIVE_FIXTURE_AUTHORITY,
+        assembly_authority=_FIXED_CANONICAL_ASSEMBLY_AUTHORITY,
+        field_gate_authority=_FIXED_07B_FIELD_GATE_AUTHORITY,
+        renderer_type=DeterministicPageRenderer,
+        render_result_type=RenderResult,
+        render_projection=_FIXED_07A_RENDER_PROJECTION,
+        consistency_type=MinimalConsistencyChecker,
+        consistency_projection=_FIXED_07A_CONSISTENCY_PROJECTION,
+        requirement_projector=project_requirement_view,
+        requirement_projection=_FIXED_07A_REQUIREMENT_PROJECTION,
+        plan_compiler=compile_acceptance_plan,
+        plan_projection=_FIXED_07A_PLAN_PROJECTION,
+        binding_compiler=compile_acceptance_binding,
+        binding_projection=_FIXED_07A_BINDING_PROJECTION,
+        acceptance_fixture_authority=_FIXED_ACCEPTANCE_FIXTURE_AUTHORITY,
+        acceptance_executor=_FIXED_ACCEPTANCE_EXECUTION_AUTHORITY,
+        browser_projection=_FIXED_07A_BROWSER_PROJECTION,
+        count_projection=_FIXED_07A_ACCEPTANCE_COUNTS,
+        packager_type=DeterministicResultPackager,
+        package_type=ResultPackage,
+        package_projection=_FIXED_07A_PACKAGE_PROJECTION,
+        fallback_binding_authority=_FIXED_07A_FALLBACK_BINDING_AUTHORITY,
+        fallback_deliverer=deliver_frozen_g0_fallback,
+        load_fallback_report=_FIXED_07A_LOAD_FALLBACK_REPORT,
+        fallback_projection=_FIXED_07A_FALLBACK_REPORT_PROJECTION,
+        path_preflight=_FIXED_07A_PATH_PREFLIGHT,
+        staging_path=_FIXED_07A_STAGING_PATH,
+        cleanup=_FIXED_07A_CLEANUP_DIRECTORY,
+        commit=_FIXED_07A_COMMIT_STAGING,
+        rollback=_FIXED_07A_ROLLBACK_COMMIT,
+        assembled_page_authority=assembled_page_authority,
+    )
+    return first_pass, one_repair
 
 
 def _build_tier_a_07b_read_only_package_verifier(

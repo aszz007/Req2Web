@@ -1,0 +1,2462 @@
+"""P4-05 fresh integrated Qwen3.5-9B runner for AutoDL RTX 5090.
+
+The module is intentionally separate from the historical remote F3 runner.
+It reuses the existing model inventory and BF16 loader foundation, but owns a
+new P4-05 policy, worker protocol, F1-F4 input chain, raw-first ledger, and
+truthful delivery-bridge handoff.
+
+No download, network, telemetry, training, quantization, CPU offload, input
+truncation, output truncation, automatic retry, or model switching is allowed.
+The worker loads once and serves the four fresh integrated generation calls.
+"""
+
+from __future__ import annotations
+
+import base64
+import copy
+import json
+import os
+import queue
+from pathlib import Path
+import subprocess
+import sys
+import threading
+import time
+import uuid
+from dataclasses import dataclass
+from typing import Callable, Mapping
+
+from req2web_orchestration.phase4_graph import (
+    NODE_ORDER,
+    phase4_assemble_candidate,
+    phase4_compose_candidate,
+    phase4_create_mapping,
+    phase4_create_portable_authority_state,
+    phase4_normalize_and_validate_f4_output,
+    phase4_project_node_input_authority,
+    phase4_register_node_output,
+    phase4_synthetic_assembler_bindings,
+    synthetic_commerce_b_input,
+)
+from req2web_runtime import phase4_local_qwen as _local
+from req2web_runtime import phase4_local_qwen_fresh_integrated as _fresh
+from req2web_runtime import phase4_remote_qwen as _remote
+from req2web_runtime.phase4_fresh_delivery import (
+    Phase4GraphBoundDeliveryMaterials,
+    build_phase4_graph_bound_delivery_materials,
+    run_phase4_fresh_delivery,
+)
+
+
+P4_05_SCHEMA_PREFIX = "req2web.phase4.p4_05.remote_fresh_integrated"
+P4_05_PROFILE_SCHEMA_VERSION = f"{P4_05_SCHEMA_PREFIX}.profile.v1"
+P4_05_POLICY_SCHEMA_VERSION = f"{P4_05_SCHEMA_PREFIX}.policy.v1"
+P4_05_RESULT_SCHEMA_VERSION = f"{P4_05_SCHEMA_PREFIX}.result.v1"
+P4_05_INPUT_SCHEMA_VERSION = f"{P4_05_SCHEMA_PREFIX}.input.v1"
+P4_05_PRE_CALL_SCHEMA_VERSION = f"{P4_05_SCHEMA_PREFIX}.pre_call.v1"
+P4_05_ATTEMPT_SCHEMA_VERSION = f"{P4_05_SCHEMA_PREFIX}.attempt.v2"
+P4_05_LEDGER_SCHEMA_VERSION = f"{P4_05_SCHEMA_PREFIX}.ledger.v1"
+P4_05_SUPERVISOR_SCHEMA_VERSION = f"{P4_05_SCHEMA_PREFIX}.supervisor.v2"
+P4_05_STREAM_SCHEMA_VERSION = f"{P4_05_SCHEMA_PREFIX}.stream.v1"
+P4_05_WORKER_PROTOCOL = f"{P4_05_SCHEMA_PREFIX}.worker.v1"
+P4_05_PILOT_ID = "p4-05-remote-qwen-fresh-integrated-v1"
+P4_05_RUN_PREFIX = "p4-05-remote-qwen-fresh-integrated-run-"
+P4_05_CASE_ID = "path3-commerce-checkout"
+P4_05_REQUEST_ID = "p4-02a-synthetic-request-001"
+P4_05_ROOT_MARKER = ".req2web-phase4-p4-05-remote-fresh-integrated-root"
+P4_05_PROFILE_NAME = "remote_bf16_fresh_integrated"
+P4_05_TIMEOUT_SECONDS = 1200
+P4_05_LOAD_TIMEOUT_SECONDS = 600
+P4_05_GENERATE_CALL_CAP = 1
+P4_05_RETRY_COUNT = 0
+P4_05_DTYPE = "bfloat16"
+P4_05_QUANTIZATION = "none"
+P4_05_COMPUTE_DTYPE = "bfloat16"
+P4_05_MODEL_CONTEXT_TOKENS = _remote.REMOTE_MODEL_CONTEXT_TOKENS
+P4_05_DEVICE_MAP = {"": 0}
+P4_05_STOP_POLICY = {
+    "fixed_max_new_tokens": False,
+    "stop_on_complete_json_object": True,
+    "stop_on_model_eos": True,
+    "model_context_limit_enforced": True,
+    "parent_wall_clock_timeout_enforced": True,
+    "input_truncation": False,
+    "output_truncation": False,
+}
+P4_05_INPUT_CLASSES = {
+    "F1": (
+        "canonical_b_requirement_view",
+        "canonical_b_use_case_view",
+        "canonical_b_constraint_view",
+        "target_device",
+        "task_type",
+        "approved_structural_signals",
+    ),
+    "F2": (
+        "canonical_b_requirement_view",
+        "canonical_b_use_case_view",
+        "canonical_b_constraint_view",
+        "target_device",
+        "task_type",
+        "approved_structural_signals",
+        "f1_registered_structure_view",
+    ),
+    "F3": (
+        "canonical_b_requirement_view",
+        "canonical_b_use_case_view",
+        "canonical_b_constraint_view",
+        "target_device",
+        "task_type",
+        "approved_structural_signals",
+        "f1_registered_structure_view",
+        "f2_registered_state_visibility_view",
+    ),
+    "F4": (
+        "canonical_b_requirement_view",
+        "canonical_b_use_case_view",
+        "canonical_b_constraint_view",
+        "target_device",
+        "task_type",
+        "approved_structural_signals",
+        "f1_registered_structure_view",
+        "f2_registered_state_visibility_view",
+        "f3_registered_interaction_view",
+        "deterministic_use_case_mapping_view",
+    ),
+}
+P4_05_PROHIBITED_INPUT_CLASSES = (
+    "full_agent_context",
+    "retrieval_guidance",
+    "retrieval_evidence_content",
+    "retrieval_evidence_location",
+    "rico_or_reference_assets",
+    "h1_or_gold",
+    "evaluator_only_material",
+    "secrets_or_credentials",
+    "result_package",
+    "downstream_acceptance_evidence",
+    "g0_payload",
+    "unapproved_b_aux",
+)
+
+
+class Phase4RemoteFreshIntegratedError(ValueError):
+    """Raised when the P4-05 remote contract cannot be satisfied."""
+
+
+def _canonical_bytes(value: object) -> bytes:
+    try:
+        return json.dumps(
+            value,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+            allow_nan=False,
+        ).encode("utf-8")
+    except (TypeError, ValueError) as exc:
+        raise Phase4RemoteFreshIntegratedError(
+            "value is not canonical JSON"
+        ) from exc
+
+
+def _strict_json(raw: bytes, name: str) -> object:
+    if type(raw) is not bytes or not raw or raw.startswith(b"\xef\xbb\xbf"):
+        raise Phase4RemoteFreshIntegratedError(f"{name} is not valid raw JSON")
+    try:
+        value = json.loads(raw.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise Phase4RemoteFreshIntegratedError(f"{name} is not valid JSON") from exc
+    if _canonical_bytes(value) != raw:
+        raise Phase4RemoteFreshIntegratedError(f"{name} is not canonical JSON")
+    return value
+
+
+def _parse_model_json(raw: bytes, name: str) -> object:
+    """Parse complete model JSON without rewriting or canonicalizing raw bytes."""
+
+    if type(raw) is not bytes or not raw or raw.startswith(b"\xef\xbb\xbf"):
+        raise Phase4RemoteFreshIntegratedError(f"{name} is not valid raw JSON")
+
+    def reject_constant(value: str) -> object:
+        raise ValueError(f"non-finite JSON constant: {value}")
+
+    try:
+        return json.loads(
+            raw.decode("utf-8"),
+            parse_constant=reject_constant,
+        )
+    except (UnicodeDecodeError, json.JSONDecodeError, ValueError) as exc:
+        raise Phase4RemoteFreshIntegratedError(f"{name} is not complete JSON") from exc
+
+
+def _b64(raw: bytes) -> str:
+    if type(raw) is not bytes:
+        raise Phase4RemoteFreshIntegratedError("base64 input must be bytes")
+    return base64.b64encode(raw).decode("ascii")
+
+
+def _decode_b64(value: object, name: str) -> bytes:
+    if not isinstance(value, str):
+        raise Phase4RemoteFreshIntegratedError(f"{name} is not base64 text")
+    try:
+        return base64.b64decode(value.encode("ascii"), validate=True)
+    except (ValueError, UnicodeEncodeError) as exc:
+        raise Phase4RemoteFreshIntegratedError(f"{name} is not canonical base64") from exc
+
+
+def _sha256(raw: bytes) -> str:
+    import hashlib
+
+    return "sha256:" + hashlib.sha256(raw).hexdigest()
+
+
+def _identity(
+    value: object,
+    *,
+    revision: str,
+    identity_kind: str = "canonical_json",
+) -> dict[str, object]:
+    raw = value if type(value) is bytes else _canonical_bytes(value)
+    return {
+        "identity_kind": identity_kind,
+        "sha256": _sha256(raw),
+        "byte_length": len(raw),
+        "revision": revision,
+    }
+
+
+def _expected_input_classes(node_id: str) -> tuple[str, ...]:
+    try:
+        return P4_05_INPUT_CLASSES[node_id]
+    except KeyError as exc:
+        raise Phase4RemoteFreshIntegratedError(
+            f"unknown P4-05 input node: {node_id}"
+        ) from exc
+
+
+def _validated_node_output(
+    state: Mapping[str, object],
+    node_id: str,
+) -> Mapping[str, object]:
+    record = state.get("node_results", {}).get(node_id)
+    if not isinstance(record, Mapping):
+        raise Phase4RemoteFreshIntegratedError(
+            f"{node_id} validated node result is unavailable"
+        )
+    payload = record.get("payload")
+    if not isinstance(payload, Mapping):
+        raise Phase4RemoteFreshIntegratedError(
+            f"{node_id} validated node payload is unavailable"
+        )
+    output = payload.get("node_output")
+    if not isinstance(output, Mapping):
+        raise Phase4RemoteFreshIntegratedError(
+            f"{node_id} validated node output is unavailable"
+        )
+    return output
+
+
+def _registry_row(
+    authority_projection: Mapping[str, object],
+    *,
+    node_id: str,
+    entity_type: str,
+    local_id: str,
+) -> Mapping[str, object]:
+    rows = authority_projection.get("registry_rows")
+    if not isinstance(rows, list):
+        raise Phase4RemoteFreshIntegratedError(
+            "registered input view has no registry rows"
+        )
+    matches = [
+        row
+        for row in rows
+        if isinstance(row, Mapping)
+        and row.get("node_id") == node_id
+        and row.get("entity_type") == entity_type
+        and row.get("local_id") == local_id
+    ]
+    if len(matches) != 1:
+        raise Phase4RemoteFreshIntegratedError(
+            f"registered input view target is not unique: {node_id}/{local_id}"
+        )
+    return matches[0]
+
+
+def _f1_registered_structure_view(
+    *,
+    state: Mapping[str, object],
+    authority_projection: Mapping[str, object],
+) -> dict[str, object]:
+    output = _validated_node_output(state, "F1")
+    sections: list[dict[str, object]] = []
+    components: list[dict[str, object]] = []
+    component_rows: dict[str, Mapping[str, object]] = {}
+    for component in output["components"]:
+        row = _registry_row(
+            authority_projection,
+            node_id="F1",
+            entity_type="component",
+            local_id=str(component["local_id"]),
+        )
+        component_rows[str(component["local_id"])] = row
+        components.append(
+            {
+                "local_id": component["local_id"],
+                "stable_id": row["stable_id"],
+                "component_type": component["component_type"],
+                "section_local_id": component["section_local_id"],
+                "label": component["label"],
+                "purpose": component["purpose"],
+            }
+        )
+    for section in output["sections"]:
+        row = _registry_row(
+            authority_projection,
+            node_id="F1",
+            entity_type="section",
+            local_id=str(section["local_id"]),
+        )
+        component_stable_ids = [
+            component_rows[str(local_id)]["stable_id"]
+            for local_id in section["component_local_ids"]
+        ]
+        sections.append(
+            {
+                "local_id": section["local_id"],
+                "stable_id": row["stable_id"],
+                "title": section["title"],
+                "purpose": section["purpose"],
+                "component_local_ids": list(section["component_local_ids"]),
+                "component_stable_ids": component_stable_ids,
+            }
+        )
+    return {
+        "registry_identity": copy.deepcopy(
+            authority_projection["registry_identities"]["F1"]
+        ),
+        "page_title": output["page_title"],
+        "layout_pattern": output["layout_pattern"],
+        "sections": sections,
+        "components": components,
+    }
+
+
+def _f2_registered_state_visibility_view(
+    *,
+    state: Mapping[str, object],
+    authority_projection: Mapping[str, object],
+) -> dict[str, object]:
+    output = _validated_node_output(state, "F2")
+    f1_view = _f1_registered_structure_view(
+        state=state,
+        authority_projection=authority_projection,
+    )
+    component_rows = {
+        str(component["local_id"]): component
+        for component in f1_view["components"]
+    }
+    states: list[dict[str, object]] = []
+    for item in output["states"]:
+        row = _registry_row(
+            authority_projection,
+            node_id="F2",
+            entity_type="state",
+            local_id=str(item["local_id"]),
+        )
+        states.append(
+            {
+                "local_id": item["local_id"],
+                "stable_id": row["stable_id"],
+                "name": item["name"],
+                "description": item["description"],
+                "visible_component_local_ids": list(
+                    item["visible_component_local_ids"]
+                ),
+                "visible_component_stable_ids": [
+                    component_rows[str(local_id)]["stable_id"]
+                    for local_id in item["visible_component_local_ids"]
+                ],
+            }
+        )
+    return {
+        "registry_identity": copy.deepcopy(
+            authority_projection["registry_identities"]["F2"]
+        ),
+        "states": states,
+    }
+
+
+def _f3_registered_interaction_view(
+    *,
+    state: Mapping[str, object],
+    authority_projection: Mapping[str, object],
+) -> dict[str, object]:
+    output = _validated_node_output(state, "F3")
+    f1_view = _f1_registered_structure_view(
+        state=state,
+        authority_projection=authority_projection,
+    )
+    component_rows = {
+        str(component["local_id"]): component
+        for component in f1_view["components"]
+    }
+    f2_view = _f2_registered_state_visibility_view(
+        state=state,
+        authority_projection=authority_projection,
+    )
+    state_rows = {
+        str(item["local_id"]): item
+        for item in f2_view["states"]
+    }
+    interactions: list[dict[str, object]] = []
+    for item in output["interactions"]:
+        row = _registry_row(
+            authority_projection,
+            node_id="F3",
+            entity_type="interaction",
+            local_id=str(item["local_id"]),
+        )
+        source_state = state_rows[str(item["source_state_local_id"])]
+        target_state = state_rows[str(item["target_state_local_id"])]
+        interactions.append(
+            {
+                "local_id": item["local_id"],
+                "stable_id": row["stable_id"],
+                "trigger_component_local_id": item[
+                    "trigger_component_local_id"
+                ],
+                "trigger_component_stable_id": component_rows[
+                    str(item["trigger_component_local_id"])
+                ]["stable_id"],
+                "source_state_local_id": item["source_state_local_id"],
+                "source_state_stable_id": source_state["stable_id"],
+                "action": item["action"],
+                "target_state_local_id": item["target_state_local_id"],
+                "target_state_stable_id": target_state["stable_id"],
+                "user_feedback": item["user_feedback"],
+            }
+        )
+    return {
+        "registry_identity": copy.deepcopy(
+            authority_projection["registry_identities"]["F3"]
+        ),
+        "interactions": interactions,
+    }
+
+
+def _provider_visible_projection(
+    *,
+    node_id: str,
+    b_input: Mapping[str, object],
+    state: Mapping[str, object],
+    authority_projection: Mapping[str, object],
+) -> dict[str, object]:
+    classes = _expected_input_classes(node_id)
+    projection: dict[str, object] = {
+        "canonical_b_requirement_view": {
+            "requirement": b_input["requirement"],
+            "requirement_summary": b_input["requirement_summary"],
+        },
+        "canonical_b_use_case_view": {
+            "use_cases": copy.deepcopy(b_input["use_cases"]),
+        },
+        "canonical_b_constraint_view": {
+            "constraints": copy.deepcopy(b_input["constraints"]),
+        },
+        "target_device": b_input["target_device"],
+        "task_type": b_input["task_type"],
+        "approved_structural_signals": [],
+    }
+    if node_id in {"F2", "F3", "F4"}:
+        projection["f1_registered_structure_view"] = (
+            _f1_registered_structure_view(
+                state=state,
+                authority_projection=authority_projection,
+            )
+        )
+    if node_id in {"F3", "F4"}:
+        projection["f2_registered_state_visibility_view"] = (
+            _f2_registered_state_visibility_view(
+                state=state,
+                authority_projection=authority_projection,
+            )
+        )
+    if node_id == "F4":
+        projection["f3_registered_interaction_view"] = (
+            _f3_registered_interaction_view(
+                state=state,
+                authority_projection=authority_projection,
+            )
+        )
+        projection["deterministic_use_case_mapping_view"] = {
+            "mapping_identity": copy.deepcopy(
+                authority_projection["mapping_identity"]
+            ),
+            "ordered_mappings": copy.deepcopy(
+                authority_projection["ordered_mappings"]
+            ),
+        }
+    if tuple(projection) != classes:
+        raise Phase4RemoteFreshIntegratedError(
+            f"{node_id} provider projection classes drifted"
+        )
+    return projection
+
+
+def _validate_node_input_value(value: object, node_id: str) -> Mapping[str, object]:
+    if not isinstance(value, Mapping):
+        raise Phase4RemoteFreshIntegratedError(
+            f"{node_id} input is not an object"
+        )
+    expected_keys = {
+        "schema_version",
+        "node_id",
+        "case_id",
+        "request_id",
+        "logical_input_classes",
+        "projection",
+    }
+    if set(value) != expected_keys:
+        raise Phase4RemoteFreshIntegratedError(
+            f"{node_id} input envelope keys drifted"
+        )
+    classes = _expected_input_classes(node_id)
+    if (
+        value["schema_version"] != P4_05_INPUT_SCHEMA_VERSION
+        or value["node_id"] != node_id
+        or value["logical_input_classes"] != list(classes)
+        or not isinstance(value["case_id"], str)
+        or not isinstance(value["request_id"], str)
+    ):
+        raise Phase4RemoteFreshIntegratedError(
+            f"{node_id} input envelope binding drifted"
+        )
+    projection = value["projection"]
+    if not isinstance(projection, Mapping) or set(projection) != set(classes):
+        raise Phase4RemoteFreshIntegratedError(
+            f"{node_id} input projection classes drifted"
+        )
+    if "b_aux_advisory_view" in projection or "upstream_outputs" in value:
+        raise Phase4RemoteFreshIntegratedError(
+            f"{node_id} input contains an unapproved upstream view"
+        )
+    return value
+
+
+def _safe_path(value: Path, name: str, *, directory: bool | None = None) -> Path:
+    if not isinstance(value, Path) or not value.is_absolute():
+        raise Phase4RemoteFreshIntegratedError(f"{name} must be an absolute Path")
+    if value.is_symlink():
+        raise Phase4RemoteFreshIntegratedError(f"{name} must not be a symlink")
+    if directory is True and not value.is_dir():
+        raise Phase4RemoteFreshIntegratedError(f"{name} must be a directory")
+    if directory is False and not value.is_file():
+        raise Phase4RemoteFreshIntegratedError(f"{name} must be a file")
+    return value.resolve(strict=False)
+
+
+def _write_fsync(path: Path, raw: bytes) -> None:
+    if type(raw) is not bytes or not raw:
+        raise Phase4RemoteFreshIntegratedError(f"cannot write empty artifact: {path.name}")
+    if path.exists():
+        if path.is_symlink() or not path.is_file() or path.read_bytes() != raw:
+            raise Phase4RemoteFreshIntegratedError(f"write-once artifact drifted: {path.name}")
+        return
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("xb") as handle:
+        handle.write(raw)
+        handle.flush()
+        os.fsync(handle.fileno())
+
+
+def _prepare_graph_bound_delivery_materials(
+    *,
+    result_root: Path,
+    graph_state: Mapping[str, object],
+) -> dict[str, object]:
+    materials = build_phase4_graph_bound_delivery_materials(
+        graph_state=graph_state,
+        material_root=result_root / "graph-bound-delivery-materials",
+    )
+    if type(materials) is not Phase4GraphBoundDeliveryMaterials:
+        raise Phase4RemoteFreshIntegratedError(
+            "graph-bound delivery materials have the wrong type"
+        )
+    materials.validate()
+    graph_context, graph_guidance = phase4_synthetic_assembler_bindings(
+        graph_state
+    )
+    if (
+        _canonical_bytes(materials.context.to_dict())
+        != _canonical_bytes(graph_context.to_dict())
+        or materials.binding["context_identity"]
+        != _identity(
+            graph_context.to_dict(),
+            revision="req2web.agent.context.v1",
+        )
+    ):
+        raise Phase4RemoteFreshIntegratedError(
+            "graph-bound delivery context identity drifted"
+        )
+    if (
+        _canonical_bytes(materials.guidance.to_dict())
+        != _canonical_bytes(graph_guidance.to_dict())
+        or materials.binding["guidance_identity"]
+        != _identity(
+            graph_guidance.to_dict(),
+            revision="req2web.retrieval.guidance.v1",
+        )
+    ):
+        raise Phase4RemoteFreshIntegratedError(
+            "graph-bound delivery guidance identity drifted"
+        )
+    _write_fsync(
+        result_root / "graph_bound_delivery_materials_binding.json",
+        _canonical_bytes(materials.binding),
+    )
+    return {
+        "materials": materials,
+        "live": materials.live,
+        "context": materials.context,
+        "guidance": materials.guidance,
+        "binding": materials.binding,
+    }
+
+
+def _offline_process() -> None:
+    os.environ.update(
+        {
+            "HF_HUB_OFFLINE": "1",
+            "TRANSFORMERS_OFFLINE": "1",
+            "HF_HUB_DISABLE_TELEMETRY": "1",
+            "DO_NOT_TRACK": "1",
+            "LANGSMITH_TRACING": "0",
+            "LANGCHAIN_TRACING_V2": "0",
+            "CUDA_VISIBLE_DEVICES": "0",
+            "PYTHONUNBUFFERED": "1",
+        }
+    )
+
+
+def _action_state(*, model_action: bool, remote_action: bool) -> dict[str, object]:
+    return {
+        "schema_version": f"{P4_05_SCHEMA_PREFIX}.action_state.v1",
+        "runtime_kind": P4_05_PROFILE_NAME,
+        "model_action": model_action,
+        "graph_runtime_execution": model_action,
+        "dependency_installation": False,
+        "training": False,
+        "remote_action": remote_action,
+        "network": False,
+        "telemetry": False,
+        "tracing": False,
+        "local_files_only": True,
+    }
+
+
+@dataclass(frozen=True)
+class RemoteFreshIntegratedProfile:
+    """Exact BF16/no-quantization runtime profile used by the worker."""
+
+    schema_version: str
+    profile_name: str
+    profile_id: str
+    model_id: str
+    model_revision: str
+    model_root_identity: Mapping[str, object]
+    model_inventory_identity: Mapping[str, object]
+    model_file_count: int
+    python_version: str
+    transformers_version: str
+    torch_version: str
+    accelerate_version: str
+    device_name: str
+    device_uuid: str
+    total_vram_bytes: int
+    free_vram_bytes_at_preflight: int
+    driver_version: str
+    cuda_version: str
+    device_index: int = 0
+    dtype: str = P4_05_DTYPE
+    quantization: str = P4_05_QUANTIZATION
+    compute_dtype: str = P4_05_COMPUTE_DTYPE
+    device_map: Mapping[str, int] = None  # type: ignore[assignment]
+    cpu_offload: bool = False
+    local_files_only: bool = True
+    offline: bool = True
+    network: bool = False
+    telemetry: bool = False
+    tracing: bool = False
+    max_input_tokens: int = P4_05_MODEL_CONTEXT_TOKENS
+    model_context_tokens: int = P4_05_MODEL_CONTEXT_TOKENS
+    timeout_seconds: int = P4_05_TIMEOUT_SECONDS
+    seed: int = 0
+    decode: Mapping[str, object] = None  # type: ignore[assignment]
+    model_loaded: bool = False
+    run_occurred: bool = False
+
+    @classmethod
+    def create(
+        cls,
+        *,
+        inventory: Mapping[str, object],
+        runtime_facts: Mapping[str, object],
+        gpu_facts: Mapping[str, object],
+        timeout_seconds: int = P4_05_TIMEOUT_SECONDS,
+    ) -> "RemoteFreshIntegratedProfile":
+        root = {
+            "schema_version": P4_05_PROFILE_SCHEMA_VERSION,
+            "profile_id": "pending",
+            "profile_name": P4_05_PROFILE_NAME,
+            "model_id": _remote.REMOTE_MODEL_ID,
+            "model_revision": _remote.REMOTE_MODEL_REVISION,
+            "model_root_identity": dict(inventory["model_root_identity"]),
+            "model_inventory_identity": dict(inventory["inventory_identity"]),
+            "model_file_count": int(inventory["file_count"]),
+            "python_version": str(runtime_facts["python_version"]),
+            "transformers_version": str(runtime_facts["transformers_version"]),
+            "torch_version": str(runtime_facts["torch_version"]),
+            "accelerate_version": str(runtime_facts["accelerate_version"]),
+            "device_name": str(gpu_facts["device_name"]),
+            "device_uuid": str(gpu_facts["device_uuid"]),
+            "total_vram_bytes": int(gpu_facts["total_vram_bytes"]),
+            "free_vram_bytes_at_preflight": int(gpu_facts["free_vram_bytes"]),
+            "driver_version": str(gpu_facts["driver_version"]),
+            "cuda_version": str(gpu_facts["cuda_version"]),
+            "device_index": 0,
+            "dtype": P4_05_DTYPE,
+            "quantization": P4_05_QUANTIZATION,
+            "compute_dtype": P4_05_COMPUTE_DTYPE,
+            "device_map": copy.deepcopy(P4_05_DEVICE_MAP),
+            "cpu_offload": False,
+            "local_files_only": True,
+            "offline": True,
+            "network": False,
+            "telemetry": False,
+            "tracing": False,
+            "max_input_tokens": P4_05_MODEL_CONTEXT_TOKENS,
+            "model_context_tokens": P4_05_MODEL_CONTEXT_TOKENS,
+            "timeout_seconds": timeout_seconds,
+            "seed": 0,
+            "decode": {"do_sample": False, "temperature": 0.0, "top_p": 1.0},
+            "model_loaded": False,
+            "run_occurred": False,
+        }
+        root["profile_id"] = _identity(
+            {key: value for key, value in root.items() if key != "profile_id"},
+            revision=P4_05_PROFILE_SCHEMA_VERSION,
+        )["sha256"]
+        return cls.from_dict(root)
+
+    @classmethod
+    def from_dict(cls, value: object) -> "RemoteFreshIntegratedProfile":
+        if not isinstance(value, Mapping):
+            raise Phase4RemoteFreshIntegratedError("profile is not an object")
+        expected = {
+            "schema_version",
+            "profile_id",
+            "profile_name",
+            "model_id",
+            "model_revision",
+            "model_root_identity",
+            "model_inventory_identity",
+            "model_file_count",
+            "python_version",
+            "transformers_version",
+            "torch_version",
+            "accelerate_version",
+            "device_name",
+            "device_uuid",
+            "total_vram_bytes",
+            "free_vram_bytes_at_preflight",
+            "driver_version",
+            "cuda_version",
+            "device_index",
+            "dtype",
+            "quantization",
+            "compute_dtype",
+            "device_map",
+            "cpu_offload",
+            "local_files_only",
+            "offline",
+            "network",
+            "telemetry",
+            "tracing",
+            "max_input_tokens",
+            "model_context_tokens",
+            "timeout_seconds",
+            "seed",
+            "decode",
+            "model_loaded",
+            "run_occurred",
+        }
+        if set(value) != expected:
+            raise Phase4RemoteFreshIntegratedError("profile keys drifted")
+        result = cls(**dict(value))
+        result.validate()
+        return result
+
+    @classmethod
+    def from_bytes(cls, raw: bytes) -> "RemoteFreshIntegratedProfile":
+        return cls.from_dict(_strict_json(raw, "profile"))
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "schema_version": P4_05_PROFILE_SCHEMA_VERSION,
+            "profile_id": self.profile_id,
+            "profile_name": P4_05_PROFILE_NAME,
+            "model_id": self.model_id,
+            "model_revision": self.model_revision,
+            "model_root_identity": dict(self.model_root_identity),
+            "model_inventory_identity": dict(self.model_inventory_identity),
+            "model_file_count": self.model_file_count,
+            "python_version": self.python_version,
+            "transformers_version": self.transformers_version,
+            "torch_version": self.torch_version,
+            "accelerate_version": self.accelerate_version,
+            "device_name": self.device_name,
+            "device_uuid": self.device_uuid,
+            "total_vram_bytes": self.total_vram_bytes,
+            "free_vram_bytes_at_preflight": self.free_vram_bytes_at_preflight,
+            "driver_version": self.driver_version,
+            "cuda_version": self.cuda_version,
+            "device_index": self.device_index,
+            "dtype": self.dtype,
+            "quantization": self.quantization,
+            "compute_dtype": self.compute_dtype,
+            "device_map": dict(self.device_map or P4_05_DEVICE_MAP),
+            "cpu_offload": self.cpu_offload,
+            "local_files_only": self.local_files_only,
+            "offline": self.offline,
+            "network": self.network,
+            "telemetry": self.telemetry,
+            "tracing": self.tracing,
+            "max_input_tokens": self.max_input_tokens,
+            "model_context_tokens": self.model_context_tokens,
+            "timeout_seconds": self.timeout_seconds,
+            "seed": self.seed,
+            "decode": dict(self.decode or {}),
+            "model_loaded": self.model_loaded,
+            "run_occurred": self.run_occurred,
+        }
+
+    def canonical_bytes(self) -> bytes:
+        return _canonical_bytes(self.to_dict())
+
+    def validate(self) -> None:
+        data = self.to_dict()
+        if data["schema_version"] != P4_05_PROFILE_SCHEMA_VERSION:
+            raise Phase4RemoteFreshIntegratedError("profile schema drifted")
+        if data["profile_name"] != P4_05_PROFILE_NAME:
+            raise Phase4RemoteFreshIntegratedError("profile name drifted")
+        if data["model_id"] != _remote.REMOTE_MODEL_ID or data["model_revision"] != _remote.REMOTE_MODEL_REVISION:
+            raise Phase4RemoteFreshIntegratedError("profile model identity drifted")
+        if data["model_file_count"] != _remote.REMOTE_FORMAL_FILE_COUNT:
+            raise Phase4RemoteFreshIntegratedError(
+                "profile model inventory file count drifted"
+            )
+        if (
+            data["transformers_version"] != _remote.REMOTE_TRANSFORMERS_VERSION
+            or data["torch_version"] != _remote.REMOTE_TORCH_VERSION
+            or data["accelerate_version"] != _remote.REMOTE_ACCELERATE_VERSION
+        ):
+            raise Phase4RemoteFreshIntegratedError(
+                "profile runtime package versions drifted"
+            )
+        if data["device_index"] != 0 or data["device_name"] != _remote.REMOTE_DEVICE_NAME:
+            raise Phase4RemoteFreshIntegratedError("profile must use RTX 5090 GPU0")
+        if data["total_vram_bytes"] < _remote.REMOTE_MIN_VRAM_BYTES:
+            raise Phase4RemoteFreshIntegratedError("profile GPU VRAM is below RTX 5090 floor")
+        if (
+            not isinstance(data["device_uuid"], str)
+            or not data["device_uuid"]
+            or data["free_vram_bytes_at_preflight"] < 0
+            or data["free_vram_bytes_at_preflight"] > data["total_vram_bytes"]
+        ):
+            raise Phase4RemoteFreshIntegratedError(
+                "profile GPU facts are invalid"
+            )
+        if data["dtype"] != P4_05_DTYPE or data["compute_dtype"] != P4_05_COMPUTE_DTYPE:
+            raise Phase4RemoteFreshIntegratedError("profile dtype must be BF16")
+        if data["quantization"] != P4_05_QUANTIZATION:
+            raise Phase4RemoteFreshIntegratedError("profile quantization must be none")
+        if data["device_map"] != P4_05_DEVICE_MAP or data["cpu_offload"] is not False:
+            raise Phase4RemoteFreshIntegratedError("profile placement drifted")
+        for key in ("local_files_only", "offline"):
+            if data[key] is not True:
+                raise Phase4RemoteFreshIntegratedError(f"profile {key} must be true")
+        for key in ("network", "telemetry", "tracing", "model_loaded", "run_occurred"):
+            if data[key] is not False:
+                raise Phase4RemoteFreshIntegratedError(f"profile {key} must be false")
+        if data["max_input_tokens"] != P4_05_MODEL_CONTEXT_TOKENS or data["model_context_tokens"] != P4_05_MODEL_CONTEXT_TOKENS:
+            raise Phase4RemoteFreshIntegratedError("profile context boundary drifted")
+        if data["timeout_seconds"] < 1 or data["seed"] < 0:
+            raise Phase4RemoteFreshIntegratedError("profile numeric bounds drifted")
+        if data["decode"] != {
+            "do_sample": False,
+            "temperature": 0.0,
+            "top_p": 1.0,
+        }:
+            raise Phase4RemoteFreshIntegratedError("profile decode settings drifted")
+        expected_id = _identity(
+            {key: value for key, value in data.items() if key != "profile_id"},
+            revision=P4_05_PROFILE_SCHEMA_VERSION,
+        )["sha256"]
+        if data["profile_id"] != expected_id:
+            raise Phase4RemoteFreshIntegratedError("profile identity drifted")
+
+
+def create_p4_05_policy(
+    *,
+    run_id: str,
+    result_root_marker: str,
+    profile: RemoteFreshIntegratedProfile,
+) -> dict[str, object]:
+    profile.validate()
+    if list(_fresh.NODE_ORDER) != list(NODE_ORDER):
+        raise Phase4RemoteFreshIntegratedError(
+            "fresh local/remote node order authority drifted"
+        )
+    root = {
+        "schema_version": P4_05_POLICY_SCHEMA_VERSION,
+        "pilot_id": P4_05_PILOT_ID,
+        "run_id": run_id,
+        "case_id": P4_05_CASE_ID,
+        "request_id": P4_05_REQUEST_ID,
+        "node_order": list(NODE_ORDER),
+        "fresh_graph_contract": {
+            "schema_version": _fresh.FRESH_INTEGRATED_POLICY_SCHEMA_VERSION,
+            "node_order": list(_fresh.NODE_ORDER),
+            "integrated_run_cap": 1,
+            "per_node_integrated_generate_cap": 1,
+            "retry_count_cap": 0,
+            "b_aux_disposition": "absent/not_requested",
+            "input_context": "model_native_full_context",
+            "output_contract": "complete_single_json_context_remaining",
+        },
+        "b_aux_disposition": "absent/not_requested",
+        "node_call_cap": {node_id: P4_05_GENERATE_CALL_CAP for node_id in NODE_ORDER},
+        "retry_count": P4_05_RETRY_COUNT,
+        "input_class_order": {
+            node_id: list(_expected_input_classes(node_id))
+            for node_id in NODE_ORDER
+        },
+        "prohibited_input_classes": list(P4_05_PROHIBITED_INPUT_CLASSES),
+        "pre_call_record_schema_version": P4_05_PRE_CALL_SCHEMA_VERSION,
+        "attempt_record_schema_version": P4_05_ATTEMPT_SCHEMA_VERSION,
+        "call_ledger_schema_version": P4_05_LEDGER_SCHEMA_VERSION,
+        "profile_identity": _identity(
+            profile.to_dict(),
+            revision=P4_05_PROFILE_SCHEMA_VERSION,
+        ),
+        "result_root_marker": result_root_marker,
+        "action_state": _action_state(model_action=False, remote_action=False),
+        "claim_boundary": (
+            "one fresh integrated non-H1 AutoDL pilot; raw, normalized, "
+            "assembled, and downstream delivery statuses remain separate"
+        ),
+    }
+    root["policy_id"] = _identity(
+        {key: value for key, value in root.items()},
+        revision=P4_05_POLICY_SCHEMA_VERSION,
+    )["sha256"]
+    return root
+
+
+def _emit_worker_event(event: str, *, node_id: str | None = None, delta: bytes = b"") -> None:
+    payload = {
+        "schema_version": P4_05_STREAM_SCHEMA_VERSION,
+        "event": event,
+        "node_id": node_id,
+        "delta_b64": _b64(delta),
+    }
+    stream = getattr(sys.stderr, "buffer", None)
+    raw = _canonical_bytes(payload) + b"\n"
+    if stream is not None:
+        stream.write(raw)
+        stream.flush()
+    else:
+        sys.stderr.write(raw.decode("utf-8"))
+        sys.stderr.flush()
+
+
+class _FreshIntegratedBackend(_remote._RemoteTransformersBackend):
+    """Reuse the validated BF16/no-quant loader with a fresh-node generator."""
+
+    def generate_fresh_stream(
+        self,
+        *,
+        node_id: str,
+        input_bytes: bytes,
+        prompt_bytes: bytes,
+        config_bytes: bytes,
+        request_bytes: bytes,
+        emit_delta: Callable[[bytes], None],
+    ) -> bytes:
+        if self._model is None or self._processor is None:
+            raise Phase4RemoteFreshIntegratedError("fresh backend is not loaded")
+        config = _strict_json(config_bytes, "fresh runtime config")
+        prompt_value = _strict_json(prompt_bytes, f"{node_id} prompt")
+        request = _strict_json(request_bytes, f"{node_id} request")
+        if not isinstance(config, Mapping):
+            raise Phase4RemoteFreshIntegratedError("fresh runtime config is invalid")
+        if not isinstance(prompt_value, Mapping) or not isinstance(request, Mapping):
+            raise Phase4RemoteFreshIntegratedError(
+                f"{node_id} prompt/request is invalid"
+            )
+        if (
+            config.get("schema_version")
+            != f"{P4_05_SCHEMA_PREFIX}.config.v1"
+            or config.get("node_id") != node_id
+            or config.get("profile_id") != self._profile.profile_id
+            or config.get("dtype") != P4_05_DTYPE
+            or config.get("quantization") != P4_05_QUANTIZATION
+            or config.get("compute_dtype") != P4_05_COMPUTE_DTYPE
+            or config.get("device_map") != P4_05_DEVICE_MAP
+            or config.get("cpu_offload") is not False
+            or config.get("model_context_tokens") != P4_05_MODEL_CONTEXT_TOKENS
+            or config.get("fixed_max_new_tokens") is not None
+            or config.get("stop_policy") != P4_05_STOP_POLICY
+            or config.get("input_truncation") is not False
+            or config.get("output_truncation") is not False
+        ):
+            raise Phase4RemoteFreshIntegratedError("fresh runtime config drifted")
+        if (
+            request.get("schema_version")
+            != f"{P4_05_SCHEMA_PREFIX}.request.v1"
+            or request.get("node_id") != node_id
+            or request.get("generate_call_cap") != P4_05_GENERATE_CALL_CAP
+            or request.get("retry_count") != P4_05_RETRY_COUNT
+            or request.get("source_kind")
+            != "remote_qwen_bf16_fresh_integrated"
+        ):
+            raise Phase4RemoteFreshIntegratedError(
+                f"{node_id} request binding drifted"
+            )
+        try:
+            input_value = _strict_json(input_bytes, f"{node_id} input")
+            _validate_node_input_value(input_value, node_id)
+            if (
+                request.get("case_id") != input_value["case_id"]
+                or request.get("request_id") != input_value["request_id"]
+            ):
+                raise Phase4RemoteFreshIntegratedError(
+                    f"{node_id} request/input scope drifted"
+                )
+            if (
+                prompt_value.get("schema_version")
+                != f"{P4_05_SCHEMA_PREFIX}.prompt.v1"
+                or prompt_value.get("node_id") != node_id
+                or prompt_value.get("input_identity")
+                != _identity(
+                    input_bytes,
+                    revision=P4_05_INPUT_SCHEMA_VERSION,
+                    identity_kind="raw_bytes",
+                )
+            ):
+                raise Phase4RemoteFreshIntegratedError(
+                    f"{node_id} prompt input binding drifted"
+                )
+            model_text = (
+                "P4_05_NODE_INPUT\n"
+                + _canonical_bytes(input_value).decode("utf-8")
+                + "\nP4_05_PROMPT_CONTRACT\n"
+                + _canonical_bytes(prompt_value).decode("utf-8")
+            )
+            rendered = self._processor.apply_chat_template(
+                [
+                    {
+                        "role": "user",
+                        "content": [{"type": "text", "text": model_text}],
+                    }
+                ],
+                tokenize=False,
+                add_generation_prompt=True,
+                enable_thinking=False,
+            )
+            encoded = self._processor(text=[rendered], return_tensors="pt")
+            keys = self._validated_text_inputs(encoded)
+            encoded = {key: encoded[key].to("cuda:0") for key in keys}
+            input_length = int(encoded["input_ids"].shape[1])
+            if input_length > P4_05_MODEL_CONTEXT_TOKENS:
+                raise Phase4RemoteFreshIntegratedError(
+                    f"{node_id} input exceeds native context; no truncation is allowed"
+                )
+            remaining = P4_05_MODEL_CONTEXT_TOKENS - input_length
+            if remaining < 1:
+                raise Phase4RemoteFreshIntegratedError(
+                    f"{node_id} has no context remaining; no truncation is allowed"
+                )
+            tokenizer = getattr(self._processor, "tokenizer", self._processor)
+            streamer = _local._P4D1TokenDeltaStreamer(
+                tokenizer=tokenizer,
+                emit_delta=emit_delta,
+            )
+            stopping = self._transformers.StoppingCriteriaList(
+                [
+                    _remote._RemoteCompleteJsonStoppingCriteria(
+                        tokenizer=tokenizer,
+                        prompt_length=input_length,
+                    )
+                ]
+            )
+            self._torch.manual_seed(self._profile.seed)
+            self._torch.cuda.manual_seed_all(self._profile.seed)
+            generated = self._model.generate(
+                **encoded,
+                streamer=streamer,
+                max_new_tokens=remaining,
+                stopping_criteria=stopping,
+                do_sample=False,
+                num_return_sequences=1,
+            )
+            generated_only = generated[:, input_length:]
+            text = self._processor.batch_decode(
+                generated_only,
+                skip_special_tokens=True,
+            )[0]
+            if type(text) is not str or not text:
+                raise Phase4RemoteFreshIntegratedError(
+                    f"{node_id} returned empty raw text"
+                )
+            return text.encode("utf-8")
+        except Phase4RemoteFreshIntegratedError:
+            raise
+        except Exception as exc:
+            raise Phase4RemoteFreshIntegratedError(
+                f"{node_id} BF16 generation failed closed"
+            ) from exc
+
+
+def _run_worker_protocol(model_root: Path) -> int:
+    _offline_process()
+    worker_id = f"p4-05-worker-{uuid.uuid4().hex}"
+    try:
+        first = sys.stdin.buffer.readline()
+        load = _strict_json(first.rstrip(b"\r\n"), "worker load")
+        if not isinstance(load, Mapping) or set(load) != {
+            "protocol",
+            "kind",
+            "profile_b64",
+        } or load["protocol"] != P4_05_WORKER_PROTOCOL or load["kind"] != "load":
+            raise Phase4RemoteFreshIntegratedError("worker load request drifted")
+        profile = RemoteFreshIntegratedProfile.from_bytes(
+            _decode_b64(load["profile_b64"], "worker profile")
+        )
+        _emit_worker_event("load_started")
+        backend = _FreshIntegratedBackend(model_root=model_root, profile=profile)
+        backend.load()
+        loaded_facts = backend.loaded_facts
+        if not isinstance(loaded_facts, Mapping):
+            raise Phase4RemoteFreshIntegratedError("worker loaded facts unavailable")
+        _emit_worker_event("load_completed")
+        sys.stdout.buffer.write(
+            _canonical_bytes(
+                {
+                    "protocol": P4_05_WORKER_PROTOCOL,
+                    "kind": "loaded",
+                    "worker_id": worker_id,
+                    "worker_pid": os.getpid(),
+                    "loaded_facts": dict(loaded_facts),
+                }
+            )
+            + b"\n"
+        )
+        sys.stdout.buffer.flush()
+        while True:
+            line = sys.stdin.buffer.readline()
+            if not line:
+                return 3
+            message = _strict_json(line.rstrip(b"\r\n"), "worker message")
+            if not isinstance(message, Mapping):
+                raise Phase4RemoteFreshIntegratedError("worker message is invalid")
+            kind = message.get("kind")
+            if message.get("protocol") != P4_05_WORKER_PROTOCOL:
+                raise Phase4RemoteFreshIntegratedError("worker protocol drifted")
+            if kind == "shutdown":
+                sys.stdout.buffer.write(
+                    _canonical_bytes(
+                        {
+                            "protocol": P4_05_WORKER_PROTOCOL,
+                            "kind": "shutdown_ack",
+                            "worker_id": worker_id,
+                        }
+                    )
+                    + b"\n"
+                )
+                sys.stdout.buffer.flush()
+                return 0
+            if kind != "generate":
+                raise Phase4RemoteFreshIntegratedError("worker kind is invalid")
+            node_id = message.get("node_id")
+            call_id = message.get("call_id")
+            if node_id not in NODE_ORDER or not isinstance(call_id, str):
+                raise Phase4RemoteFreshIntegratedError("worker call identity is invalid")
+            _emit_worker_event("generation_started", node_id=node_id)
+            raw = backend.generate_fresh_stream(
+                node_id=node_id,
+                input_bytes=_decode_b64(message["input_b64"], "worker input"),
+                prompt_bytes=_decode_b64(message["prompt_b64"], "worker prompt"),
+                config_bytes=_decode_b64(message["config_b64"], "worker config"),
+                request_bytes=_decode_b64(message["request_b64"], "worker request"),
+                emit_delta=lambda delta: _emit_worker_event(
+                    "token_delta",
+                    node_id=node_id,
+                    delta=delta,
+                ),
+            )
+            sys.stdout.buffer.write(
+                _canonical_bytes(
+                    {
+                        "protocol": P4_05_WORKER_PROTOCOL,
+                        "kind": "generation_result",
+                        "call_id": call_id,
+                        "worker_id": worker_id,
+                        "node_id": node_id,
+                        "raw_b64": _b64(raw),
+                    }
+                )
+                + b"\n"
+            )
+            sys.stdout.buffer.flush()
+            _emit_worker_event("generation_completed", node_id=node_id)
+    except Exception as exc:
+        _emit_worker_event("worker_failed")
+        sys.stderr.write(f"[P4-05 worker] {type(exc).__name__}: {exc}\n")
+        sys.stderr.flush()
+        return 2
+
+
+class FreshIntegratedStreamMirror:
+    """Parent-side visible stream mirror with exact raw accumulation."""
+
+    def __init__(self, target: object | None = None) -> None:
+        self.target = target if target is not None else sys.stderr
+        self.stderr_bytes = bytearray()
+        self.token_bytes = bytearray()
+        self.started_nodes: set[str] = set()
+        self.completed_nodes: set[str] = set()
+        self._lock = threading.Lock()
+
+    def feed(self, raw: bytes) -> None:
+        with self._lock:
+            self.stderr_bytes.extend(raw)
+        try:
+            event = _strict_json(raw.rstrip(b"\r\n"), "worker stream event")
+        except Phase4RemoteFreshIntegratedError:
+            self.target.write(raw.decode("utf-8", errors="replace"))  # type: ignore[union-attr]
+            self.target.flush()  # type: ignore[union-attr]
+            return
+        if not isinstance(event, Mapping) or event.get("schema_version") != P4_05_STREAM_SCHEMA_VERSION:
+            self.target.write(raw.decode("utf-8", errors="replace"))  # type: ignore[union-attr]
+            self.target.flush()  # type: ignore[union-attr]
+            return
+        event_name = event.get("event")
+        delta = _decode_b64(event.get("delta_b64"), "stream delta")
+        node_id = event.get("node_id")
+        if node_id is not None and node_id not in NODE_ORDER:
+            raise Phase4RemoteFreshIntegratedError(
+                "worker stream node identity drifted"
+            )
+        if event_name == "generation_started":
+            if not isinstance(node_id, str):
+                raise Phase4RemoteFreshIntegratedError(
+                    "generation start event has no node"
+                )
+            with self._lock:
+                self.started_nodes.add(node_id)
+        elif event_name == "generation_completed":
+            if not isinstance(node_id, str):
+                raise Phase4RemoteFreshIntegratedError(
+                    "generation completion event has no node"
+                )
+            with self._lock:
+                self.completed_nodes.add(node_id)
+        if event_name == "token_delta":
+            with self._lock:
+                self.token_bytes.extend(delta)
+            self.target.write(delta.decode("utf-8", errors="replace"))  # type: ignore[union-attr]
+            self.target.flush()  # type: ignore[union-attr]
+            return
+        if delta:
+            raise Phase4RemoteFreshIntegratedError("non-token stream event has delta")
+        self.target.write(f"\n[P4-05] {event_name}\n")  # type: ignore[union-attr]
+        self.target.flush()  # type: ignore[union-attr]
+
+    def generation_started_for(self, node_id: str) -> bool:
+        with self._lock:
+            return node_id in self.started_nodes
+
+
+class FreshIntegratedRemoteWorker:
+    """Persistent parent-supervised worker with bounded teardown."""
+
+    def __init__(
+        self,
+        *,
+        model_root: Path,
+        profile: RemoteFreshIntegratedProfile,
+        mirror: FreshIntegratedStreamMirror,
+    ) -> None:
+        _safe_path(model_root, "model root", directory=True)
+        profile.validate()
+        self.mirror = mirror
+        executable, pythonpath = _local._supervised_worker_python_runtime()
+        environment = dict(os.environ)
+        environment.update(
+            {
+                "HF_HUB_OFFLINE": "1",
+                "TRANSFORMERS_OFFLINE": "1",
+                "HF_HUB_DISABLE_TELEMETRY": "1",
+                "DO_NOT_TRACK": "1",
+                "LANGSMITH_TRACING": "0",
+                "LANGCHAIN_TRACING_V2": "0",
+                "PYTHONUNBUFFERED": "1",
+                "PYTHONPATH": pythonpath,
+            }
+        )
+        self.process = subprocess.Popen(
+            [
+                executable,
+                "-m",
+                "req2web_runtime.phase4_remote_qwen_fresh_integrated",
+                "--worker",
+                "--model-root",
+                str(model_root),
+            ],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            encoding="utf-8",
+            bufsize=1,
+            env=environment,
+            start_new_session=(os.name != "nt"),
+            creationflags=(
+                (
+                    getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+                    | getattr(subprocess, "CREATE_NO_WINDOW", 0)
+                )
+                if os.name == "nt"
+                else 0
+            ),
+        )
+        if (
+            self.process.stdin is None
+            or self.process.stdout is None
+            or self.process.stderr is None
+        ):
+            self.process.terminate()
+            self.process.wait(timeout=10)
+            raise Phase4RemoteFreshIntegratedError(
+                "worker IPC streams are unavailable"
+            )
+        self.worker_id: str | None = None
+        self.worker_pid: int | None = None
+        self.generation_started = False
+        self.calls: dict[str, int] = {node_id: 0 for node_id in NODE_ORDER}
+        self._closed = False
+        self._messages: queue.Queue[dict[str, object]] = queue.Queue()
+        self._stderr_capture = _local._WorkerStderrCapture()
+        self._stdout_thread = threading.Thread(
+            target=_local._worker_stdout_reader,
+            args=(self.process.stdout, self._messages),
+            name="p4-05-worker-stdout",
+            daemon=True,
+        )
+        self._stderr_thread = threading.Thread(
+            target=_local._worker_stderr_reader,
+            args=(self.process.stderr, self._stderr_capture, self.mirror.feed),
+            name="p4-05-worker-stderr",
+            daemon=True,
+        )
+        self._stdout_thread.start()
+        self._stderr_thread.start()
+        self._send(
+            {
+                "protocol": P4_05_WORKER_PROTOCOL,
+                "kind": "load",
+                "profile_b64": _b64(profile.canonical_bytes()),
+            }
+        )
+        loaded = self._receive(P4_05_LOAD_TIMEOUT_SECONDS)
+        if (
+            loaded.get("protocol") != P4_05_WORKER_PROTOCOL
+            or loaded.get("kind") != "loaded"
+            or loaded.get("worker_pid") != self.process.pid
+            or not isinstance(loaded.get("loaded_facts"), Mapping)
+        ):
+            self._force_teardown("worker_failed")
+            raise Phase4RemoteFreshIntegratedError("worker load did not complete")
+        self.worker_id = loaded.get("worker_id")
+        self.worker_pid = loaded.get("worker_pid")
+        if not isinstance(self.worker_id, str) or not isinstance(self.worker_pid, int):
+            self._force_teardown("worker_failed")
+            raise Phase4RemoteFreshIntegratedError("worker identity is invalid")
+        self.loaded_facts = copy.deepcopy(dict(loaded["loaded_facts"]))
+
+    def _send(self, payload: Mapping[str, object]) -> None:
+        if self._closed or self.process.stdin is None:
+            raise Phase4RemoteFreshIntegratedError("worker stdin is unavailable")
+        try:
+            self.process.stdin.write(_canonical_bytes(payload).decode("utf-8") + "\n")
+            self.process.stdin.flush()
+        except (BrokenPipeError, OSError) as exc:
+            self._force_teardown("worker_failed")
+            raise Phase4RemoteFreshIntegratedError("worker IPC failed") from exc
+
+    def _receive(self, timeout_seconds: int) -> Mapping[str, object]:
+        deadline = time.monotonic() + timeout_seconds
+        while True:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                self._force_teardown("generation_timeout")
+                raise Phase4RemoteFreshIntegratedError("worker deadline exceeded")
+            try:
+                message = self._messages.get(timeout=min(1.0, remaining))
+            except queue.Empty:
+                continue
+            if message.get("kind") == "protocol_error":
+                self._force_teardown("worker_failed")
+                raise Phase4RemoteFreshIntegratedError("worker protocol failed")
+            if not isinstance(message, Mapping):
+                self._force_teardown("worker_failed")
+                raise Phase4RemoteFreshIntegratedError("worker response is invalid")
+            return message
+
+    def _join_readers(self) -> tuple[bool, bool]:
+        self._stdout_thread.join(timeout=2)
+        self._stderr_thread.join(timeout=2)
+        return (
+            self._stdout_thread.is_alive() is False,
+            self._stderr_thread.is_alive() is False,
+        )
+
+    def generate(
+        self,
+        *,
+        node_id: str,
+        input_bytes: bytes,
+        prompt_bytes: bytes,
+        config_bytes: bytes,
+        request_bytes: bytes,
+    ) -> bytes:
+        if self._closed or self.process.poll() is not None:
+            raise Phase4RemoteFreshIntegratedError("worker is unavailable")
+        if node_id not in NODE_ORDER or self.calls[node_id] >= P4_05_GENERATE_CALL_CAP:
+            raise Phase4RemoteFreshIntegratedError("node generate cap is exhausted")
+        call_id = f"p4-05-call-{uuid.uuid4().hex}"
+        self.calls[node_id] += 1
+        self.generation_started = True
+        self._send(
+            {
+                "protocol": P4_05_WORKER_PROTOCOL,
+                "kind": "generate",
+                "call_id": call_id,
+                "node_id": node_id,
+                "input_b64": _b64(input_bytes),
+                "prompt_b64": _b64(prompt_bytes),
+                "config_b64": _b64(config_bytes),
+                "request_b64": _b64(request_bytes),
+            }
+        )
+        message = self._receive(P4_05_TIMEOUT_SECONDS)
+        if (
+            message.get("kind") != "generation_result"
+            or message.get("call_id") != call_id
+            or message.get("worker_id") != self.worker_id
+            or message.get("node_id") != node_id
+        ):
+            self._force_teardown("worker_failed")
+            raise Phase4RemoteFreshIntegratedError("worker generation response drifted")
+        return _decode_b64(message.get("raw_b64"), f"{node_id} raw")
+
+    def _force_teardown(self, terminal_status: str) -> None:
+        if self._closed:
+            return
+        try:
+            if os.name != "nt":
+                os.killpg(self.process.pid, signal.SIGTERM)
+            else:
+                self.process.terminate()
+            self.process.wait(timeout=2)
+        except (OSError, subprocess.TimeoutExpired):
+            try:
+                if os.name != "nt":
+                    os.killpg(self.process.pid, signal.SIGKILL)
+                else:
+                    self.process.kill()
+                self.process.wait(timeout=10)
+            except (OSError, subprocess.TimeoutExpired):
+                pass
+        self._closed = True
+        self.stdout_thread_joined, self.stderr_thread_joined = self._join_readers()
+        self.terminal_status = (
+            terminal_status if self.process.poll() is not None else "worker_teardown_unverified"
+        )
+
+    def close(self) -> dict[str, object]:
+        if not self._closed:
+            try:
+                self._send(
+                    {
+                        "protocol": P4_05_WORKER_PROTOCOL,
+                        "kind": "shutdown",
+                    }
+                )
+                response = self._receive(20)
+                if response.get("kind") != "shutdown_ack":
+                    raise Phase4RemoteFreshIntegratedError(
+                        "worker shutdown acknowledgement drifted"
+                    )
+                self.process.wait(timeout=20)
+                self._closed = True
+                self.terminal_status = (
+                    "normal_completed"
+                    if self.process.poll() is not None
+                    else "worker_teardown_unverified"
+                )
+                self.stdout_thread_joined, self.stderr_thread_joined = (
+                    self._join_readers()
+                )
+            except (OSError, subprocess.SubprocessError, Phase4RemoteFreshIntegratedError):
+                self._force_teardown("worker_failed")
+        elif not hasattr(self, "stdout_thread_joined"):
+            self.stdout_thread_joined, self.stderr_thread_joined = self._join_readers()
+        stderr_snapshot = self._stderr_capture.snapshot(
+            stderr_thread=self._stderr_thread,
+            worker_exit_verified=self.process.poll() is not None,
+        )
+        started_calls = {
+            node_id: int(self.mirror.generation_started_for(node_id))
+            for node_id in NODE_ORDER
+        }
+        return {
+            "worker_id": self.worker_id,
+            "worker_pid": self.worker_pid,
+            "worker_exit_code": self.process.poll(),
+            "worker_exit_verified": self.process.poll() is not None,
+            "terminal_status": getattr(
+                self, "terminal_status", "worker_teardown_unverified"
+            ),
+            "generation_started": self.generation_started,
+            "generate_calls": started_calls,
+            "attempt_envelopes": dict(self.calls),
+            "stdout_thread_joined": getattr(self, "stdout_thread_joined", False),
+            "stderr_thread_joined": getattr(self, "stderr_thread_joined", False),
+            "stderr_capture_completed": stderr_snapshot["completed"],
+        }
+
+
+def _node_input(
+    *,
+    node_id: str,
+    b_input: Mapping[str, object],
+    state: Mapping[str, object],
+    authority_projection: Mapping[str, object],
+) -> bytes:
+    payload: dict[str, object] = {
+        "schema_version": P4_05_INPUT_SCHEMA_VERSION,
+        "node_id": node_id,
+        "case_id": b_input["case_id"],
+        "request_id": b_input["request_id"],
+        "logical_input_classes": list(_expected_input_classes(node_id)),
+        "projection": _provider_visible_projection(
+            node_id=node_id,
+            b_input=b_input,
+            state=state,
+            authority_projection=authority_projection,
+        ),
+    }
+    _validate_node_input_value(payload, node_id)
+    return _canonical_bytes(payload)
+
+
+def _node_prompt(
+    *,
+    node_id: str,
+    input_bytes: bytes,
+) -> bytes:
+    payload = {
+        "schema_version": f"{P4_05_SCHEMA_PREFIX}.prompt.v1",
+        "node_id": node_id,
+        "output_format": "one_complete_canonical_json_object",
+        "input_identity": _identity(
+            input_bytes,
+            revision=P4_05_INPUT_SCHEMA_VERSION,
+            identity_kind="raw_bytes",
+        ),
+        "instructions": [
+            "Return exactly one JSON object and no prose.",
+            "Preserve the required node schema and semantic array order.",
+            "Do not emit authoritative IDs, mappings, acceptance verdicts, or browser evidence.",
+            "Do not abbreviate, truncate, omit, or split the object.",
+            "F4 must emit candidate acceptance semantics only.",
+        ],
+        "node_output_keys": {
+            "F1": ["page_title", "layout_pattern", "sections", "components"],
+            "F2": ["states"],
+            "F3": ["interactions"],
+            "F4": ["acceptance_checks"],
+        }[node_id],
+    }
+    return _canonical_bytes(payload)
+
+
+def _node_config(
+    *,
+    node_id: str,
+    profile: RemoteFreshIntegratedProfile,
+) -> bytes:
+    return _canonical_bytes(
+        {
+            "schema_version": f"{P4_05_SCHEMA_PREFIX}.config.v1",
+            "node_id": node_id,
+            "profile_id": profile.profile_id,
+            "profile_name": profile.to_dict()["profile_name"],
+            "dtype": P4_05_DTYPE,
+            "quantization": P4_05_QUANTIZATION,
+            "compute_dtype": P4_05_COMPUTE_DTYPE,
+            "device_map": dict(P4_05_DEVICE_MAP),
+            "cpu_offload": False,
+            "local_files_only": True,
+            "offline": True,
+            "network": False,
+            "telemetry": False,
+            "tracing": False,
+            "fixed_max_new_tokens": None,
+            "model_context_tokens": P4_05_MODEL_CONTEXT_TOKENS,
+            "input_truncation": False,
+            "output_truncation": False,
+            "stop_policy": copy.deepcopy(P4_05_STOP_POLICY),
+            "retry_count": P4_05_RETRY_COUNT,
+        }
+    )
+
+
+def _node_request(
+    *,
+    run_id: str,
+    case_id: str,
+    request_id: str,
+    node_id: str,
+    index: int,
+) -> bytes:
+    return _canonical_bytes(
+        {
+            "schema_version": f"{P4_05_SCHEMA_PREFIX}.request.v1",
+            "pilot_id": P4_05_PILOT_ID,
+            "run_id": run_id,
+            "case_id": case_id,
+            "request_id": request_id,
+            "node_id": node_id,
+            "generate_call_index": index,
+            "generate_call_cap": P4_05_GENERATE_CALL_CAP,
+            "retry_count": P4_05_RETRY_COUNT,
+            "source_kind": "remote_qwen_bf16_fresh_integrated",
+        }
+    )
+
+
+def _pre_call_record(
+    *,
+    profile: RemoteFreshIntegratedProfile,
+    run_id: str,
+    case_id: str,
+    request_id: str,
+    node_id: str,
+    index: int,
+    input_bytes: bytes,
+    prompt_bytes: bytes,
+    config_bytes: bytes,
+    request_bytes: bytes,
+    worker_id: str | None,
+    worker_pid: int | None,
+) -> dict[str, object]:
+    record: dict[str, object] = {
+        "schema_version": P4_05_PRE_CALL_SCHEMA_VERSION,
+        "record_id": "pending",
+        "pilot_id": P4_05_PILOT_ID,
+        "run_id": run_id,
+        "case_id": case_id,
+        "request_id": request_id,
+        "node_id": node_id,
+        "attempt_index": 1,
+        "generate_call_index": index,
+        "generate_call_cap": P4_05_GENERATE_CALL_CAP,
+        "retry_count": P4_05_RETRY_COUNT,
+        "profile_identity": _identity(
+            profile.to_dict(),
+            revision=P4_05_PROFILE_SCHEMA_VERSION,
+        ),
+        "worker_identity": {
+            "worker_id": worker_id,
+            "worker_pid": worker_pid,
+        },
+        "input_identity": _identity(
+            input_bytes,
+            revision=P4_05_INPUT_SCHEMA_VERSION,
+            identity_kind="raw_bytes",
+        ),
+        "prompt_identity": _identity(
+            prompt_bytes,
+            revision=f"{P4_05_SCHEMA_PREFIX}.prompt.v1",
+            identity_kind="raw_bytes",
+        ),
+        "config_identity": _identity(
+            config_bytes,
+            revision=f"{P4_05_SCHEMA_PREFIX}.config.v1",
+            identity_kind="raw_bytes",
+        ),
+        "request_identity": _identity(
+            request_bytes,
+            revision=f"{P4_05_SCHEMA_PREFIX}.request.v1",
+            identity_kind="raw_bytes",
+        ),
+        "raw_capture_state": "not_created",
+        "pre_call_fsync_required": True,
+        "action_state": _action_state(model_action=True, remote_action=True),
+    }
+    record["record_id"] = _identity(
+        {
+            key: value
+            for key, value in record.items()
+            if key != "record_id"
+        },
+        revision=P4_05_PRE_CALL_SCHEMA_VERSION,
+    )["sha256"]
+    return record
+
+
+def _attempt_record(
+    *,
+    run_id: str,
+    case_id: str,
+    request_id: str,
+    node_id: str,
+    input_bytes: bytes,
+    prompt_bytes: bytes,
+    config_bytes: bytes,
+    request_bytes: bytes,
+    pre_call_record: Mapping[str, object],
+    worker_id: str | None,
+    worker_pid: int | None,
+    raw: bytes | None,
+    generate_started: bool,
+    status: str,
+    failure_code: str | None,
+) -> dict[str, object]:
+    return {
+        "schema_version": P4_05_ATTEMPT_SCHEMA_VERSION,
+        "pilot_id": P4_05_PILOT_ID,
+        "run_id": run_id,
+        "case_id": case_id,
+        "request_id": request_id,
+        "node_id": node_id,
+        "attempt_index": 1,
+        "call_kind": "integrated",
+        "call_count": int(generate_started),
+        "retry_count": P4_05_RETRY_COUNT,
+        "worker_identity": {
+            "worker_id": worker_id,
+            "worker_pid": worker_pid,
+        },
+        "pre_call_identity": _identity(
+            pre_call_record,
+            revision=P4_05_PRE_CALL_SCHEMA_VERSION,
+        ),
+        "input_identity": _identity(
+            input_bytes,
+            revision=P4_05_INPUT_SCHEMA_VERSION,
+            identity_kind="raw_bytes",
+        ),
+        "prompt_identity": _identity(
+            prompt_bytes,
+            revision=f"{P4_05_SCHEMA_PREFIX}.prompt.v1",
+            identity_kind="raw_bytes",
+        ),
+        "config_identity": _identity(
+            config_bytes,
+            revision=f"{P4_05_SCHEMA_PREFIX}.config.v1",
+            identity_kind="raw_bytes",
+        ),
+        "request_identity": _identity(
+            request_bytes,
+            revision=f"{P4_05_SCHEMA_PREFIX}.request.v1",
+            identity_kind="raw_bytes",
+        ),
+        "raw_identity": (
+            None
+            if raw is None
+            else _identity(
+                raw,
+                revision=f"{P4_05_SCHEMA_PREFIX}.raw.v1",
+                identity_kind="raw_bytes",
+            )
+        ),
+        "raw_first": True,
+        "generate_started": generate_started,
+        "status": status,
+        "failure_code": failure_code,
+        "automatic_retry": False,
+    }
+
+
+def _call_ledger(
+    *,
+    run_id: str,
+    node_results: Mapping[str, Mapping[str, object]],
+) -> dict[str, object]:
+    per_node = {
+        node_id: {
+            "attempt_count": int(node_id in node_results),
+            "generate_started_count": (
+                int(node_results[node_id].get("call_count", 0))
+                if node_id in node_results
+                else 0
+            ),
+            "generate_call_cap": P4_05_GENERATE_CALL_CAP,
+            "retry_count": P4_05_RETRY_COUNT,
+        }
+        for node_id in NODE_ORDER
+    }
+    return {
+        "schema_version": P4_05_LEDGER_SCHEMA_VERSION,
+        "pilot_id": P4_05_PILOT_ID,
+        "run_id": run_id,
+        "node_order": list(NODE_ORDER),
+        "per_node": per_node,
+        "total_generate_calls": sum(
+            int(row["generate_started_count"]) for row in per_node.values()
+        ),
+        "automatic_retry": False,
+        "budget_reset": False,
+    }
+
+
+def prepare_phase4_remote_qwen_fresh_integrated(
+    *,
+    model_root: Path,
+    integrity_evidence: Path,
+    result_root: Path,
+    run_id: str | None = None,
+) -> dict[str, object]:
+    """Create the no-generation P4-05 preflight and profile artifacts."""
+
+    _offline_process()
+    model_root = _safe_path(model_root, "model root", directory=True)
+    integrity_evidence = _safe_path(
+        integrity_evidence,
+        "integrity evidence",
+        directory=False,
+    )
+    result_root = _safe_path(result_root, "result root")
+    if result_root.exists():
+        if not result_root.is_dir() or any(result_root.iterdir()):
+            raise Phase4RemoteFreshIntegratedError(
+                "result root must be new and empty"
+            )
+    result_root.mkdir(parents=True, exist_ok=False)
+    marker = P4_05_ROOT_MARKER
+    _write_fsync(result_root / P4_05_ROOT_MARKER, marker.encode("ascii"))
+    b_input = synthetic_commerce_b_input(
+        case_id=P4_05_CASE_ID,
+        request_id=P4_05_REQUEST_ID,
+    )
+    state = phase4_create_portable_authority_state(b_input)
+    graph_bound_delivery = _prepare_graph_bound_delivery_materials(
+        result_root=result_root,
+        graph_state=state,
+    )
+    inventory = _remote.validate_remote_model_inventory(
+        model_root=model_root,
+        integrity_evidence=integrity_evidence,
+    )
+    runtime_facts = _remote._collect_remote_runtime_facts()
+    gpu_facts = _remote._probe_remote_gpu_facts()
+    if gpu_facts["device_name"] != _remote.REMOTE_DEVICE_NAME:
+        raise Phase4RemoteFreshIntegratedError("P4-05 requires RTX 5090 GPU0")
+    if int(gpu_facts["total_vram_bytes"]) < _remote.REMOTE_MIN_VRAM_BYTES:
+        raise Phase4RemoteFreshIntegratedError("P4-05 GPU VRAM is below the RTX 5090 floor")
+    profile = RemoteFreshIntegratedProfile.create(
+        inventory=inventory,
+        runtime_facts=runtime_facts,
+        gpu_facts=gpu_facts,
+    )
+    selected_run_id = run_id or f"{P4_05_RUN_PREFIX}{uuid.uuid4().hex[:16]}"
+    policy = create_p4_05_policy(
+        run_id=selected_run_id,
+        result_root_marker=marker,
+        profile=profile,
+    )
+    preflight = {
+        "schema_version": f"{P4_05_SCHEMA_PREFIX}.preflight.v1",
+        "pilot_id": P4_05_PILOT_ID,
+        "run_id": selected_run_id,
+        "model_root": str(model_root),
+        "integrity_evidence": str(integrity_evidence),
+        "model_inventory_identity": inventory["inventory_identity"],
+        "profile_identity": _identity(
+            profile.to_dict(),
+            revision=P4_05_PROFILE_SCHEMA_VERSION,
+        ),
+        "policy_identity": _identity(
+            policy,
+            revision=P4_05_POLICY_SCHEMA_VERSION,
+        ),
+        "case_id": b_input["case_id"],
+        "request_id": b_input["request_id"],
+        "node_order": list(NODE_ORDER),
+        "graph_bound_delivery_materials_binding": graph_bound_delivery[
+            "binding"
+        ],
+        "action_state": _action_state(model_action=False, remote_action=False),
+        "model_loaded": False,
+        "run_occurred": False,
+        "downstream": "not_executed",
+    }
+    _write_fsync(result_root / "model_inventory.json", _canonical_bytes(inventory))
+    _write_fsync(result_root / "remote_profile.json", profile.canonical_bytes())
+    _write_fsync(result_root / "p4_05_policy.json", _canonical_bytes(policy))
+    _write_fsync(result_root / "preflight_manifest.json", _canonical_bytes(preflight))
+    _write_fsync(result_root / "b_input.json", _canonical_bytes(b_input))
+    return {
+        "result_root": result_root,
+        "run_id": selected_run_id,
+        "marker": marker,
+        "inventory": inventory,
+        "profile": profile,
+        "policy": policy,
+        "preflight": preflight,
+        "b_input": b_input,
+        "state": state,
+        "graph_bound_delivery": graph_bound_delivery,
+    }
+
+
+def run_phase4_remote_qwen_fresh_integrated(
+    *,
+    model_root: Path,
+    integrity_evidence: Path,
+    result_root: Path,
+    confirm_one_remote_fresh_integrated_run: bool,
+    run_id: str | None = None,
+    console: object | None = None,
+) -> dict[str, object]:
+    """Run one fresh F1-F4 BF16 experiment through terminal local delivery."""
+
+    if confirm_one_remote_fresh_integrated_run is not True:
+        raise Phase4RemoteFreshIntegratedError(
+            "explicit P4-05 remote generation confirmation is required"
+        )
+    mirror = FreshIntegratedStreamMirror(console)
+    prepared = prepare_phase4_remote_qwen_fresh_integrated(
+        model_root=model_root,
+        integrity_evidence=integrity_evidence,
+        result_root=result_root,
+        run_id=run_id,
+    )
+    result_root = prepared["result_root"]
+    profile: RemoteFreshIntegratedProfile = prepared["profile"]
+    run_id = str(prepared["run_id"])
+    b_input = prepared["b_input"]
+    state = copy.deepcopy(dict(prepared["state"]))
+    graph_bound_delivery = prepared["graph_bound_delivery"]
+    live_delivery = graph_bound_delivery["live"]
+    context = graph_bound_delivery["context"]
+    guidance = graph_bound_delivery["guidance"]
+    worker: FreshIntegratedRemoteWorker | None = None
+    node_results: dict[str, object] = {}
+    source_f4_raw_success = False
+    normalized_node_success = False
+    failure: dict[str, object] | None = None
+    delivery_result: dict[str, object] | None = None
+    terminal_status = "not_started"
+    try:
+        mirror.target.write("[P4-05] load started\n")  # type: ignore[union-attr]
+        mirror.target.flush()  # type: ignore[union-attr]
+        worker = FreshIntegratedRemoteWorker(
+            model_root=model_root,
+            profile=profile,
+            mirror=mirror,
+        )
+        _write_fsync(
+            result_root / "load_receipt.json",
+            _canonical_bytes(
+                {
+                    "schema_version": f"{P4_05_SCHEMA_PREFIX}.load_receipt.v1",
+                    "profile_identity": _identity(
+                        profile.to_dict(),
+                        revision=P4_05_PROFILE_SCHEMA_VERSION,
+                    ),
+                    "loaded_facts": worker.loaded_facts,
+                    "model_loaded": True,
+                    "dtype": P4_05_DTYPE,
+                    "quantization": P4_05_QUANTIZATION,
+                    "device": "cuda:0",
+                    "cpu_offload": False,
+                }
+            ),
+        )
+        mirror.target.write("[P4-05] load completed\n")  # type: ignore[union-attr]
+        mirror.target.flush()  # type: ignore[union-attr]
+        for index, node_id in enumerate(NODE_ORDER, start=1):
+            if node_id == "F4" and state.get("mapping_record") is None:
+                mapping_before_f4 = phase4_create_mapping(state)
+                state = copy.deepcopy(dict(state))
+                state["mapping_record"] = mapping_before_f4
+                _write_fsync(
+                    result_root / "mapping.json",
+                    _canonical_bytes(mapping_before_f4),
+                )
+            authority = phase4_project_node_input_authority(state, node_id)
+            input_bytes = _node_input(
+                node_id=node_id,
+                b_input=b_input,
+                state=state,
+                authority_projection=authority,
+            )
+            prompt_bytes = _node_prompt(node_id=node_id, input_bytes=input_bytes)
+            config_bytes = _node_config(node_id=node_id, profile=profile)
+            request_bytes = _node_request(
+                run_id=run_id,
+                case_id=str(b_input["case_id"]),
+                request_id=str(b_input["request_id"]),
+                node_id=node_id,
+                index=index,
+            )
+            pre_call = _pre_call_record(
+                profile=profile,
+                run_id=run_id,
+                case_id=str(b_input["case_id"]),
+                request_id=str(b_input["request_id"]),
+                node_id=node_id,
+                index=index,
+                input_bytes=input_bytes,
+                prompt_bytes=prompt_bytes,
+                config_bytes=config_bytes,
+                request_bytes=request_bytes,
+                worker_id=worker.worker_id,
+                worker_pid=worker.worker_pid,
+            )
+            attempt_root = result_root / "attempts" / node_id
+            _write_fsync(attempt_root / "input.json", input_bytes)
+            _write_fsync(attempt_root / "prompt.json", prompt_bytes)
+            _write_fsync(attempt_root / "config.json", config_bytes)
+            _write_fsync(attempt_root / "request.json", request_bytes)
+            _write_fsync(
+                attempt_root / "pre_call_record.json",
+                _canonical_bytes(pre_call),
+            )
+            mirror.target.write(f"[P4-05] {node_id} generation started\n")  # type: ignore[union-attr]
+            mirror.target.flush()  # type: ignore[union-attr]
+            raw: bytes | None = None
+            generate_started = False
+            try:
+                raw = worker.generate(
+                    node_id=node_id,
+                    input_bytes=input_bytes,
+                    prompt_bytes=prompt_bytes,
+                    config_bytes=config_bytes,
+                    request_bytes=request_bytes,
+                )
+                generate_started = True
+                _write_fsync(attempt_root / "raw_response.bin", raw)
+                parsed = _parse_model_json(raw, f"{node_id} raw response")
+                if not isinstance(parsed, Mapping):
+                    raise Phase4RemoteFreshIntegratedError(
+                        f"{node_id} raw response is not an object"
+                    )
+                output = dict(parsed)
+                normalization_receipt = None
+                if node_id == "F4":
+                    output, normalization_receipt = phase4_normalize_and_validate_f4_output(
+                        raw_bytes=raw,
+                        output=output,
+                        state=state,
+                    )
+                    source_f4_raw_success = (
+                        normalization_receipt["raw_model_contract_success"] is True
+                    )
+                    normalized_node_success = (
+                        normalization_receipt["normalized_node_contract_success"]
+                        is True
+                    )
+                    _write_fsync(
+                        attempt_root / "normalization_receipt.json",
+                        _canonical_bytes(normalization_receipt),
+                    )
+                    _write_fsync(
+                        result_root / "core_f4_normalization_receipt.json",
+                        _canonical_bytes(normalization_receipt),
+                    )
+                else:
+                    from req2web_orchestration.phase4_graph import (
+                        phase4_validate_node_output,
+                    )
+
+                    phase4_validate_node_output(node_id, output, state)
+                state = phase4_register_node_output(state, node_id, output)
+                _write_fsync(
+                    attempt_root / "validated_node_output.json",
+                    _canonical_bytes(output),
+                )
+                attempt = _attempt_record(
+                    run_id=run_id,
+                    case_id=str(b_input["case_id"]),
+                    request_id=str(b_input["request_id"]),
+                    node_id=node_id,
+                    input_bytes=input_bytes,
+                    prompt_bytes=prompt_bytes,
+                    config_bytes=config_bytes,
+                    request_bytes=request_bytes,
+                    pre_call_record=pre_call,
+                    worker_id=worker.worker_id,
+                    worker_pid=worker.worker_pid,
+                    raw=raw,
+                    generate_started=True,
+                    status="validated",
+                    failure_code=None,
+                )
+                node_results[node_id] = attempt
+                _write_fsync(
+                    attempt_root / "attempt_result.json",
+                    _canonical_bytes(attempt),
+                )
+                mirror.target.write(f"\n[P4-05] {node_id} generation completed\n")  # type: ignore[union-attr]
+                mirror.target.flush()  # type: ignore[union-attr]
+            except Exception as exc:
+                generate_started = (
+                    generate_started
+                    or mirror.generation_started_for(node_id)
+                )
+                failure_code = (
+                    "node_failed_closed"
+                    if generate_started
+                    else "worker_not_started"
+                )
+                failure = {
+                    "code": failure_code,
+                    "node_id": node_id,
+                    "message_code": type(exc).__name__,
+                    "retry_allowed": False,
+                    "automatic_retry": False,
+                    "generate_started": generate_started,
+                }
+                attempt = _attempt_record(
+                    run_id=run_id,
+                    case_id=str(b_input["case_id"]),
+                    request_id=str(b_input["request_id"]),
+                    node_id=node_id,
+                    input_bytes=input_bytes,
+                    prompt_bytes=prompt_bytes,
+                    config_bytes=config_bytes,
+                    request_bytes=request_bytes,
+                    pre_call_record=pre_call,
+                    worker_id=worker.worker_id,
+                    worker_pid=worker.worker_pid,
+                    raw=raw,
+                    generate_started=generate_started,
+                    status="failed_closed",
+                    failure_code=failure_code,
+                )
+                node_results[node_id] = attempt
+                _write_fsync(
+                    attempt_root / "attempt_result.json",
+                    _canonical_bytes(attempt),
+                )
+                _write_fsync(
+                    result_root / "failure.json",
+                    _canonical_bytes(failure),
+                )
+                terminal_status = "failed_closed"
+                break
+        if failure is None:
+            ledger = _call_ledger(
+                run_id=run_id,
+                node_results=node_results,
+            )
+            _write_fsync(
+                result_root / "model_call_ledger.json",
+                _canonical_bytes(ledger),
+            )
+            mapping = phase4_create_mapping(state)
+            _write_fsync(result_root / "mapping.json", _canonical_bytes(mapping))
+            composition = phase4_compose_candidate(state)
+            _write_fsync(
+                result_root / "candidate_composition_record.json",
+                _canonical_bytes(composition),
+            )
+            candidate_bytes = base64.b64decode(
+                str(composition["model_semantic_candidate_canonical_b64"]),
+                validate=True,
+            )
+            assembled = phase4_assemble_candidate(
+                candidate_bytes,
+                context,
+                guidance,
+            )
+            assembled.validate()
+            _write_fsync(
+                result_root / "assembled_page_spec.json",
+                _canonical_bytes(assembled.page_spec.to_dict()),
+            )
+            _write_fsync(
+                result_root / "assembly_report.json",
+                _canonical_bytes(assembled.report.to_dict()),
+            )
+            source_result = {
+                "schema_version": P4_05_RESULT_SCHEMA_VERSION,
+                "pilot_id": P4_05_PILOT_ID,
+                "run_id": run_id,
+                "case_id": b_input["case_id"],
+                "request_id": b_input["request_id"],
+                "source_kind": "remote_qwen_bf16_fresh_integrated",
+                "status": "assembled",
+                "model_generate_calls": ledger["total_generate_calls"],
+                "model_call_ledger_identity": _identity(
+                    ledger,
+                    revision=P4_05_LEDGER_SCHEMA_VERSION,
+                ),
+                "raw_model_contract_success": source_f4_raw_success,
+                "normalized_node_contract_success": normalized_node_success,
+                "agent_chain_system_output_usable": True,
+                "composition_status": "composed",
+                "assembler_status": "assembled",
+                "downstream": "not_executed",
+                "historical_strict_result": "0/2_unchanged",
+                "claim_boundary": (
+                    "P4-05 remote BF16 fresh integrated result; "
+                    "not strict raw-model first-pass success"
+                ),
+                "failure": None,
+            }
+            _write_fsync(
+                result_root / "revalidation_result.json",
+                _canonical_bytes(source_result),
+            )
+            try:
+                receipt = run_phase4_fresh_delivery(
+                    source_root=result_root,
+                    delivery_root=result_root / "delivery",
+                    context=context,
+                    guidance=guidance,
+                    manifest=live_delivery["manifest"],
+                    selected=live_delivery["selected"],
+                    local_request=live_delivery["local_request"],
+                    pre_invocation_audit=live_delivery[
+                        "pre_invocation_audit"
+                    ],
+                    local_qwen_preparation=live_delivery[
+                        "local_qwen_preparation"
+                    ],
+                    package=live_delivery["package"],
+                    frozen_g0_reference=live_delivery[
+                        "frozen_g0_reference"
+                    ],
+                    fallback_record=live_delivery["fallback_record"],
+                    fallback_snapshot_dir=live_delivery[
+                        "fallback_snapshot_dir"
+                    ],
+                    scripted_acceptance_fixture=live_delivery[
+                        "scripted_acceptance_fixture"
+                    ],
+                )
+            except Exception as exc:
+                delivery = {
+                    "status": "failed_closed",
+                    "failure": {
+                        "code": "fresh_delivery_exception",
+                        "message_code": type(exc).__name__,
+                        "retry_allowed": False,
+                        "model_retry_performed": False,
+                        "automatic_fallback_performed": False,
+                    },
+                }
+                delivery_result = delivery
+                failure = {
+                    "code": "fresh_delivery_failed_closed",
+                    "node_id": None,
+                    "message_code": type(exc).__name__,
+                    "retry_allowed": False,
+                    "automatic_retry": False,
+                    "generate_started": True,
+                }
+                _write_fsync(
+                    result_root / "delivery_failure.json",
+                    _canonical_bytes(delivery),
+                )
+                _write_fsync(
+                    result_root / "failure.json",
+                    _canonical_bytes(failure),
+                )
+                terminal_status = "failed_closed"
+            else:
+                delivery = receipt.to_dict()
+                delivery_result = delivery
+                if receipt.success_accounting["delivery_success"] is True:
+                    terminal_status = "delivery_terminal_success"
+                else:
+                    failure = {
+                        "code": "fresh_delivery_terminal_failed",
+                        "node_id": None,
+                        "message_code": str(receipt.downstream["status"]),
+                        "retry_allowed": False,
+                        "automatic_retry": False,
+                        "generate_started": True,
+                    }
+                    _write_fsync(
+                        result_root / "failure.json",
+                        _canonical_bytes(failure),
+                    )
+                    terminal_status = "failed_closed"
+            _write_fsync(
+                result_root / "p4_05_final_result.json",
+                _canonical_bytes(
+                    {
+                        **source_result,
+                        "status": terminal_status,
+                        "delivery_receipt": (
+                            delivery
+                            if "receipt_id" in delivery
+                            else None
+                        ),
+                        "delivery_failure": (
+                            None
+                            if "receipt_id" in delivery
+                            else delivery
+                        ),
+                        "delivery_result_identity": _identity(
+                            delivery,
+                            revision=f"{P4_05_RESULT_SCHEMA_VERSION}.delivery",
+                        ),
+                    }
+                ),
+            )
+        elif terminal_status != "failed_closed":
+            terminal_status = "failed_closed"
+    finally:
+        if worker is not None:
+            teardown = worker.close()
+        else:
+            teardown = {
+                "worker_id": None,
+                "worker_pid": None,
+                "worker_exit_code": None,
+                "worker_exit_verified": False,
+                "terminal_status": "worker_not_started",
+                "generation_started": False,
+                "generate_calls": {node_id: 0 for node_id in NODE_ORDER},
+                "attempt_envelopes": {node_id: 0 for node_id in NODE_ORDER},
+            }
+        ledger = _call_ledger(
+            run_id=run_id,
+            node_results=node_results,
+        )
+        _write_fsync(
+            result_root / "model_call_ledger.json",
+            _canonical_bytes(ledger),
+        )
+        supervisor = {
+            "schema_version": P4_05_SUPERVISOR_SCHEMA_VERSION,
+            "pilot_id": P4_05_PILOT_ID,
+            "run_id": run_id,
+            "terminal_status": teardown["terminal_status"],
+            "worker_id": teardown["worker_id"],
+            "worker_pid": teardown["worker_pid"],
+            "worker_exit_code": teardown["worker_exit_code"],
+            "worker_exit_verified": teardown["worker_exit_verified"],
+            "generation_started": teardown["generation_started"],
+            "generate_calls": teardown["generate_calls"],
+            "attempt_envelopes": teardown.get(
+                "attempt_envelopes",
+                {node_id: 0 for node_id in NODE_ORDER},
+            ),
+            "model_call_ledger_identity": _identity(
+                ledger,
+                revision=P4_05_LEDGER_SCHEMA_VERSION,
+            ),
+            "stderr_identity": _identity(
+                bytes(mirror.stderr_bytes),
+                revision=f"{P4_05_SUPERVISOR_SCHEMA_VERSION}.stderr",
+                identity_kind="raw_bytes",
+            ),
+            "action_state": _action_state(
+                model_action=bool(teardown["generation_started"]),
+                remote_action=bool(teardown["generation_started"]),
+            ),
+            "stdout_thread_joined": teardown.get("stdout_thread_joined", False),
+            "stderr_thread_joined": teardown.get("stderr_thread_joined", False),
+            "stderr_capture_completed": teardown.get(
+                "stderr_capture_completed", False
+            ),
+        }
+        _write_fsync(
+            result_root / "supervisor_receipt.json",
+            _canonical_bytes(supervisor),
+        )
+    return {
+        "schema_version": P4_05_RESULT_SCHEMA_VERSION,
+        "pilot_id": P4_05_PILOT_ID,
+        "run_id": run_id,
+        "status": terminal_status,
+        "node_results": node_results,
+        "failure": failure,
+        "source_f4_raw_contract_success": source_f4_raw_success,
+        "normalized_node_contract_success": normalized_node_success,
+        "model_generate_calls": sum(node_results[node]["call_count"] for node in node_results),
+        "delivery_status": (
+            None
+            if delivery_result is None
+            else delivery_result.get("status")
+            or delivery_result.get("downstream", {}).get("status")
+        ),
+        "delivery_receipt_terminal": (
+            delivery_result is not None
+            and isinstance(delivery_result.get("receipt_id"), str)
+            and bool(delivery_result["receipt_id"])
+        ),
+        "supervisor": supervisor,
+        "claim_boundary": (
+            "P4-05 remote BF16 fresh integrated experiment; "
+            "existing downstream delivery authorities are executed or "
+            "explicitly fail-closed; not strict raw-model first-pass success, "
+            "H1, browser, or formal quality"
+        ),
+    }
+
+
+def main_worker(argv: list[str]) -> int:
+    if len(argv) != 3 or argv[0] != "--worker" or argv[1] != "--model-root":
+        return 2
+    return _run_worker_protocol(Path(argv[2]).resolve(strict=True))
+
+
+__all__ = [
+    "P4_05_CASE_ID",
+    "P4_05_GENERATE_CALL_CAP",
+    "P4_05_INPUT_CLASSES",
+    "P4_05_INPUT_SCHEMA_VERSION",
+    "P4_05_LEDGER_SCHEMA_VERSION",
+    "P4_05_MODEL_CONTEXT_TOKENS",
+    "P4_05_PILOT_ID",
+    "P4_05_PRE_CALL_SCHEMA_VERSION",
+    "P4_05_QUANTIZATION",
+    "P4_05_REQUEST_ID",
+    "P4_05_RUN_PREFIX",
+    "P4_05_SUPERVISOR_SCHEMA_VERSION",
+    "P4_05_TIMEOUT_SECONDS",
+    "Phase4RemoteFreshIntegratedError",
+    "RemoteFreshIntegratedProfile",
+    "FreshIntegratedRemoteWorker",
+    "FreshIntegratedStreamMirror",
+    "create_p4_05_policy",
+    "prepare_phase4_remote_qwen_fresh_integrated",
+    "run_phase4_remote_qwen_fresh_integrated",
+]
+
+
+if __name__ == "__main__":
+    if len(sys.argv) > 1 and sys.argv[1] == "--worker":
+        raise SystemExit(main_worker(sys.argv[1:]))
