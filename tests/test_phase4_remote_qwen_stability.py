@@ -638,7 +638,11 @@ class Phase4RemoteQwenStabilityCliTests(unittest.TestCase):
 
 class Phase4RemoteQwenStabilityRuntimeTests(unittest.TestCase):
     def test_prepare_freezes_case_set_and_no_model_policy(self) -> None:
-        result_root = Path("C:/p4-05-test-only/stability-preflight-runtime")
+        result_root = (
+            _ROOT
+            / ".p4-05-test-only"
+            / "stability-preflight-runtime"
+        ).resolve(strict=False)
         inventory = {"inventory_identity": _INVENTORY_IDENTITY}
         gpu = {
             "device_name": runtime._fresh._remote.REMOTE_DEVICE_NAME,
