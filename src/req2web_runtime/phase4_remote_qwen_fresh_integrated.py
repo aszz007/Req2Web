@@ -36,6 +36,7 @@ from req2web_orchestration.phase4_graph import (
     phase4_project_node_input_authority,
     phase4_register_node_output,
     phase4_synthetic_assembler_bindings,
+    phase4_validate_node_output,
     synthetic_commerce_b_input,
 )
 from req2web_runtime import phase4_local_qwen as _local
@@ -53,14 +54,19 @@ P4_05_PROFILE_SCHEMA_VERSION = f"{P4_05_SCHEMA_PREFIX}.profile.v1"
 P4_05_POLICY_SCHEMA_VERSION = f"{P4_05_SCHEMA_PREFIX}.policy.v1"
 P4_05_RESULT_SCHEMA_VERSION = f"{P4_05_SCHEMA_PREFIX}.result.v1"
 P4_05_INPUT_SCHEMA_VERSION = f"{P4_05_SCHEMA_PREFIX}.input.v1"
-P4_05_PROMPT_SCHEMA_VERSION = f"{P4_05_SCHEMA_PREFIX}.prompt.v3"
+P4_05_PROMPT_SCHEMA_VERSION = f"{P4_05_SCHEMA_PREFIX}.prompt.v4"
 P4_05_PRE_CALL_SCHEMA_VERSION = f"{P4_05_SCHEMA_PREFIX}.pre_call.v1"
 P4_05_ATTEMPT_SCHEMA_VERSION = f"{P4_05_SCHEMA_PREFIX}.attempt.v2"
 P4_05_LEDGER_SCHEMA_VERSION = f"{P4_05_SCHEMA_PREFIX}.ledger.v1"
+P4_05_HISTORY_SCHEMA_VERSION = f"{P4_05_SCHEMA_PREFIX}.history.v1"
+P4_05_RESUME_SCHEMA_VERSION = f"{P4_05_SCHEMA_PREFIX}.resume.v1"
+P4_05_AGGREGATE_LEDGER_SCHEMA_VERSION = (
+    f"{P4_05_SCHEMA_PREFIX}.aggregate_ledger.v1"
+)
 P4_05_SUPERVISOR_SCHEMA_VERSION = f"{P4_05_SCHEMA_PREFIX}.supervisor.v2"
 P4_05_STREAM_SCHEMA_VERSION = f"{P4_05_SCHEMA_PREFIX}.stream.v1"
 P4_05_WORKER_PROTOCOL = f"{P4_05_SCHEMA_PREFIX}.worker.v1"
-P4_05_PILOT_ID = "p4-05-remote-qwen-fresh-integrated-v3"
+P4_05_PILOT_ID = "p4-05-remote-qwen-fresh-integrated-v4"
 P4_05_RUN_PREFIX = "p4-05-remote-qwen-fresh-integrated-run-"
 P4_05_CASE_ID = "path3-commerce-checkout"
 P4_05_REQUEST_ID = "p4-02a-synthetic-request-001"
@@ -69,6 +75,7 @@ P4_05_PROFILE_NAME = "remote_bf16_fresh_integrated"
 P4_05_TIMEOUT_SECONDS = 1200
 P4_05_LOAD_TIMEOUT_SECONDS = 600
 P4_05_GENERATE_CALL_CAP = 1
+P4_05_TOTAL_REAL_MODEL_CALL_CAP_PER_NODE = 3
 P4_05_RETRY_COUNT = 0
 P4_05_DTYPE = "bfloat16"
 P4_05_QUANTIZATION = "none"
@@ -1691,6 +1698,7 @@ def _node_prompt(
             "Return exactly one JSON object and no prose.",
             "Use strict RFC 8259 JSON syntax: double-quoted keys and string values, a colon between every key and value, and no trailing commas.",
             "Every object must contain exactly the keys listed in exact_output_contract; do not add properties or alternate nesting.",
+            "Every listed key is mandatory, including refs fields whose required value is the empty array [].",
             "Preserve the required node schema and semantic array order.",
             "Do not emit authoritative IDs, mappings, acceptance verdicts, or browser evidence.",
             "Do not abbreviate, truncate, omit, or split the object.",
@@ -1938,6 +1946,354 @@ def _call_ledger(
     }
 
 
+def _read_canonical_artifact(path: Path, name: str) -> object:
+    if path.is_symlink() or not path.is_file():
+        raise Phase4RemoteFreshIntegratedError(f"{name} is unavailable")
+    return _strict_json(path.read_bytes(), name)
+
+
+def _build_call_history(
+    *,
+    history_result_roots: tuple[Path, ...],
+    result_root: Path,
+) -> dict[str, object]:
+    seen_roots: set[str] = set()
+    seen_runs: set[tuple[str, str]] = set()
+    rows: list[dict[str, object]] = []
+    aggregate_per_node = {node_id: 0 for node_id in NODE_ORDER}
+    for supplied_root in history_result_roots:
+        history_root = _safe_path(
+            supplied_root,
+            "history result root",
+            directory=True,
+        )
+        if history_root == result_root:
+            raise Phase4RemoteFreshIntegratedError(
+                "history result root must differ from the new result root"
+            )
+        root_text = str(history_root)
+        if root_text in seen_roots:
+            raise Phase4RemoteFreshIntegratedError(
+                "history result roots must be unique"
+            )
+        seen_roots.add(root_text)
+        ledger = _read_canonical_artifact(
+            history_root / "model_call_ledger.json",
+            "history model-call ledger",
+        )
+        if not isinstance(ledger, Mapping) or set(ledger) != {
+            "schema_version",
+            "pilot_id",
+            "run_id",
+            "node_order",
+            "per_node",
+            "total_generate_calls",
+            "automatic_retry",
+            "budget_reset",
+        }:
+            raise Phase4RemoteFreshIntegratedError(
+                "history model-call ledger shape drifted"
+            )
+        if (
+            ledger["schema_version"] != P4_05_LEDGER_SCHEMA_VERSION
+            or ledger["node_order"] != list(NODE_ORDER)
+            or ledger["automatic_retry"] is not False
+            or ledger["budget_reset"] is not False
+            or not isinstance(ledger["pilot_id"], str)
+            or not isinstance(ledger["run_id"], str)
+            or not isinstance(ledger["per_node"], Mapping)
+        ):
+            raise Phase4RemoteFreshIntegratedError(
+                "history model-call ledger binding drifted"
+            )
+        run_key = (str(ledger["pilot_id"]), str(ledger["run_id"]))
+        if run_key in seen_runs:
+            raise Phase4RemoteFreshIntegratedError(
+                "history pilot/run identity is duplicated"
+            )
+        seen_runs.add(run_key)
+        row_counts: dict[str, int] = {}
+        for node_id in NODE_ORDER:
+            node_row = ledger["per_node"].get(node_id)
+            if not isinstance(node_row, Mapping) or set(node_row) != {
+                "attempt_count",
+                "generate_started_count",
+                "generate_call_cap",
+                "retry_count",
+            }:
+                raise Phase4RemoteFreshIntegratedError(
+                    "history per-node ledger shape drifted"
+                )
+            count = node_row["generate_started_count"]
+            if type(count) is not int or count not in {0, 1}:
+                raise Phase4RemoteFreshIntegratedError(
+                    "history per-node generate count is invalid"
+                )
+            if (
+                node_row["attempt_count"] not in {0, 1}
+                or node_row["generate_call_cap"] != P4_05_GENERATE_CALL_CAP
+                or node_row["retry_count"] != P4_05_RETRY_COUNT
+            ):
+                raise Phase4RemoteFreshIntegratedError(
+                    "history per-node call policy drifted"
+                )
+            row_counts[node_id] = count
+            aggregate_per_node[node_id] += count
+        if ledger["total_generate_calls"] != sum(row_counts.values()):
+            raise Phase4RemoteFreshIntegratedError(
+                "history total model-call count drifted"
+            )
+        rows.append(
+            {
+                "result_root": root_text,
+                "pilot_id": ledger["pilot_id"],
+                "run_id": ledger["run_id"],
+                "model_call_ledger_identity": _identity(
+                    ledger,
+                    revision=P4_05_LEDGER_SCHEMA_VERSION,
+                ),
+                "per_node_generate_started_count": row_counts,
+                "total_generate_calls": ledger["total_generate_calls"],
+            }
+        )
+    if any(
+        count > P4_05_TOTAL_REAL_MODEL_CALL_CAP_PER_NODE
+        for count in aggregate_per_node.values()
+    ):
+        raise Phase4RemoteFreshIntegratedError(
+            "historical per-node real-model call cap is exhausted"
+        )
+    body: dict[str, object] = {
+        "schema_version": P4_05_HISTORY_SCHEMA_VERSION,
+        "pilot_id": P4_05_PILOT_ID,
+        "history_rows": rows,
+        "aggregate_per_node_generate_started_count": aggregate_per_node,
+        "aggregate_total_generate_calls": sum(aggregate_per_node.values()),
+        "per_node_total_call_cap": P4_05_TOTAL_REAL_MODEL_CALL_CAP_PER_NODE,
+        "budget_reset": False,
+        "automatic_retry": False,
+        "action_state": _action_state(
+            model_action=False,
+            remote_action=False,
+        ),
+    }
+    body["history_receipt_id"] = _identity(
+        body,
+        revision=P4_05_HISTORY_SCHEMA_VERSION,
+    )["sha256"]
+    return body
+
+
+def _restore_validated_prefix(
+    *,
+    resume_from_result_root: Path,
+    result_root: Path,
+    b_input: Mapping[str, object],
+    state: Mapping[str, object],
+    history_receipt: Mapping[str, object],
+) -> tuple[dict[str, object], dict[str, object]]:
+    source_root = _safe_path(
+        resume_from_result_root,
+        "resume source result root",
+        directory=True,
+    )
+    history_rows = history_receipt.get("history_rows")
+    if not isinstance(history_rows, list):
+        raise Phase4RemoteFreshIntegratedError(
+            "history receipt rows are unavailable"
+        )
+    matching_history = [
+        row
+        for row in history_rows
+        if isinstance(row, Mapping)
+        and row.get("result_root") == str(source_root)
+    ]
+    if len(matching_history) != 1:
+        raise Phase4RemoteFreshIntegratedError(
+            "resume source must be included exactly once in call history"
+        )
+    source_b_input = _read_canonical_artifact(
+        source_root / "b_input.json",
+        "resume source B input",
+    )
+    if source_b_input != dict(b_input):
+        raise Phase4RemoteFreshIntegratedError(
+            "resume source B input binding drifted"
+        )
+    source_ledger = _read_canonical_artifact(
+        source_root / "model_call_ledger.json",
+        "resume source model-call ledger",
+    )
+    if not isinstance(source_ledger, Mapping):
+        raise Phase4RemoteFreshIntegratedError(
+            "resume source model-call ledger is invalid"
+        )
+    restored_state = copy.deepcopy(dict(state))
+    resumed_nodes: list[str] = []
+    node_bindings: list[dict[str, object]] = []
+    encountered_gap = False
+    for node_id in NODE_ORDER:
+        attempt_root = source_root / "attempts" / node_id
+        output_path = attempt_root / "validated_node_output.json"
+        if not output_path.exists():
+            encountered_gap = True
+            continue
+        if encountered_gap:
+            raise Phase4RemoteFreshIntegratedError(
+                "resume validated nodes are not a contiguous prefix"
+            )
+        output = _read_canonical_artifact(
+            output_path,
+            f"resume {node_id} validated output",
+        )
+        attempt = _read_canonical_artifact(
+            attempt_root / "attempt_result.json",
+            f"resume {node_id} attempt result",
+        )
+        raw_path = attempt_root / "raw_response.bin"
+        if (
+            not isinstance(output, Mapping)
+            or not isinstance(attempt, Mapping)
+            or attempt.get("node_id") != node_id
+            or attempt.get("pilot_id") != source_ledger.get("pilot_id")
+            or attempt.get("run_id") != source_ledger.get("run_id")
+            or attempt.get("case_id") != b_input["case_id"]
+            or attempt.get("request_id") != b_input["request_id"]
+            or attempt.get("status") != "validated"
+            or attempt.get("generate_started") is not True
+            or attempt.get("call_count") != 1
+            or attempt.get("retry_count") != P4_05_RETRY_COUNT
+            or raw_path.is_symlink()
+            or not raw_path.is_file()
+            or attempt.get("raw_identity")
+            != _identity(
+                raw_path.read_bytes(),
+                revision=f"{P4_05_SCHEMA_PREFIX}.raw.v1",
+                identity_kind="raw_bytes",
+            )
+        ):
+            raise Phase4RemoteFreshIntegratedError(
+                f"resume {node_id} source binding drifted"
+            )
+        phase4_validate_node_output(node_id, output, restored_state)
+        restored_state = phase4_register_node_output(
+            restored_state,
+            node_id,
+            output,
+        )
+        resumed_nodes.append(node_id)
+        node_bindings.append(
+            {
+                "node_id": node_id,
+                "source_attempt_identity": _identity(
+                    attempt,
+                    revision=P4_05_ATTEMPT_SCHEMA_VERSION,
+                ),
+                "validated_output_identity": _identity(
+                    output,
+                    revision=f"{node_id}.output.p4.v1",
+                ),
+                "raw_identity": attempt["raw_identity"],
+            }
+        )
+    if not resumed_nodes or len(resumed_nodes) == len(NODE_ORDER):
+        raise Phase4RemoteFreshIntegratedError(
+            "resume source must contain a non-empty proper validated prefix"
+        )
+    body: dict[str, object] = {
+        "schema_version": P4_05_RESUME_SCHEMA_VERSION,
+        "pilot_id": P4_05_PILOT_ID,
+        "source_result_root": str(source_root),
+        "source_pilot_id": source_ledger["pilot_id"],
+        "source_run_id": source_ledger["run_id"],
+        "source_model_call_ledger_identity": _identity(
+            source_ledger,
+            revision=P4_05_LEDGER_SCHEMA_VERSION,
+        ),
+        "resumed_nodes": resumed_nodes,
+        "next_node": NODE_ORDER[len(resumed_nodes)],
+        "node_bindings": node_bindings,
+        "model_generate_calls": 0,
+        "automatic_retry": False,
+        "budget_reset": False,
+        "action_state": _action_state(
+            model_action=False,
+            remote_action=False,
+        ),
+    }
+    body["resume_receipt_id"] = _identity(
+        body,
+        revision=P4_05_RESUME_SCHEMA_VERSION,
+    )["sha256"]
+    _write_fsync(
+        result_root / "resume_receipt.json",
+        _canonical_bytes(body),
+    )
+    return restored_state, body
+
+
+def _aggregate_call_ledger(
+    *,
+    run_id: str,
+    history_receipt: Mapping[str, object],
+    current_ledger: Mapping[str, object],
+) -> dict[str, object]:
+    historical = history_receipt[
+        "aggregate_per_node_generate_started_count"
+    ]
+    current = current_ledger["per_node"]
+    if not isinstance(historical, Mapping) or not isinstance(current, Mapping):
+        raise Phase4RemoteFreshIntegratedError(
+            "aggregate model-call inputs are invalid"
+        )
+    per_node: dict[str, dict[str, object]] = {}
+    for node_id in NODE_ORDER:
+        prior_count = historical.get(node_id)
+        current_row = current.get(node_id)
+        if type(prior_count) is not int or not isinstance(current_row, Mapping):
+            raise Phase4RemoteFreshIntegratedError(
+                "aggregate per-node model-call input drifted"
+            )
+        current_count = current_row.get("generate_started_count")
+        if type(current_count) is not int:
+            raise Phase4RemoteFreshIntegratedError(
+                "aggregate current model-call count drifted"
+            )
+        total_count = prior_count + current_count
+        if total_count > P4_05_TOTAL_REAL_MODEL_CALL_CAP_PER_NODE:
+            raise Phase4RemoteFreshIntegratedError(
+                f"{node_id} aggregate real-model call cap exceeded"
+            )
+        per_node[node_id] = {
+            "historical_generate_started_count": prior_count,
+            "current_generate_started_count": current_count,
+            "aggregate_generate_started_count": total_count,
+            "total_real_model_call_cap": (
+                P4_05_TOTAL_REAL_MODEL_CALL_CAP_PER_NODE
+            ),
+        }
+    return {
+        "schema_version": P4_05_AGGREGATE_LEDGER_SCHEMA_VERSION,
+        "pilot_id": P4_05_PILOT_ID,
+        "run_id": run_id,
+        "history_receipt_identity": _identity(
+            history_receipt,
+            revision=P4_05_HISTORY_SCHEMA_VERSION,
+        ),
+        "current_ledger_identity": _identity(
+            current_ledger,
+            revision=P4_05_LEDGER_SCHEMA_VERSION,
+        ),
+        "per_node": per_node,
+        "aggregate_total_generate_calls": sum(
+            int(row["aggregate_generate_started_count"])
+            for row in per_node.values()
+        ),
+        "automatic_retry": False,
+        "budget_reset": False,
+    }
+
+
 def prepare_phase4_remote_qwen_fresh_integrated(
     *,
     model_root: Path,
@@ -2046,6 +2402,8 @@ def run_phase4_remote_qwen_fresh_integrated(
     confirm_one_remote_fresh_integrated_run: bool,
     run_id: str | None = None,
     console: object | None = None,
+    history_result_roots: tuple[Path, ...] = (),
+    resume_from_result_root: Path | None = None,
 ) -> dict[str, object]:
     """Run one fresh F1-F4 BF16 experiment through terminal local delivery."""
 
@@ -2065,6 +2423,42 @@ def run_phase4_remote_qwen_fresh_integrated(
     run_id = str(prepared["run_id"])
     b_input = prepared["b_input"]
     state = copy.deepcopy(dict(prepared["state"]))
+    history_receipt = _build_call_history(
+        history_result_roots=history_result_roots,
+        result_root=result_root,
+    )
+    _write_fsync(
+        result_root / "model_call_history_receipt.json",
+        _canonical_bytes(history_receipt),
+    )
+    resume_receipt: dict[str, object] | None = None
+    if resume_from_result_root is not None:
+        state, resume_receipt = _restore_validated_prefix(
+            resume_from_result_root=resume_from_result_root,
+            result_root=result_root,
+            b_input=b_input,
+            state=state,
+            history_receipt=history_receipt,
+        )
+    resumed_nodes = (
+        set()
+        if resume_receipt is None
+        else set(str(node) for node in resume_receipt["resumed_nodes"])
+    )
+    historical_per_node = history_receipt[
+        "aggregate_per_node_generate_started_count"
+    ]
+    for node_id in NODE_ORDER:
+        if node_id in resumed_nodes:
+            continue
+        if (
+            not isinstance(historical_per_node, Mapping)
+            or historical_per_node.get(node_id)
+            >= P4_05_TOTAL_REAL_MODEL_CALL_CAP_PER_NODE
+        ):
+            raise Phase4RemoteFreshIntegratedError(
+                f"{node_id} aggregate real-model call cap is exhausted"
+            )
     graph_bound_delivery = prepared["graph_bound_delivery"]
     live_delivery = graph_bound_delivery["live"]
     context = graph_bound_delivery["context"]
@@ -2076,6 +2470,7 @@ def run_phase4_remote_qwen_fresh_integrated(
     failure: dict[str, object] | None = None
     delivery_result: dict[str, object] | None = None
     terminal_status = "not_started"
+    aggregate_ledger: dict[str, object] | None = None
     try:
         mirror.target.write("[P4-05] load started\n")  # type: ignore[union-attr]
         mirror.target.flush()  # type: ignore[union-attr]
@@ -2105,6 +2500,12 @@ def run_phase4_remote_qwen_fresh_integrated(
         mirror.target.write("[P4-05] load completed\n")  # type: ignore[union-attr]
         mirror.target.flush()  # type: ignore[union-attr]
         for index, node_id in enumerate(NODE_ORDER, start=1):
+            if node_id in resumed_nodes:
+                mirror.target.write(
+                    f"[P4-05] {node_id} restored from validated checkpoint\n"
+                )  # type: ignore[union-attr]
+                mirror.target.flush()  # type: ignore[union-attr]
+                continue
             if node_id == "F4" and state.get("mapping_record") is None:
                 mapping_before_f4 = phase4_create_mapping(state)
                 state = copy.deepcopy(dict(state))
@@ -2195,10 +2596,6 @@ def run_phase4_remote_qwen_fresh_integrated(
                         _canonical_bytes(normalization_receipt),
                     )
                 else:
-                    from req2web_orchestration.phase4_graph import (
-                        phase4_validate_node_output,
-                    )
-
                     phase4_validate_node_output(node_id, output, state)
                 state = phase4_register_node_output(state, node_id, output)
                 _write_fsync(
@@ -2284,6 +2681,15 @@ def run_phase4_remote_qwen_fresh_integrated(
                 result_root / "model_call_ledger.json",
                 _canonical_bytes(ledger),
             )
+            aggregate_ledger = _aggregate_call_ledger(
+                run_id=run_id,
+                history_receipt=history_receipt,
+                current_ledger=ledger,
+            )
+            _write_fsync(
+                result_root / "aggregate_model_call_ledger.json",
+                _canonical_bytes(aggregate_ledger),
+            )
             mapping = phase4_create_mapping(state)
             _write_fsync(result_root / "mapping.json", _canonical_bytes(mapping))
             composition = phase4_compose_candidate(state)
@@ -2317,10 +2723,24 @@ def run_phase4_remote_qwen_fresh_integrated(
                 "request_id": b_input["request_id"],
                 "source_kind": "remote_qwen_bf16_fresh_integrated",
                 "status": "assembled",
-                "model_generate_calls": ledger["total_generate_calls"],
+                "model_generate_calls": aggregate_ledger[
+                    "aggregate_total_generate_calls"
+                ],
                 "model_call_ledger_identity": _identity(
                     ledger,
                     revision=P4_05_LEDGER_SCHEMA_VERSION,
+                ),
+                "aggregate_model_call_ledger_identity": _identity(
+                    aggregate_ledger,
+                    revision=P4_05_AGGREGATE_LEDGER_SCHEMA_VERSION,
+                ),
+                "resume_receipt_identity": (
+                    None
+                    if resume_receipt is None
+                    else _identity(
+                        resume_receipt,
+                        revision=P4_05_RESUME_SCHEMA_VERSION,
+                    )
                 ),
                 "raw_model_contract_success": source_f4_raw_success,
                 "normalized_node_contract_success": normalized_node_success,
@@ -2461,6 +2881,15 @@ def run_phase4_remote_qwen_fresh_integrated(
             result_root / "model_call_ledger.json",
             _canonical_bytes(ledger),
         )
+        aggregate_ledger = _aggregate_call_ledger(
+            run_id=run_id,
+            history_receipt=history_receipt,
+            current_ledger=ledger,
+        )
+        _write_fsync(
+            result_root / "aggregate_model_call_ledger.json",
+            _canonical_bytes(aggregate_ledger),
+        )
         supervisor = {
             "schema_version": P4_05_SUPERVISOR_SCHEMA_VERSION,
             "pilot_id": P4_05_PILOT_ID,
@@ -2479,6 +2908,22 @@ def run_phase4_remote_qwen_fresh_integrated(
             "model_call_ledger_identity": _identity(
                 ledger,
                 revision=P4_05_LEDGER_SCHEMA_VERSION,
+            ),
+            "aggregate_model_call_ledger_identity": _identity(
+                aggregate_ledger,
+                revision=P4_05_AGGREGATE_LEDGER_SCHEMA_VERSION,
+            ),
+            "history_receipt_identity": _identity(
+                history_receipt,
+                revision=P4_05_HISTORY_SCHEMA_VERSION,
+            ),
+            "resume_receipt_identity": (
+                None
+                if resume_receipt is None
+                else _identity(
+                    resume_receipt,
+                    revision=P4_05_RESUME_SCHEMA_VERSION,
+                )
             ),
             "stderr_identity": _identity(
                 bytes(mirror.stderr_bytes),
@@ -2508,7 +2953,17 @@ def run_phase4_remote_qwen_fresh_integrated(
         "failure": failure,
         "source_f4_raw_contract_success": source_f4_raw_success,
         "normalized_node_contract_success": normalized_node_success,
-        "model_generate_calls": sum(node_results[node]["call_count"] for node in node_results),
+        "model_generate_calls": aggregate_ledger[
+            "aggregate_total_generate_calls"
+        ],
+        "current_run_model_generate_calls": sum(
+            node_results[node]["call_count"] for node in node_results
+        ),
+        "resumed_nodes": (
+            []
+            if resume_receipt is None
+            else list(resume_receipt["resumed_nodes"])
+        ),
         "delivery_status": (
             None
             if delivery_result is None

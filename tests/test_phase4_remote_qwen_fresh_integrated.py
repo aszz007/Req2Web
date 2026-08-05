@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 import queue
 import sys
+import tempfile
 import types
 import unittest
 from unittest.mock import patch
@@ -64,6 +65,12 @@ except ModuleNotFoundError as exc:
 
 import req2web_runtime.phase4_remote_qwen as remote_base
 import req2web_runtime.phase4_remote_qwen_fresh_integrated as remote
+from req2web_orchestration.phase4_graph import (
+    phase4_create_portable_authority_state,
+    phase4_register_node_output,
+    phase4_synthetic_fixture_output,
+    synthetic_commerce_b_input,
+)
 
 
 def _identity(value: object) -> dict[str, object]:
@@ -265,6 +272,96 @@ class Phase4RemoteFreshIntegratedArtifactTests(unittest.TestCase):
         with self.assertRaises(remote.Phase4RemoteFreshIntegratedError):
             remote._parse_model_json(b'{"states": []} trailing', "test")
 
+    @unittest.skipIf(
+        sys.platform == "win32",
+        "Windows managed host denies nested temp-directory access",
+    )
+    def test_history_and_resume_restore_validated_prefix_without_calls(self) -> None:
+        b_input = synthetic_commerce_b_input(
+            case_id=remote.P4_05_CASE_ID,
+            request_id=remote.P4_05_REQUEST_ID,
+        )
+        source_state = phase4_create_portable_authority_state(b_input)
+        attempts: dict[str, dict[str, object]] = {}
+        with tempfile.TemporaryDirectory(
+            dir=_ROOT,
+            ignore_cleanup_errors=True,
+        ) as temporary:
+            temp_root = Path(temporary)
+            source_root = temp_root / "source"
+            result_root = temp_root / "result"
+            source_root.mkdir()
+            result_root.mkdir()
+            (source_root / "b_input.json").write_bytes(
+                remote._canonical_bytes(b_input)
+            )
+            for node_id in ("F1", "F2"):
+                output = phase4_synthetic_fixture_output(
+                    node_id,
+                    source_state,
+                )
+                source_state = phase4_register_node_output(
+                    source_state,
+                    node_id,
+                    output,
+                )
+                raw = remote._canonical_bytes(output)
+                attempt_root = source_root / "attempts" / node_id
+                attempt_root.mkdir(parents=True)
+                attempt = remote._attempt_record(
+                    run_id=f"{remote.P4_05_RUN_PREFIX}resume-source",
+                    case_id=remote.P4_05_CASE_ID,
+                    request_id=remote.P4_05_REQUEST_ID,
+                    node_id=node_id,
+                    input_bytes=b"{}",
+                    prompt_bytes=b"{}",
+                    config_bytes=b"{}",
+                    request_bytes=b"{}",
+                    pre_call_record={},
+                    worker_id="worker-source",
+                    worker_pid=1,
+                    raw=raw,
+                    generate_started=True,
+                    status="validated",
+                    failure_code=None,
+                )
+                attempts[node_id] = attempt
+                (attempt_root / "raw_response.bin").write_bytes(raw)
+                (attempt_root / "validated_node_output.json").write_bytes(raw)
+                (attempt_root / "attempt_result.json").write_bytes(
+                    remote._canonical_bytes(attempt)
+                )
+            ledger = remote._call_ledger(
+                run_id=f"{remote.P4_05_RUN_PREFIX}resume-source",
+                node_results=attempts,
+            )
+            (source_root / "model_call_ledger.json").write_bytes(
+                remote._canonical_bytes(ledger)
+            )
+
+            history = remote._build_call_history(
+                history_result_roots=(source_root,),
+                result_root=result_root,
+            )
+            restored, receipt = remote._restore_validated_prefix(
+                resume_from_result_root=source_root,
+                result_root=result_root,
+                b_input=b_input,
+                state=phase4_create_portable_authority_state(b_input),
+                history_receipt=history,
+            )
+
+        self.assertEqual(receipt["resumed_nodes"], ["F1", "F2"])
+        self.assertEqual(receipt["next_node"], "F3")
+        self.assertEqual(
+            history["aggregate_per_node_generate_started_count"],
+            {"F1": 1, "F2": 1, "F3": 0, "F4": 0},
+        )
+        self.assertEqual(
+            list(restored["node_results"]),
+            ["F1", "F2"],
+        )
+
 
 class Phase4RemoteFreshIntegratedStreamingTests(unittest.TestCase):
     def test_stream_mirror_prints_delta_and_keeps_bytes(self) -> None:
@@ -361,6 +458,8 @@ class Phase4RemoteFreshIntegratedCliTests(unittest.TestCase):
         self.assertNotIn("--repository-root", help_text)
         self.assertIn("--preflight-only", help_text)
         self.assertIn("--confirm-one-remote-fresh-integrated-run", help_text)
+        self.assertIn("--history-result-root", help_text)
+        self.assertIn("--resume-from-result-root", help_text)
 
         with self.assertRaises(SystemExit) as raised:
             cli.main(

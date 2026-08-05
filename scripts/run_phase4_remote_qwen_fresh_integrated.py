@@ -39,6 +39,25 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Write and validate the offline preflight without loading or generating.",
     )
+    parser.add_argument(
+        "--history-result-root",
+        action="append",
+        default=[],
+        type=Path,
+        help=(
+            "Repeat for every earlier P4-05 result root whose real generate "
+            "calls must remain in the aggregate per-node budget."
+        ),
+    )
+    parser.add_argument(
+        "--resume-from-result-root",
+        type=Path,
+        default=None,
+        help=(
+            "Restore the contiguous validated F-node prefix from this earlier "
+            "result root without generating those nodes again."
+        ),
+    )
     parser.add_argument("--run-id", default=None)
     return parser
 
@@ -69,6 +88,12 @@ def main(argv: list[str] | None = None) -> int:
             "--confirm-one-remote-fresh-integrated-run is required before "
             "the worker may load or generate"
         )
+    if args.preflight_only and (
+        args.history_result_root or args.resume_from_result_root is not None
+    ):
+        parser.error(
+            "history/resume options are valid only for a confirmed model run"
+        )
     _offline_process()
     try:
         if args.preflight_only:
@@ -97,6 +122,15 @@ def main(argv: list[str] | None = None) -> int:
             confirm_one_remote_fresh_integrated_run=True,
             run_id=args.run_id,
             console=sys.stderr,
+            history_result_roots=tuple(
+                path.resolve(strict=True)
+                for path in args.history_result_root
+            ),
+            resume_from_result_root=(
+                None
+                if args.resume_from_result_root is None
+                else args.resume_from_result_root.resolve(strict=True)
+            ),
         )
     except (OSError, Phase4RemoteFreshIntegratedError) as exc:
         print(f"[P4-05] failed closed: {exc}", file=sys.stderr, flush=True)
