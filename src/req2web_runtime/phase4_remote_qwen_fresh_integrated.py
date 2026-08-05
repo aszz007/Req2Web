@@ -3220,6 +3220,8 @@ def run_phase4_remote_qwen_fresh_integrated(
         "schema_version": P4_05_RESULT_SCHEMA_VERSION,
         "pilot_id": P4_05_PILOT_ID,
         "run_id": run_id,
+        "case_id": b_input["case_id"],
+        "request_id": b_input["request_id"],
         "parent_experiment_binding": parent_binding,
         "status": terminal_status,
         "node_results": node_results,
