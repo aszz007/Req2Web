@@ -53,13 +53,14 @@ P4_05_PROFILE_SCHEMA_VERSION = f"{P4_05_SCHEMA_PREFIX}.profile.v1"
 P4_05_POLICY_SCHEMA_VERSION = f"{P4_05_SCHEMA_PREFIX}.policy.v1"
 P4_05_RESULT_SCHEMA_VERSION = f"{P4_05_SCHEMA_PREFIX}.result.v1"
 P4_05_INPUT_SCHEMA_VERSION = f"{P4_05_SCHEMA_PREFIX}.input.v1"
+P4_05_PROMPT_SCHEMA_VERSION = f"{P4_05_SCHEMA_PREFIX}.prompt.v2"
 P4_05_PRE_CALL_SCHEMA_VERSION = f"{P4_05_SCHEMA_PREFIX}.pre_call.v1"
 P4_05_ATTEMPT_SCHEMA_VERSION = f"{P4_05_SCHEMA_PREFIX}.attempt.v2"
 P4_05_LEDGER_SCHEMA_VERSION = f"{P4_05_SCHEMA_PREFIX}.ledger.v1"
 P4_05_SUPERVISOR_SCHEMA_VERSION = f"{P4_05_SCHEMA_PREFIX}.supervisor.v2"
 P4_05_STREAM_SCHEMA_VERSION = f"{P4_05_SCHEMA_PREFIX}.stream.v1"
 P4_05_WORKER_PROTOCOL = f"{P4_05_SCHEMA_PREFIX}.worker.v1"
-P4_05_PILOT_ID = "p4-05-remote-qwen-fresh-integrated-v1"
+P4_05_PILOT_ID = "p4-05-remote-qwen-fresh-integrated-v2"
 P4_05_RUN_PREFIX = "p4-05-remote-qwen-fresh-integrated-run-"
 P4_05_CASE_ID = "path3-commerce-checkout"
 P4_05_REQUEST_ID = "p4-02a-synthetic-request-001"
@@ -1046,7 +1047,7 @@ class _FreshIntegratedBackend(_remote._RemoteTransformersBackend):
                 )
             if (
                 prompt_value.get("schema_version")
-                != f"{P4_05_SCHEMA_PREFIX}.prompt.v1"
+                != P4_05_PROMPT_SCHEMA_VERSION
                 or prompt_value.get("node_id") != node_id
                 or prompt_value.get("input_identity")
                 != _identity(
@@ -1579,7 +1580,7 @@ def _node_prompt(
     input_bytes: bytes,
 ) -> bytes:
     payload = {
-        "schema_version": f"{P4_05_SCHEMA_PREFIX}.prompt.v1",
+        "schema_version": P4_05_PROMPT_SCHEMA_VERSION,
         "node_id": node_id,
         "output_format": "one_complete_canonical_json_object",
         "input_identity": _identity(
@@ -1589,6 +1590,7 @@ def _node_prompt(
         ),
         "instructions": [
             "Return exactly one JSON object and no prose.",
+            "Use strict RFC 8259 JSON syntax: double-quoted keys and string values, a colon between every key and value, and no trailing commas.",
             "Preserve the required node schema and semantic array order.",
             "Do not emit authoritative IDs, mappings, acceptance verdicts, or browser evidence.",
             "Do not abbreviate, truncate, omit, or split the object.",
@@ -1701,7 +1703,7 @@ def _pre_call_record(
         ),
         "prompt_identity": _identity(
             prompt_bytes,
-            revision=f"{P4_05_SCHEMA_PREFIX}.prompt.v1",
+            revision=P4_05_PROMPT_SCHEMA_VERSION,
             identity_kind="raw_bytes",
         ),
         "config_identity": _identity(
@@ -1773,7 +1775,7 @@ def _attempt_record(
         ),
         "prompt_identity": _identity(
             prompt_bytes,
-            revision=f"{P4_05_SCHEMA_PREFIX}.prompt.v1",
+            revision=P4_05_PROMPT_SCHEMA_VERSION,
             identity_kind="raw_bytes",
         ),
         "config_identity": _identity(
