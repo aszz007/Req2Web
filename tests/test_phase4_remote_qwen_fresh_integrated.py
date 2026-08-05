@@ -134,6 +134,20 @@ class Phase4RemoteFreshIntegratedProfileTests(unittest.TestCase):
 
         f1 = json.loads(remote._node_prompt(node_id="F1", input_bytes=input_bytes))
         f4 = json.loads(remote._node_prompt(node_id="F4", input_bytes=input_bytes))
+        f3_revision = json.loads(
+            remote._node_prompt(
+                node_id="F3",
+                input_bytes=input_bytes,
+                prompt_revision=remote.P4_05_F3_F4_PROMPT_REVISION,
+            )
+        )
+        f4_revision = json.loads(
+            remote._node_prompt(
+                node_id="F4",
+                input_bytes=input_bytes,
+                prompt_revision=remote.P4_05_F3_F4_PROMPT_REVISION,
+            )
+        )
 
         self.assertEqual(
             f1["schema_version"],
@@ -172,6 +186,18 @@ class Phase4RemoteFreshIntegratedProfileTests(unittest.TestCase):
                 "required_ref_revision"
             ],
             "req2web.phase4.registry.p4_02a.v1",
+        )
+        self.assertEqual(
+            f3_revision["prompt_revision"],
+            remote.P4_05_F3_F4_PROMPT_REVISION,
+        )
+        self.assertIn(
+            "treat the first row in the supplied F2 states array as the initial workflow state; do not require its name to be the literal word initial",
+            f3_revision["exact_output_contract"]["invariants"],
+        )
+        self.assertIn(
+            "assign use cases monotonically across the supplied F2 state order: use the state at the same zero-based position when available, otherwise reuse only the final supplied state",
+            f4_revision["exact_output_contract"]["invariants"],
         )
 
     def test_profile_is_exact_bf16_gpu0_no_offload_profile(self) -> None:
@@ -514,6 +540,11 @@ class Phase4RemoteFreshIntegratedArtifactTests(unittest.TestCase):
                     }
                 )
             )
+            ignored_f4_root = child_root / "attempts" / "F4"
+            ignored_f4_root.mkdir(parents=True)
+            (ignored_f4_root / "validated_node_output.json").write_bytes(
+                b'{"intentionally":"ignored-by-f1-f2-prefix"}'
+            )
 
             history = remote._build_call_history(
                 history_result_roots=(source_root, child_root),
@@ -525,17 +556,20 @@ class Phase4RemoteFreshIntegratedArtifactTests(unittest.TestCase):
                 b_input=b_input,
                 state=phase4_create_portable_authority_state(b_input),
                 history_receipt=history,
+                resume_prefix=remote.P4_05_RESUME_PREFIX_F1_F2,
             )
 
-        self.assertEqual(receipt["resumed_nodes"], ["F1", "F2", "F3"])
-        self.assertEqual(receipt["next_node"], "F4")
+        self.assertEqual(receipt["selected_prefix"], "F1-F2")
+        self.assertEqual(receipt["resumed_nodes"], ["F1", "F2"])
+        self.assertEqual(receipt["next_node"], "F3")
+        self.assertEqual(receipt["ignored_source_nodes"], ["F3", "F4"])
         self.assertEqual(
             history["aggregate_per_node_generate_started_count"],
             {"F1": 1, "F2": 1, "F3": 1, "F4": 0},
         )
         self.assertEqual(
             list(restored["node_results"]),
-            ["F1", "F2", "F3"],
+            ["F1", "F2"],
         )
 
 

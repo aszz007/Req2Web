@@ -61,7 +61,7 @@ P4_05_PRE_CALL_SCHEMA_VERSION = f"{P4_05_SCHEMA_PREFIX}.pre_call.v1"
 P4_05_ATTEMPT_SCHEMA_VERSION = f"{P4_05_SCHEMA_PREFIX}.attempt.v2"
 P4_05_LEDGER_SCHEMA_VERSION = f"{P4_05_SCHEMA_PREFIX}.ledger.v1"
 P4_05_HISTORY_SCHEMA_VERSION = f"{P4_05_SCHEMA_PREFIX}.history.v1"
-P4_05_RESUME_SCHEMA_VERSION = f"{P4_05_SCHEMA_PREFIX}.resume.v2"
+P4_05_RESUME_SCHEMA_VERSION = f"{P4_05_SCHEMA_PREFIX}.resume.v3"
 P4_05_AGGREGATE_LEDGER_SCHEMA_VERSION = (
     f"{P4_05_SCHEMA_PREFIX}.aggregate_ledger.v1"
 )
@@ -85,6 +85,10 @@ P4_05_LOAD_TIMEOUT_SECONDS = 600
 P4_05_GENERATE_CALL_CAP = 1
 P4_05_TOTAL_REAL_MODEL_CALL_CAP_PER_NODE = 3
 P4_05_RETRY_COUNT = 0
+P4_05_F3_F4_PROMPT_REVISION = "f3_f4_unique_reachable_acceptance_v1"
+P4_05_REVISION_PROMPT_NODES = ("F3", "F4")
+P4_05_RESUME_PREFIX_F1_F2 = "F1-F2"
+P4_05_RESUME_PREFIX_F1_F3 = "F1-F3"
 P4_05_DTYPE = "bfloat16"
 P4_05_QUANTIZATION = "none"
 P4_05_COMPUTE_DTYPE = "bfloat16"
@@ -325,6 +329,36 @@ def _expected_input_classes(node_id: str) -> tuple[str, ...]:
         raise Phase4RemoteFreshIntegratedError(
             f"unknown P4-05 input node: {node_id}"
         ) from exc
+
+
+def _validate_prompt_revision(
+    *,
+    node_id: str,
+    prompt_revision: str | None,
+) -> None:
+    if prompt_revision is None:
+        return
+    if (
+        prompt_revision != P4_05_F3_F4_PROMPT_REVISION
+        or node_id not in P4_05_REVISION_PROMPT_NODES
+    ):
+        raise Phase4RemoteFreshIntegratedError(
+            "unsupported P4-05 prompt revision for node"
+        )
+
+
+def _prompt_revision_for_node(
+    *,
+    node_id: str,
+    prompt_revision: str | None,
+) -> str | None:
+    _validate_prompt_revision(
+        node_id=node_id,
+        prompt_revision=prompt_revision,
+    )
+    if node_id not in P4_05_REVISION_PROMPT_NODES:
+        return None
+    return prompt_revision
 
 
 def _validated_node_output(
@@ -1007,8 +1041,13 @@ def create_p4_05_policy(
     profile: RemoteFreshIntegratedProfile,
     case_id: str = P4_05_CASE_ID,
     request_id: str = P4_05_REQUEST_ID,
+    prompt_revision: str | None = None,
     parent_experiment_binding: Mapping[str, object] | None = None,
 ) -> dict[str, object]:
+    if prompt_revision is not None and prompt_revision != P4_05_F3_F4_PROMPT_REVISION:
+        raise Phase4RemoteFreshIntegratedError(
+            "unsupported P4-05 policy prompt revision"
+        )
     profile.validate()
     parent_binding = _validate_parent_experiment_binding(
         parent_experiment_binding,
@@ -1059,6 +1098,9 @@ def create_p4_05_policy(
             "assembled, and downstream delivery statuses remain separate"
         ),
     }
+    if prompt_revision is not None:
+        root["prompt_revision"] = prompt_revision
+        root["prompt_revision_nodes"] = list(P4_05_REVISION_PROMPT_NODES)
     root["policy_id"] = _identity(
         {key: value for key, value in root.items()},
         revision=P4_05_POLICY_SCHEMA_VERSION,
@@ -1136,6 +1178,17 @@ class _FreshIntegratedBackend(_remote._RemoteTransformersBackend):
             raise Phase4RemoteFreshIntegratedError(
                 f"{node_id} request binding drifted"
             )
+        request_prompt_revision = request.get("prompt_revision")
+        if request_prompt_revision is not None and not isinstance(
+            request_prompt_revision, str
+        ):
+            raise Phase4RemoteFreshIntegratedError(
+                f"{node_id} request prompt revision is invalid"
+            )
+        _validate_prompt_revision(
+            node_id=node_id,
+            prompt_revision=request_prompt_revision,
+        )
         try:
             input_value = _strict_json(input_bytes, f"{node_id} input")
             _validate_node_input_value(input_value, node_id)
@@ -1150,6 +1203,8 @@ class _FreshIntegratedBackend(_remote._RemoteTransformersBackend):
                 prompt_value.get("schema_version")
                 != P4_05_PROMPT_SCHEMA_VERSION
                 or prompt_value.get("node_id") != node_id
+                or prompt_value.get("prompt_revision")
+                != request_prompt_revision
                 or prompt_value.get("input_identity")
                 != _identity(
                     input_bytes,
@@ -1679,7 +1734,12 @@ def _node_prompt(
     *,
     node_id: str,
     input_bytes: bytes,
+    prompt_revision: str | None = None,
 ) -> bytes:
+    prompt_revision = _prompt_revision_for_node(
+        node_id=node_id,
+        prompt_revision=prompt_revision,
+    )
     output_contracts: dict[str, dict[str, object]] = {
         "F1": {
             "exact_top_level_keys": [
@@ -1827,6 +1887,79 @@ def _node_prompt(
         }[node_id],
         "exact_output_contract": output_contracts[node_id],
     }
+    if prompt_revision == P4_05_F3_F4_PROMPT_REVISION:
+        if node_id == "F3":
+            output_contracts["F3"]["invariants"] = [
+                *output_contracts["F3"]["invariants"],
+                (
+                    "treat the first row in the supplied F2 states array as "
+                    "the initial workflow state; do not require its name to "
+                    "be the literal word initial"
+                ),
+                (
+                    "follow canonical B use-case order and create deterministic "
+                    "state progressions from the initial state"
+                ),
+                (
+                    "for every supplied F2 state, include at least one same-state "
+                    "interaction that performs in-state work so that state is a "
+                    "non-empty acceptance target"
+                ),
+                (
+                    "for every adjacent pair in supplied F2 state order, include "
+                    "at least one forward transition from the earlier state to "
+                    "the later state"
+                ),
+                (
+                    "every interaction trigger component must be visible in its "
+                    "source state's visible_component_local_ids"
+                ),
+                (
+                    "same-state actions are allowed, but cannot replace the "
+                    "required forward transitions toward later workflow states"
+                ),
+                (
+                    "avoid backward transitions and avoid multiple equivalent "
+                    "forward paths for the same workflow step"
+                ),
+                "do not add or fabricate use-case reference fields",
+            ]
+        else:
+            output_contracts["F4"]["invariants"] = [
+                *output_contracts["F4"]["invariants"],
+                (
+                    "emit exactly one acceptance check for each canonical use "
+                    "case, in canonical use-case order, and put exactly that one "
+                    "use-case reference in the check"
+                ),
+                (
+                    "each state_ref must be uniquely reachable from the initial "
+                    "state through the supplied F3 interaction graph"
+                ),
+                (
+                    "assign use cases monotonically across the supplied F2 state "
+                    "order: use the state at the same zero-based position when "
+                    "available, otherwise reuse only the final supplied state"
+                ),
+                (
+                    "state_ref must match the expected outcome state for its use "
+                    "case; do not bind later use cases to the first state merely "
+                    "for reachability"
+                ),
+                (
+                    "never emit a second non-error acceptance target for the same "
+                    "use case because it would make the target ambiguous"
+                ),
+            ]
+        payload["prompt_revision"] = prompt_revision
+        payload["instructions"] = [
+            *payload["instructions"],
+            (
+                "This versioned F3/F4 revision strengthens reachability and "
+                "acceptance-target uniqueness only; do not change the schema, "
+                "registry, mapping, composition, assembler, or gates."
+            ),
+        ]
     return _canonical_bytes(payload)
 
 
@@ -1868,28 +2001,34 @@ def _node_request(
     request_id: str,
     node_id: str,
     index: int,
+    prompt_revision: str | None = None,
     parent_experiment_binding: Mapping[str, object] | None = None,
 ) -> bytes:
+    prompt_revision = _prompt_revision_for_node(
+        node_id=node_id,
+        prompt_revision=prompt_revision,
+    )
     parent_binding = _validate_parent_experiment_binding(
         parent_experiment_binding,
         case_id=case_id,
         request_id=request_id,
     )
-    return _canonical_bytes(
-        {
-            "schema_version": f"{P4_05_SCHEMA_PREFIX}.request.v1",
-            "pilot_id": P4_05_PILOT_ID,
-            "run_id": run_id,
-            "case_id": case_id,
-            "request_id": request_id,
-            "node_id": node_id,
-            "generate_call_index": index,
-            "generate_call_cap": P4_05_GENERATE_CALL_CAP,
-            "retry_count": P4_05_RETRY_COUNT,
-            "source_kind": "remote_qwen_bf16_fresh_integrated",
-            "parent_experiment_binding": parent_binding,
-        }
-    )
+    payload: dict[str, object] = {
+        "schema_version": f"{P4_05_SCHEMA_PREFIX}.request.v1",
+        "pilot_id": P4_05_PILOT_ID,
+        "run_id": run_id,
+        "case_id": case_id,
+        "request_id": request_id,
+        "node_id": node_id,
+        "generate_call_index": index,
+        "generate_call_cap": P4_05_GENERATE_CALL_CAP,
+        "retry_count": P4_05_RETRY_COUNT,
+        "source_kind": "remote_qwen_bf16_fresh_integrated",
+        "parent_experiment_binding": parent_binding,
+    }
+    if prompt_revision is not None:
+        payload["prompt_revision"] = prompt_revision
+    return _canonical_bytes(payload)
 
 
 def _pre_call_record(
@@ -1906,8 +2045,13 @@ def _pre_call_record(
     request_bytes: bytes,
     worker_id: str | None,
     worker_pid: int | None,
+    prompt_revision: str | None = None,
     parent_experiment_binding: Mapping[str, object] | None = None,
 ) -> dict[str, object]:
+    prompt_revision = _prompt_revision_for_node(
+        node_id=node_id,
+        prompt_revision=prompt_revision,
+    )
     parent_binding = _validate_parent_experiment_binding(
         parent_experiment_binding,
         case_id=case_id,
@@ -1958,6 +2102,8 @@ def _pre_call_record(
         "pre_call_fsync_required": True,
         "action_state": _action_state(model_action=True, remote_action=True),
     }
+    if prompt_revision is not None:
+        record["prompt_revision"] = prompt_revision
     record["record_id"] = _identity(
         {
             key: value
@@ -1986,14 +2132,19 @@ def _attempt_record(
     generate_started: bool,
     status: str,
     failure_code: str | None,
+    prompt_revision: str | None = None,
     parent_experiment_binding: Mapping[str, object] | None = None,
 ) -> dict[str, object]:
+    prompt_revision = _prompt_revision_for_node(
+        node_id=node_id,
+        prompt_revision=prompt_revision,
+    )
     parent_binding = _validate_parent_experiment_binding(
         parent_experiment_binding,
         case_id=case_id,
         request_id=request_id,
     )
-    return {
+    record = {
         "schema_version": P4_05_ATTEMPT_SCHEMA_VERSION,
         "pilot_id": P4_05_PILOT_ID,
         "run_id": run_id,
@@ -2048,6 +2199,9 @@ def _attempt_record(
         "failure_code": failure_code,
         "automatic_retry": False,
     }
+    if prompt_revision is not None:
+        record["prompt_revision"] = prompt_revision
+    return record
 
 
 def _call_ledger(
@@ -2086,6 +2240,18 @@ def _read_canonical_artifact(path: Path, name: str) -> object:
     if path.is_symlink() or not path.is_file():
         raise Phase4RemoteFreshIntegratedError(f"{name} is unavailable")
     return _strict_json(path.read_bytes(), name)
+
+
+def _resume_prefix_nodes(resume_prefix: str | None) -> tuple[str, ...] | None:
+    if resume_prefix is None:
+        return None
+    if resume_prefix == P4_05_RESUME_PREFIX_F1_F2:
+        return ("F1", "F2")
+    if resume_prefix == P4_05_RESUME_PREFIX_F1_F3:
+        return ("F1", "F2", "F3")
+    raise Phase4RemoteFreshIntegratedError(
+        "unsupported explicit resume prefix"
+    )
 
 
 def _build_call_history(
@@ -2227,7 +2393,9 @@ def _restore_validated_prefix(
     b_input: Mapping[str, object],
     state: Mapping[str, object],
     history_receipt: Mapping[str, object],
+    resume_prefix: str | None = None,
 ) -> tuple[dict[str, object], dict[str, object]]:
+    selected_prefix_nodes = _resume_prefix_nodes(resume_prefix)
     source_root = _safe_path(
         resume_from_result_root,
         "resume source result root",
@@ -2284,6 +2452,7 @@ def _restore_validated_prefix(
             or source_resume.get("schema_version")
             not in {
                 f"{P4_05_SCHEMA_PREFIX}.resume.v1",
+                f"{P4_05_SCHEMA_PREFIX}.resume.v2",
                 P4_05_RESUME_SCHEMA_VERSION,
             }
             or not isinstance(source_resume.get("source_result_root"), str)
@@ -2312,7 +2481,12 @@ def _restore_validated_prefix(
     resumed_nodes: list[str] = []
     node_bindings: list[dict[str, object]] = []
     encountered_gap = False
-    for node_id in NODE_ORDER:
+    nodes_to_restore = (
+        tuple(NODE_ORDER)
+        if selected_prefix_nodes is None
+        else selected_prefix_nodes
+    )
+    for node_id in nodes_to_restore:
         candidate_roots = [
             candidate_root
             for candidate_root in source_chain
@@ -2417,6 +2591,17 @@ def _restore_validated_prefix(
         raise Phase4RemoteFreshIntegratedError(
             "resume source must contain a non-empty proper validated prefix"
         )
+    if selected_prefix_nodes is not None and resumed_nodes != list(
+        selected_prefix_nodes
+    ):
+        raise Phase4RemoteFreshIntegratedError(
+            "resume source does not contain the requested validated prefix"
+        )
+    selected_prefix = (
+        resume_prefix
+        if resume_prefix is not None
+        else "-".join(resumed_nodes)
+    )
     body: dict[str, object] = {
         "schema_version": P4_05_RESUME_SCHEMA_VERSION,
         "pilot_id": P4_05_PILOT_ID,
@@ -2430,8 +2615,12 @@ def _restore_validated_prefix(
             primary_source_ledger,
             revision=P4_05_LEDGER_SCHEMA_VERSION,
         ),
+        "selected_prefix": selected_prefix,
         "resumed_nodes": resumed_nodes,
         "next_node": NODE_ORDER[len(resumed_nodes)],
+        "ignored_source_nodes": [
+            node_id for node_id in NODE_ORDER if node_id not in resumed_nodes
+        ],
         "node_bindings": node_bindings,
         "model_generate_calls": 0,
         "automatic_retry": False,
@@ -2521,6 +2710,7 @@ def prepare_phase4_remote_qwen_fresh_integrated(
     result_root: Path,
     run_id: str | None = None,
     b_input: Mapping[str, object] | None = None,
+    prompt_revision: str | None = None,
     parent_experiment_binding: Mapping[str, object] | None = None,
 ) -> dict[str, object]:
     """Create the no-generation P4-05 preflight and profile artifacts."""
@@ -2570,6 +2760,10 @@ def prepare_phase4_remote_qwen_fresh_integrated(
         gpu_facts=gpu_facts,
     )
     selected_run_id = run_id or f"{P4_05_RUN_PREFIX}{uuid.uuid4().hex[:16]}"
+    if prompt_revision is not None and prompt_revision != P4_05_F3_F4_PROMPT_REVISION:
+        raise Phase4RemoteFreshIntegratedError(
+            "unsupported P4-05 preparation prompt revision"
+        )
     parent_binding = _validate_parent_experiment_binding(
         parent_experiment_binding,
         case_id=str(selected_b_input["case_id"]),
@@ -2581,6 +2775,7 @@ def prepare_phase4_remote_qwen_fresh_integrated(
         profile=profile,
         case_id=str(selected_b_input["case_id"]),
         request_id=str(selected_b_input["request_id"]),
+        prompt_revision=prompt_revision,
         parent_experiment_binding=parent_binding,
     )
     preflight = {
@@ -2610,6 +2805,9 @@ def prepare_phase4_remote_qwen_fresh_integrated(
         "run_occurred": False,
         "downstream": "not_executed",
     }
+    if prompt_revision is not None:
+        preflight["prompt_revision"] = prompt_revision
+        preflight["prompt_revision_nodes"] = list(P4_05_REVISION_PROMPT_NODES)
     _write_fsync(result_root / "model_inventory.json", _canonical_bytes(inventory))
     _write_fsync(result_root / "remote_profile.json", profile.canonical_bytes())
     _write_fsync(result_root / "p4_05_policy.json", _canonical_bytes(policy))
@@ -2643,7 +2841,9 @@ def run_phase4_remote_qwen_fresh_integrated(
     console: object | None = None,
     history_result_roots: tuple[Path, ...] = (),
     resume_from_result_root: Path | None = None,
+    resume_prefix: str | None = None,
     b_input: Mapping[str, object] | None = None,
+    prompt_revision: str | None = None,
     expected_profile_identity: Mapping[str, object] | None = None,
     expected_model_inventory_identity: Mapping[str, object] | None = None,
     parent_experiment_binding: Mapping[str, object] | None = None,
@@ -2661,6 +2861,7 @@ def run_phase4_remote_qwen_fresh_integrated(
         result_root=result_root,
         run_id=run_id,
         b_input=b_input,
+        prompt_revision=prompt_revision,
         parent_experiment_binding=parent_experiment_binding,
     )
     result_root = prepared["result_root"]
@@ -2706,6 +2907,7 @@ def run_phase4_remote_qwen_fresh_integrated(
             b_input=b_input,
             state=state,
             history_receipt=history_receipt,
+            resume_prefix=resume_prefix,
         )
     resumed_nodes = (
         set()
@@ -2787,7 +2989,20 @@ def run_phase4_remote_qwen_fresh_integrated(
                 state=state,
                 authority_projection=authority,
             )
-            prompt_bytes = _node_prompt(node_id=node_id, input_bytes=input_bytes)
+            node_prompt_revision = (
+                prompt_revision
+                if node_id in P4_05_REVISION_PROMPT_NODES
+                else None
+            )
+            _validate_prompt_revision(
+                node_id=node_id,
+                prompt_revision=node_prompt_revision,
+            )
+            prompt_bytes = _node_prompt(
+                node_id=node_id,
+                input_bytes=input_bytes,
+                prompt_revision=node_prompt_revision,
+            )
             config_bytes = _node_config(node_id=node_id, profile=profile)
             request_bytes = _node_request(
                 run_id=run_id,
@@ -2795,6 +3010,7 @@ def run_phase4_remote_qwen_fresh_integrated(
                 request_id=str(b_input["request_id"]),
                 node_id=node_id,
                 index=index,
+                prompt_revision=node_prompt_revision,
                 parent_experiment_binding=parent_binding,
             )
             pre_call = _pre_call_record(
@@ -2810,6 +3026,7 @@ def run_phase4_remote_qwen_fresh_integrated(
                 request_bytes=request_bytes,
                 worker_id=worker.worker_id,
                 worker_pid=worker.worker_pid,
+                prompt_revision=node_prompt_revision,
                 parent_experiment_binding=parent_binding,
             )
             attempt_root = result_root / "attempts" / node_id
@@ -2886,6 +3103,7 @@ def run_phase4_remote_qwen_fresh_integrated(
                     generate_started=True,
                     status="validated",
                     failure_code=None,
+                    prompt_revision=node_prompt_revision,
                     parent_experiment_binding=parent_binding,
                 )
                 node_results[node_id] = attempt
@@ -2929,6 +3147,7 @@ def run_phase4_remote_qwen_fresh_integrated(
                     generate_started=generate_started,
                     status="failed_closed",
                     failure_code=failure_code,
+                    prompt_revision=node_prompt_revision,
                     parent_experiment_binding=parent_binding,
                 )
                 node_results[node_id] = attempt
@@ -3026,6 +3245,9 @@ def run_phase4_remote_qwen_fresh_integrated(
                 ),
                 "failure": None,
             }
+            if prompt_revision is not None:
+                source_result["prompt_revision"] = prompt_revision
+                source_result["resume_prefix"] = resume_prefix
             _write_fsync(
                 result_root / "revalidation_result.json",
                 _canonical_bytes(source_result),
@@ -3216,7 +3438,7 @@ def run_phase4_remote_qwen_fresh_integrated(
             result_root / "supervisor_receipt.json",
             _canonical_bytes(supervisor),
         )
-    return {
+    result = {
         "schema_version": P4_05_RESULT_SCHEMA_VERSION,
         "pilot_id": P4_05_PILOT_ID,
         "run_id": run_id,
@@ -3258,6 +3480,10 @@ def run_phase4_remote_qwen_fresh_integrated(
             "H1, browser, or formal quality"
         ),
     }
+    if prompt_revision is not None:
+        result["prompt_revision"] = prompt_revision
+        result["resume_prefix"] = resume_prefix
+    return result
 
 
 def main_worker(argv: list[str]) -> int:
@@ -3275,10 +3501,13 @@ __all__ = [
     "P4_05_MODEL_CONTEXT_TOKENS",
     "P4_05_PARENT_BINDING_SCHEMA_VERSION",
     "P4_05_PILOT_ID",
+    "P4_05_F3_F4_PROMPT_REVISION",
     "P4_05_PRE_CALL_SCHEMA_VERSION",
     "P4_05_QUANTIZATION",
     "P4_05_REQUEST_ID",
     "P4_05_RUN_PREFIX",
+    "P4_05_RESUME_PREFIX_F1_F2",
+    "P4_05_RESUME_PREFIX_F1_F3",
     "P4_05_STABILITY_PROFILE_BINDING_SCHEMA_VERSION",
     "P4_05_SUPERVISOR_SCHEMA_VERSION",
     "P4_05_TIMEOUT_SECONDS",

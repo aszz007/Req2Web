@@ -484,6 +484,9 @@ class Phase4RemoteQwenStabilityCliTests(unittest.TestCase):
             "--preflight-only",
             "--confirm-ten-case-baseline",
             "--resume-existing",
+            "--f3-f4-revision",
+            "--baseline-root",
+            "--confirm-f3-f4-revision",
         ):
             self.assertIn(option, help_text)
 
@@ -596,6 +599,64 @@ class Phase4RemoteQwenStabilityCliTests(unittest.TestCase):
         ):
             self.assertIn(fragment, output)
 
+    def test_revision_dispatches_with_baseline_binding_and_new_call_summary(self) -> None:
+        result_root = Path("C:/p4-05-test-only/stability-revision")
+        baseline_root = _ROOT
+        summary = {
+            "revision_complete": True,
+            "aggregate": {
+                "case_count": 10,
+                "total_model_generate_calls": 20,
+                "f4_raw_direct_pass_count": 8,
+                "f4_normalized_case_count": 0,
+                "repair_attempted_count": 2,
+                "repair_success_count": 1,
+                "repair_failed_count": 1,
+                "fallback_attempted_count": 1,
+                "g0_fallback_count": 1,
+                "delivery_success_count": 10,
+                "failed_closed_count": 0,
+            },
+            "new_model_generate_calls": 20,
+        }
+        stdout = io.StringIO()
+        stderr = io.StringIO()
+        with patch.object(
+            runtime,
+            "run_phase4_remote_qwen_f3_f4_prompt_revision",
+            return_value=summary,
+        ) as run, patch("sys.stdout", stdout), patch("sys.stderr", stderr):
+            code = cli.main(
+                self._common_args(result_root)
+                + [
+                    "--run-id",
+                    "p4-05-test-revision",
+                    "--f3-f4-revision",
+                    "--baseline-root",
+                    str(baseline_root),
+                    "--confirm-f3-f4-revision",
+                ]
+            )
+        self.assertEqual(code, 0)
+        self.assertEqual(
+            run.call_args.kwargs,
+            {
+                "model_root": _ROOT.resolve(strict=True),
+                "integrity_evidence": (
+                    _ROOT / "docs" / "project_memory.md"
+                ).resolve(strict=True),
+                "baseline_root": baseline_root.resolve(strict=True),
+                "result_root": result_root.resolve(strict=False),
+                "confirm_f3_f4_prompt_revision": True,
+                "run_id": "p4-05-test-revision",
+                "console": stderr,
+                "resume_existing": False,
+            },
+        )
+        output = stdout.getvalue()
+        self.assertIn("status=revision_complete", output)
+        self.assertIn("new_model_generate_calls=20", output)
+
     def test_fresh_runner_exception_is_reported_fail_closed(self) -> None:
         stderr = io.StringIO()
         with patch.object(
@@ -637,6 +698,40 @@ class Phase4RemoteQwenStabilityCliTests(unittest.TestCase):
 
 
 class Phase4RemoteQwenStabilityRuntimeTests(unittest.TestCase):
+    def test_revision_baseline_binding_is_hash_bound_and_rejects_drift(self) -> None:
+        baseline_summary = {
+            "baseline_complete": True,
+            "experiment_mode": "baseline",
+            "case_set_identity": {"sha256": "case-set"},
+            "policy_identity": {"sha256": "policy"},
+            "summary_identity": {"sha256": "summary"},
+            "profile_identity": _PROFILE_IDENTITY,
+            "model_inventory_identity": _INVENTORY_IDENTITY,
+            "aggregate": {
+                "per_node_called_count": {
+                    node_id: runtime.CASE_COUNT
+                    for node_id in runtime._fresh.NODE_ORDER
+                },
+                "total_model_generate_calls": runtime.BASELINE_TOTAL_CALL_CAP,
+            },
+        }
+        prepared = {
+            "result_root": Path("C:/p4-05-test-only/baseline"),
+            "run_id": "baseline-run",
+            "case_set": {},
+            "summary": baseline_summary,
+        }
+        binding = runtime._build_revision_baseline_binding(
+            baseline_prepared=prepared,
+        )
+        tampered = dict(binding)
+        tampered["baseline_run_id"] = "other-run"
+        with self.assertRaises(runtime.Phase4RemoteQwenStabilityError):
+            runtime._validate_revision_baseline_binding(
+                tampered,
+                baseline_prepared=prepared,
+            )
+
     def test_prepare_freezes_case_set_and_no_model_policy(self) -> None:
         result_root = (
             _ROOT
@@ -966,6 +1061,60 @@ class Phase4RemoteQwenStabilityRuntimeTests(unittest.TestCase):
         self.assertEqual(aggregate["fallback_attempted_count"], 10)
         self.assertEqual(aggregate["g0_fallback_count"], 10)
         self.assertEqual(aggregate["system_adjustment_rate"], 1.0)
+
+    def test_revision_aggregate_keeps_new_and_historical_call_counts(self) -> None:
+        case_result = {
+            "status": "delivery_terminal_success",
+            "per_node_generate_calls": {
+                "F1": 0,
+                "F2": 0,
+                "F3": 1,
+                "F4": 1,
+            },
+            "per_node_raw_contract_pass": {
+                node_id: True for node_id in runtime._fresh.NODE_ORDER
+            },
+            "per_node_failure_codes": {
+                node_id: None for node_id in runtime._fresh.NODE_ORDER
+            },
+            "historical_per_node_generate_calls": {
+                node_id: 1 for node_id in runtime._fresh.NODE_ORDER
+            },
+            "aggregate_per_node_generate_calls": {
+                "F1": 1,
+                "F2": 1,
+                "F3": 2,
+                "F4": 2,
+            },
+            "f4_called": True,
+            "f4_raw_direct_pass": True,
+            "f4_normalization_used": False,
+            "model_success": True,
+            "composition_pass": True,
+            "assembler_pass": True,
+            "downstream_first_pass_success": True,
+            "repair_attempted": False,
+            "repair_success": False,
+            "repair_failed": False,
+            "deterministic_repair_success": False,
+            "fallback_attempted": False,
+            "g0_fallback_success": False,
+            "delivery_success": True,
+            "system_adjustment_used": False,
+            "total_model_generate_calls": 2,
+            "failure_code": None,
+        }
+        aggregate = runtime._aggregate([case_result] * 10)
+        self.assertEqual(aggregate["total_model_generate_calls"], 20)
+        self.assertEqual(
+            aggregate["historical_per_node_generate_started_count"],
+            {"F1": 10, "F2": 10, "F3": 10, "F4": 10},
+        )
+        self.assertEqual(
+            aggregate["aggregate_per_node_generate_started_count"],
+            {"F1": 10, "F2": 10, "F3": 20, "F4": 20},
+        )
+        self.assertEqual(aggregate["aggregate_total_model_generate_calls"], 60)
 
     def test_resume_skips_progress_and_seals_existing_child_without_progress(
         self,

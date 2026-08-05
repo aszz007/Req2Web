@@ -46,9 +46,23 @@ STABILITY_ROOT_MARKER = ".req2web-phase4-p4-05-remote-qwen-stability-root"
 STABILITY_EXPERIMENT_ANCHOR_NAME = (
     ".req2web-phase4-p4-05-stability-experiment-anchor.json"
 )
+STABILITY_REVISION_EXPERIMENT_ANCHOR_NAME = (
+    ".req2web-phase4-p4-05-stability-revision-experiment-anchor.json"
+)
 BASELINE_PER_CASE_PER_NODE_CALL_CAP = 1
 BASELINE_TOTAL_CALL_CAP = CASE_COUNT * len(_fresh.NODE_ORDER)
 PROMPT_CONTRACT_REVISION_CAP = 1
+F3_F4_PROMPT_REVISION = _fresh.P4_05_F3_F4_PROMPT_REVISION
+F3_F4_REVISION_MODE = "f3_f4_prompt_revision"
+F3_F4_REVISION_NODES = ("F3", "F4")
+F3_F4_REVISION_PER_CASE_PER_NODE_CALL_CAP = 1
+F3_F4_REVISION_TOTAL_CALL_CAP = (
+    CASE_COUNT * len(F3_F4_REVISION_NODES)
+)
+F3_F4_REVISION_RUN_PREFIX = "p4-05-remote-qwen-stability-f3-f4-revision-"
+STABILITY_REVISION_BASELINE_BINDING_SCHEMA_VERSION = (
+    f"{STABILITY_SCHEMA_PREFIX}.revision_baseline_binding.v1"
+)
 
 
 class Phase4RemoteQwenStabilityError(ValueError):
@@ -131,7 +145,13 @@ def _read_required_bytes(path: Path, name: str) -> bytes:
     return raw
 
 
-def _experiment_anchor_path(result_root: Path) -> Path:
+def _experiment_anchor_path(
+    result_root: Path,
+    *,
+    revision_mode: bool = False,
+) -> Path:
+    if revision_mode:
+        return result_root / STABILITY_REVISION_EXPERIMENT_ANCHOR_NAME
     return result_root.parent / STABILITY_EXPERIMENT_ANCHOR_NAME
 
 
@@ -234,6 +254,7 @@ def _create_experiment_anchor(
     policy_identity: Mapping[str, object],
     profile_identity: Mapping[str, object],
     model_inventory_identity: Mapping[str, object],
+    revision_mode: bool = False,
 ) -> dict[str, object]:
     experiment_root = {
         "case_set_id": CASE_SET_ID,
@@ -262,7 +283,7 @@ def _create_experiment_anchor(
         ),
     }
     _fresh._write_fsync(
-        _experiment_anchor_path(result_root),
+        _experiment_anchor_path(result_root, revision_mode=revision_mode),
         _fresh._canonical_bytes(anchor),
     )
     return anchor
@@ -320,7 +341,7 @@ def _child_parent_experiment_binding(
     index: int,
     case: Mapping[str, object],
 ) -> dict[str, object]:
-    return {
+    result = {
         "schema_version": _fresh.P4_05_PARENT_BINDING_SCHEMA_VERSION,
         "experiment_id": CASE_SET_ID,
         "experiment_run_id": experiment_run_id,
@@ -331,6 +352,7 @@ def _child_parent_experiment_binding(
         "case_id": case["case_id"],
         "request_id": case["request_id"],
     }
+    return result
 
 
 def _validate_marker(result_root: Path) -> None:
@@ -400,6 +422,9 @@ def _validate_policy_artifact(
     expected_profile_identity: Mapping[str, object] | None,
     expected_model_inventory_identity: Mapping[str, object] | None,
     parent_experiment_binding: Mapping[str, object] | None,
+    expected_experiment_mode: str = "baseline",
+    expected_prompt_revision: str | None = None,
+    expected_baseline_binding: Mapping[str, object] | None = None,
 ) -> dict[str, object]:
     data = dict(policy)
     if data.get("schema_version") != STABILITY_POLICY_SCHEMA_VERSION:
@@ -450,6 +475,47 @@ def _validate_policy_artifact(
     if data.get("output_truncation") is not False:
         raise Phase4RemoteQwenStabilityError(
             "stability policy output truncation boundary drifted"
+        )
+    actual_mode = data.get("experiment_mode", "baseline")
+    if actual_mode != expected_experiment_mode:
+        raise Phase4RemoteQwenStabilityError(
+            "stability policy experiment mode drifted"
+        )
+    if actual_mode == F3_F4_REVISION_MODE:
+        if data.get("prompt_revision") != F3_F4_PROMPT_REVISION:
+            raise Phase4RemoteQwenStabilityError(
+                "stability revision prompt identity drifted"
+            )
+        if data.get("revision_nodes") != list(F3_F4_REVISION_NODES):
+            raise Phase4RemoteQwenStabilityError(
+                "stability revision node selection drifted"
+            )
+        if (
+            data.get("revision_per_case_per_node_call_cap")
+            != F3_F4_REVISION_PER_CASE_PER_NODE_CALL_CAP
+            or data.get("revision_total_call_cap")
+            != F3_F4_REVISION_TOTAL_CALL_CAP
+        ):
+            raise Phase4RemoteQwenStabilityError(
+                "stability revision call budget drifted"
+            )
+        if expected_prompt_revision != F3_F4_PROMPT_REVISION:
+            raise Phase4RemoteQwenStabilityError(
+                "stability revision prompt expectation is missing"
+            )
+        if expected_baseline_binding is not None:
+            _assert_same_canonical(
+                data.get("baseline_binding"),
+                dict(expected_baseline_binding),
+                "stability revision baseline binding drifted",
+            )
+    elif actual_mode != "baseline":
+        raise Phase4RemoteQwenStabilityError(
+            "unknown stability experiment mode"
+        )
+    elif expected_prompt_revision is not None:
+        raise Phase4RemoteQwenStabilityError(
+            "baseline policy unexpectedly contains a prompt revision"
         )
     _validate_identity_match(
         data.get("model_inventory_identity"),
@@ -531,6 +597,25 @@ def _validate_preflight_artifact(
         expected_model_inventory_identity,
         "stability preflight model inventory identity",
     )
+    experiment_mode = policy.get("experiment_mode", "baseline")
+    if data.get("experiment_mode", "baseline") != experiment_mode:
+        raise Phase4RemoteQwenStabilityError(
+            "stability preflight experiment mode drifted"
+        )
+    if experiment_mode == F3_F4_REVISION_MODE:
+        if data.get("prompt_revision") != F3_F4_PROMPT_REVISION:
+            raise Phase4RemoteQwenStabilityError(
+                "stability preflight prompt revision drifted"
+            )
+        if data.get("revision_total_call_cap") != F3_F4_REVISION_TOTAL_CALL_CAP:
+            raise Phase4RemoteQwenStabilityError(
+                "stability preflight revision budget drifted"
+            )
+        _assert_same_canonical(
+            data.get("baseline_binding"),
+            policy.get("baseline_binding"),
+            "stability preflight baseline binding drifted",
+        )
     stored_parent = data.get("parent_experiment_binding")
     if parent_experiment_binding is not None:
         _assert_same_canonical(
@@ -550,7 +635,27 @@ def _create_policy(
     parent_experiment_binding: Mapping[str, object] | None,
     expected_profile_identity: Mapping[str, object] | None,
     expected_model_inventory_identity: Mapping[str, object] | None,
+    experiment_mode: str = "baseline",
+    prompt_revision: str | None = None,
+    baseline_binding: Mapping[str, object] | None = None,
 ) -> dict[str, object]:
+    if experiment_mode not in {"baseline", F3_F4_REVISION_MODE}:
+        raise Phase4RemoteQwenStabilityError(
+            "unsupported stability experiment mode"
+        )
+    if experiment_mode == F3_F4_REVISION_MODE:
+        if prompt_revision != F3_F4_PROMPT_REVISION:
+            raise Phase4RemoteQwenStabilityError(
+                "F3/F4 revision requires its exact prompt revision"
+            )
+        if baseline_binding is None:
+            raise Phase4RemoteQwenStabilityError(
+                "F3/F4 revision requires a completed baseline binding"
+            )
+    elif prompt_revision is not None or baseline_binding is not None:
+        raise Phase4RemoteQwenStabilityError(
+            "baseline policy cannot carry revision-only bindings"
+        )
     validated_case_set = validate_stability_case_set(copy.deepcopy(dict(case_set)))
     profile.validate()
     profile_identity = _profile_identity(profile)
@@ -621,6 +726,19 @@ def _create_policy(
             remote_action=False,
         ),
     }
+    if experiment_mode == F3_F4_REVISION_MODE:
+        root.update(
+            {
+                "experiment_mode": F3_F4_REVISION_MODE,
+                "prompt_revision": F3_F4_PROMPT_REVISION,
+                "revision_nodes": list(F3_F4_REVISION_NODES),
+                "revision_per_case_per_node_call_cap": (
+                    F3_F4_REVISION_PER_CASE_PER_NODE_CALL_CAP
+                ),
+                "revision_total_call_cap": F3_F4_REVISION_TOTAL_CALL_CAP,
+                "baseline_binding": copy.deepcopy(dict(baseline_binding)),
+            }
+        )
     return {
         **root,
         "policy_identity": _fresh._identity(
@@ -639,6 +757,9 @@ def _load_existing_prepared(
     expected_profile_identity: Mapping[str, object] | None,
     expected_model_inventory_identity: Mapping[str, object] | None,
     parent_experiment_binding: Mapping[str, object] | None,
+    experiment_mode: str = "baseline",
+    prompt_revision: str | None = None,
+    expected_baseline_binding: Mapping[str, object] | None = None,
 ) -> dict[str, object]:
     if not result_root.is_dir():
         raise Phase4RemoteQwenStabilityError(
@@ -669,6 +790,9 @@ def _load_existing_prepared(
         expected_profile_identity=expected_profile_identity,
         expected_model_inventory_identity=expected_model_inventory_identity,
         parent_experiment_binding=parent_experiment_binding,
+        expected_experiment_mode=experiment_mode,
+        expected_prompt_revision=prompt_revision,
+        expected_baseline_binding=expected_baseline_binding,
     )
     stored_profile_identity = _require_mapping(
         validated_policy.get("profile_identity"),
@@ -698,7 +822,10 @@ def _load_existing_prepared(
         ),
     )
     anchor = _read_json(
-        _experiment_anchor_path(result_root),
+        _experiment_anchor_path(
+            result_root,
+            revision_mode=experiment_mode == F3_F4_REVISION_MODE,
+        ),
         required=True,
     )
     assert anchor is not None
@@ -725,6 +852,9 @@ def _load_existing_prepared(
         "preflight": preflight,
         "experiment_anchor": validated_anchor,
         "summary": summary,
+        "experiment_mode": validated_policy.get("experiment_mode", "baseline"),
+        "prompt_revision": validated_policy.get("prompt_revision"),
+        "baseline_binding": validated_policy.get("baseline_binding"),
     }
     if summary is not None:
         _validate_summary(
@@ -739,6 +869,85 @@ def _load_existing_prepared(
             ),
         )
     return prepared
+
+
+def _build_revision_baseline_binding(
+    *,
+    baseline_prepared: Mapping[str, object],
+) -> dict[str, object]:
+    baseline_root = baseline_prepared.get("result_root")
+    summary = baseline_prepared.get("summary")
+    case_set = baseline_prepared.get("case_set")
+    if not isinstance(baseline_root, Path):
+        raise Phase4RemoteQwenStabilityError(
+            "revision baseline result root is unavailable"
+        )
+    if not isinstance(summary, Mapping) or not isinstance(case_set, Mapping):
+        raise Phase4RemoteQwenStabilityError(
+            "revision requires a completed baseline summary"
+        )
+    if (
+        summary.get("baseline_complete") is not True
+        or summary.get("experiment_mode", "baseline") != "baseline"
+    ):
+        raise Phase4RemoteQwenStabilityError(
+            "revision baseline root is not a completed baseline experiment"
+        )
+    aggregate = summary.get("aggregate")
+    if not isinstance(aggregate, Mapping):
+        raise Phase4RemoteQwenStabilityError(
+            "revision baseline aggregate is unavailable"
+        )
+    expected_counts = {node_id: CASE_COUNT for node_id in _fresh.NODE_ORDER}
+    if aggregate.get("per_node_called_count") != expected_counts:
+        raise Phase4RemoteQwenStabilityError(
+            "revision baseline must contain one call for every node in every case"
+        )
+    if aggregate.get("total_model_generate_calls") != BASELINE_TOTAL_CALL_CAP:
+        raise Phase4RemoteQwenStabilityError(
+            "revision baseline total call count is incomplete"
+        )
+    root = {
+        "baseline_result_root": str(baseline_root.resolve(strict=False)),
+        "baseline_run_id": baseline_prepared.get("run_id"),
+        "baseline_case_set_identity": summary.get("case_set_identity"),
+        "baseline_policy_identity": summary.get("policy_identity"),
+        "baseline_summary_identity": summary.get("summary_identity"),
+        "baseline_profile_identity": summary.get("profile_identity"),
+        "baseline_model_inventory_identity": summary.get(
+            "model_inventory_identity"
+        ),
+        "baseline_per_node_generate_started_count": expected_counts,
+        "baseline_total_model_generate_calls": BASELINE_TOTAL_CALL_CAP,
+    }
+    if not isinstance(root["baseline_run_id"], str) or not root["baseline_run_id"]:
+        raise Phase4RemoteQwenStabilityError(
+            "revision baseline run identity is invalid"
+        )
+    binding = {
+        **root,
+        "binding_identity": _fresh._identity(
+            root,
+            revision=STABILITY_REVISION_BASELINE_BINDING_SCHEMA_VERSION,
+        ),
+    }
+    return binding
+
+
+def _validate_revision_baseline_binding(
+    binding: Mapping[str, object],
+    *,
+    baseline_prepared: Mapping[str, object],
+) -> dict[str, object]:
+    expected = _build_revision_baseline_binding(
+        baseline_prepared=baseline_prepared,
+    )
+    _assert_same_canonical(
+        binding,
+        expected,
+        "revision baseline binding drifted",
+    )
+    return dict(expected)
 
 
 def prepare_phase4_remote_qwen_stability(
@@ -931,6 +1140,236 @@ def prepare_phase4_remote_qwen_stability(
     }
 
 
+def prepare_phase4_remote_qwen_f3_f4_prompt_revision(
+    *,
+    model_root: Path,
+    integrity_evidence: Path,
+    baseline_root: Path,
+    result_root: Path,
+    run_id: str | None = None,
+    resume_existing: bool = False,
+    expected_profile_identity: Mapping[str, object] | None = None,
+    expected_model_inventory_identity: Mapping[str, object] | None = None,
+    parent_experiment_binding: Mapping[str, object] | None = None,
+) -> dict[str, object]:
+    """Prepare or load the explicit F3/F4 prompt-revision experiment."""
+
+    _fresh._offline_process()
+    model_root = _fresh._safe_path(model_root, "model root", directory=True)
+    integrity_evidence = _fresh._safe_path(
+        integrity_evidence,
+        "integrity evidence",
+        directory=False,
+    )
+    baseline_root = _fresh._safe_path(
+        baseline_root,
+        "baseline result root",
+        directory=True,
+    )
+    result_root = _fresh._safe_path(result_root, "result root")
+    if baseline_root == result_root:
+        raise Phase4RemoteQwenStabilityError(
+            "revision result root must differ from the completed baseline root"
+        )
+
+    baseline_prepared = _load_existing_prepared(
+        model_root=model_root,
+        integrity_evidence=integrity_evidence,
+        result_root=baseline_root,
+        run_id=None,
+        expected_profile_identity=expected_profile_identity,
+        expected_model_inventory_identity=expected_model_inventory_identity,
+        parent_experiment_binding=None,
+        experiment_mode="baseline",
+    )
+    baseline_binding = _build_revision_baseline_binding(
+        baseline_prepared=baseline_prepared,
+    )
+
+    revision_anchor_path = _experiment_anchor_path(
+        result_root,
+        revision_mode=True,
+    )
+    existing_anchor = _read_json(revision_anchor_path)
+    if existing_anchor is not None:
+        _validate_experiment_anchor(
+            existing_anchor,
+            result_root=result_root,
+            run_id=run_id,
+        )
+        if not result_root.is_dir():
+            raise Phase4RemoteQwenStabilityError(
+                "the anchored revision result root is missing"
+            )
+
+    if result_root.exists():
+        if result_root.is_symlink() or not result_root.is_dir():
+            raise Phase4RemoteQwenStabilityError(
+                "revision result root must be a directory"
+            )
+        if existing_anchor is not None or resume_existing:
+            return _load_existing_prepared(
+                model_root=model_root,
+                integrity_evidence=integrity_evidence,
+                result_root=result_root,
+                run_id=run_id,
+                expected_profile_identity=expected_profile_identity,
+                expected_model_inventory_identity=expected_model_inventory_identity,
+                parent_experiment_binding=parent_experiment_binding,
+                experiment_mode=F3_F4_REVISION_MODE,
+                prompt_revision=F3_F4_PROMPT_REVISION,
+                expected_baseline_binding=baseline_binding,
+            )
+        if any(result_root.iterdir()):
+            raise Phase4RemoteQwenStabilityError(
+                "existing revision result root requires --resume-existing"
+            )
+    else:
+        if resume_existing:
+            raise Phase4RemoteQwenStabilityError(
+                "--resume-existing requires an existing revision result root"
+            )
+
+    case_set = get_stability_case_set()
+    inventory = _fresh._remote.validate_remote_model_inventory(
+        model_root=model_root,
+        integrity_evidence=integrity_evidence,
+    )
+    runtime_facts = _fresh._remote._collect_remote_runtime_facts()
+    gpu_facts = _fresh._remote._probe_remote_gpu_facts()
+    if gpu_facts["device_name"] != _fresh._remote.REMOTE_DEVICE_NAME:
+        raise Phase4RemoteQwenStabilityError(
+            "P4-05 F3/F4 revision requires RTX 5090 GPU0"
+        )
+    if int(gpu_facts["total_vram_bytes"]) < _fresh._remote.REMOTE_MIN_VRAM_BYTES:
+        raise Phase4RemoteQwenStabilityError(
+            "P4-05 F3/F4 revision GPU VRAM is below the RTX 5090 floor"
+        )
+    profile = _fresh.RemoteFreshIntegratedProfile.create(
+        inventory=inventory,
+        runtime_facts=runtime_facts,
+        gpu_facts=gpu_facts,
+    )
+    profile_identity = _profile_identity(profile)
+    inventory_identity = _require_mapping(
+        inventory.get("inventory_identity"),
+        "model inventory identity",
+    )
+    _assert_same_canonical(
+        profile_identity,
+        baseline_binding["baseline_profile_identity"],
+        "revision profile identity drifted from baseline",
+    )
+    _assert_same_canonical(
+        inventory_identity,
+        baseline_binding["baseline_model_inventory_identity"],
+        "revision model inventory identity drifted from baseline",
+    )
+    _validate_identity_match(
+        profile_identity,
+        expected_profile_identity,
+        "stability revision profile identity",
+    )
+    _validate_identity_match(
+        inventory_identity,
+        expected_model_inventory_identity,
+        "stability revision model inventory identity",
+    )
+    selected_run_id = run_id or f"{F3_F4_REVISION_RUN_PREFIX}{uuid.uuid4().hex[:16]}"
+    policy = _create_policy(
+        run_id=selected_run_id,
+        case_set=case_set,
+        inventory=inventory,
+        profile=profile,
+        parent_experiment_binding=parent_experiment_binding,
+        expected_profile_identity=expected_profile_identity,
+        expected_model_inventory_identity=expected_model_inventory_identity,
+        experiment_mode=F3_F4_REVISION_MODE,
+        prompt_revision=F3_F4_PROMPT_REVISION,
+        baseline_binding=baseline_binding,
+    )
+    parent_binding = policy["parent_experiment_binding"]
+    preflight_root = {
+        "schema_version": STABILITY_PREFLIGHT_SCHEMA_VERSION,
+        "experiment_mode": F3_F4_REVISION_MODE,
+        "prompt_revision": F3_F4_PROMPT_REVISION,
+        "baseline_result_root": baseline_binding["baseline_result_root"],
+        "baseline_binding": baseline_binding,
+        "run_id": selected_run_id,
+        "case_set_identity": case_set["case_set_identity"],
+        "policy_identity": policy["policy_identity"],
+        "model_inventory_identity": inventory_identity,
+        "profile_identity": profile_identity,
+        "parent_experiment_binding": parent_binding,
+        "model_root": str(model_root),
+        "integrity_evidence": str(integrity_evidence),
+        "result_root": str(result_root),
+        "revision_total_call_cap": F3_F4_REVISION_TOTAL_CALL_CAP,
+        "action_state": _fresh._action_state(
+            model_action=False,
+            remote_action=False,
+        ),
+    }
+    preflight = {
+        **preflight_root,
+        "preflight_identity": _fresh._identity(
+            preflight_root,
+            revision=STABILITY_PREFLIGHT_SCHEMA_VERSION,
+        ),
+    }
+    anchor = _create_experiment_anchor(
+        result_root=result_root,
+        run_id=selected_run_id,
+        case_set_identity=case_set.get("case_set_identity"),
+        policy_identity=_require_mapping(
+            policy.get("policy_identity"),
+            "stability revision policy identity",
+        ),
+        profile_identity=profile_identity,
+        model_inventory_identity=inventory_identity,
+        revision_mode=True,
+    )
+    result_root.mkdir(parents=True, exist_ok=True)
+    _fresh._write_fsync(
+        result_root / STABILITY_ROOT_MARKER,
+        STABILITY_ROOT_MARKER.encode("ascii"),
+    )
+    _fresh._write_fsync(
+        result_root / "stability_case_set.json",
+        canonical_case_set_record_bytes(case_set),
+    )
+    _fresh._write_fsync(
+        result_root / "model_inventory.json",
+        _fresh._canonical_bytes(inventory),
+    )
+    _fresh._write_fsync(
+        result_root / "remote_profile.json",
+        profile.canonical_bytes(),
+    )
+    _fresh._write_fsync(
+        result_root / "stability_policy.json",
+        _fresh._canonical_bytes(policy),
+    )
+    _fresh._write_fsync(
+        result_root / "preflight_manifest.json",
+        _fresh._canonical_bytes(preflight),
+    )
+    return {
+        "result_root": result_root,
+        "run_id": selected_run_id,
+        "case_set": case_set,
+        "inventory": inventory,
+        "profile": profile,
+        "policy": policy,
+        "preflight": preflight,
+        "experiment_anchor": anchor,
+        "summary": None,
+        "experiment_mode": F3_F4_REVISION_MODE,
+        "prompt_revision": F3_F4_PROMPT_REVISION,
+        "baseline_binding": baseline_binding,
+    }
+
+
 def _validate_child_binding(
     value: Mapping[str, object],
     *,
@@ -1020,6 +1459,7 @@ def _read_attempt_evidence(
     expected_profile_identity: Mapping[str, object] | None,
     expected_model_inventory_identity: Mapping[str, object] | None,
     parent_experiment_binding: Mapping[str, object] | None,
+    expected_prompt_revision: str | None = None,
 ) -> tuple[
     dict[str, int],
     dict[str, bool],
@@ -1164,6 +1604,25 @@ def _read_attempt_evidence(
                 expected_identity,
                 f"stability pre-call {identity_key} drifted",
             )
+        prompt_value = _read_json(
+            entry / "prompt.json",
+            required=True,
+        )
+        assert prompt_value is not None
+        expected_node_prompt_revision = (
+            expected_prompt_revision
+            if entry.name in F3_F4_REVISION_NODES
+            else None
+        )
+        if prompt_value.get("prompt_revision") != expected_node_prompt_revision:
+            raise Phase4RemoteQwenStabilityError(
+                "stability attempt prompt revision binding drifted"
+            )
+        for record, name in ((attempt, "attempt"), (pre_call, "pre-call")):
+            if record.get("prompt_revision") != expected_node_prompt_revision:
+                raise Phase4RemoteQwenStabilityError(
+                    f"stability {name} prompt revision binding drifted"
+                )
         raw_path = entry / "raw_response.bin"
         if raw_path.exists():
             raw = _read_required_bytes(
@@ -1306,8 +1765,22 @@ def _validate_aggregate_ledger(
     child_run_id: str,
     calls: Mapping[str, int],
     ledger: Mapping[str, object],
+    historical_counts: Mapping[str, int] | None = None,
 ) -> None:
     data = dict(aggregate_ledger)
+    expected_historical = (
+        {node_id: 0 for node_id in _fresh.NODE_ORDER}
+        if historical_counts is None
+        else dict(historical_counts)
+    )
+    if set(expected_historical) != set(_fresh.NODE_ORDER) or any(
+        type(expected_historical[node_id]) is not int
+        or expected_historical[node_id] < 0
+        for node_id in _fresh.NODE_ORDER
+    ):
+        raise Phase4RemoteQwenStabilityError(
+            "stability aggregate historical call input is invalid"
+        )
     if data.get("schema_version") != _fresh.P4_05_AGGREGATE_LEDGER_SCHEMA_VERSION:
         raise Phase4RemoteQwenStabilityError(
             "stability aggregate ledger schema drifted"
@@ -1339,15 +1812,17 @@ def _validate_aggregate_ledger(
             raise Phase4RemoteQwenStabilityError(
                 "stability aggregate ledger row is invalid"
             )
-        if row.get("historical_generate_started_count") != 0:
+        if row.get("historical_generate_started_count") != expected_historical[node_id]:
             raise Phase4RemoteQwenStabilityError(
-                "stability child unexpectedly contains historical calls"
+                "stability aggregate historical call count drifted"
             )
         if row.get("current_generate_started_count") != calls[node_id]:
             raise Phase4RemoteQwenStabilityError(
                 "stability aggregate ledger current count drifted"
             )
-        if row.get("aggregate_generate_started_count") != calls[node_id]:
+        if row.get("aggregate_generate_started_count") != (
+            expected_historical[node_id] + calls[node_id]
+        ):
             raise Phase4RemoteQwenStabilityError(
                 "stability aggregate ledger total count drifted"
             )
@@ -1358,7 +1833,10 @@ def _validate_aggregate_ledger(
             raise Phase4RemoteQwenStabilityError(
                 "stability aggregate ledger node cap drifted"
             )
-    if data.get("aggregate_total_generate_calls") != sum(calls.values()):
+    if data.get("aggregate_total_generate_calls") != sum(
+        expected_historical[node_id] + calls[node_id]
+        for node_id in _fresh.NODE_ORDER
+    ):
         raise Phase4RemoteQwenStabilityError(
             "stability aggregate ledger total drifted"
         )
@@ -1757,6 +2235,8 @@ def _inspect_child_evidence(
     expected_profile_identity: Mapping[str, object] | None,
     expected_model_inventory_identity: Mapping[str, object] | None,
     parent_experiment_binding: Mapping[str, object] | None,
+    expected_prompt_revision: str | None = None,
+    expected_historical_per_node_calls: Mapping[str, int] | None = None,
 ) -> dict[str, object]:
     cases_root = child_root.parent
     _assert_child_root(cases_root=cases_root, child_root=child_root, must_exist=True)
@@ -1772,6 +2252,7 @@ def _inspect_child_evidence(
             expected_profile_identity=expected_profile_identity,
             expected_model_inventory_identity=expected_model_inventory_identity,
             parent_experiment_binding=parent_experiment_binding,
+            expected_prompt_revision=expected_prompt_revision,
         )
     )
     ledger = _read_json(
@@ -1800,6 +2281,7 @@ def _inspect_child_evidence(
         child_run_id=child_run_id,
         calls=calls,
         ledger=ledger,
+        historical_counts=expected_historical_per_node_calls,
     )
     if parent_experiment_binding is None:
         raise Phase4RemoteQwenStabilityError(
@@ -1939,6 +2421,30 @@ def _inspect_child_evidence(
 
     return {
         "calls": calls,
+        "historical_calls": (
+            {
+                node_id: int(
+                    dict(aggregate_ledger["per_node"])[node_id][
+                        "historical_generate_started_count"
+                    ]
+                )
+                for node_id in _fresh.NODE_ORDER
+            }
+            if isinstance(aggregate_ledger.get("per_node"), Mapping)
+            else {node_id: 0 for node_id in _fresh.NODE_ORDER}
+        ),
+        "aggregate_calls": (
+            {
+                node_id: int(
+                    dict(aggregate_ledger["per_node"])[node_id][
+                        "aggregate_generate_started_count"
+                    ]
+                )
+                for node_id in _fresh.NODE_ORDER
+            }
+            if isinstance(aggregate_ledger.get("per_node"), Mapping)
+            else {node_id: 0 for node_id in _fresh.NODE_ORDER}
+        ),
         "raw_pass": raw_pass,
         "failure_codes": failure_codes,
         "source_result": source_result,
@@ -1962,6 +2468,9 @@ def _summarize_case(
     expected_profile_identity: Mapping[str, object] | None = None,
     expected_model_inventory_identity: Mapping[str, object] | None = None,
     parent_experiment_binding: Mapping[str, object] | None = None,
+    prompt_revision: str | None = None,
+    baseline_binding: Mapping[str, object] | None = None,
+    expected_historical_per_node_calls: Mapping[str, int] | None = None,
 ) -> dict[str, object]:
     child_run_id = _expected_child_run_id(experiment_run_id, index)
     evidence = _inspect_child_evidence(
@@ -1971,10 +2480,14 @@ def _summarize_case(
         expected_profile_identity=expected_profile_identity,
         expected_model_inventory_identity=expected_model_inventory_identity,
         parent_experiment_binding=parent_experiment_binding,
+        expected_prompt_revision=prompt_revision,
+        expected_historical_per_node_calls=expected_historical_per_node_calls,
     )
     ledger_calls = evidence["calls"]
     raw_pass = evidence["raw_pass"]
     failure_codes = evidence["failure_codes"]
+    historical_calls = evidence["historical_calls"]
+    aggregate_calls = evidence["aggregate_calls"]
     normalization_receipt = evidence["normalization"]
     source_result = evidence["source_result"]
     final_result = evidence["final_result"]
@@ -2149,6 +2662,16 @@ def _summarize_case(
         "retry_count": 0,
         "automatic_retry": False,
     }
+    if prompt_revision is not None:
+        root["experiment_mode"] = F3_F4_REVISION_MODE
+        root["prompt_revision"] = prompt_revision
+        root["baseline_binding"] = (
+            None
+            if baseline_binding is None
+            else copy.deepcopy(dict(baseline_binding))
+        )
+        root["historical_per_node_generate_calls"] = dict(historical_calls)
+        root["aggregate_per_node_generate_calls"] = dict(aggregate_calls)
     return {
         **root,
         "case_result_identity": _fresh._identity(
@@ -2168,6 +2691,8 @@ def _validate_case_result(
     expected_profile_identity: Mapping[str, object] | None,
     expected_model_inventory_identity: Mapping[str, object] | None,
     parent_experiment_binding: Mapping[str, object] | None,
+    prompt_revision: str | None = None,
+    expected_historical_per_node_calls: Mapping[str, int] | None = None,
 ) -> dict[str, object]:
     data = dict(case_result)
     if data.get("schema_version") != STABILITY_CASE_RESULT_SCHEMA_VERSION:
@@ -2268,6 +2793,45 @@ def _validate_case_result(
         raise Phase4RemoteQwenStabilityError(
             "stability case-result total call accounting is invalid"
         )
+    if prompt_revision is None:
+        if data.get("prompt_revision") is not None:
+            raise Phase4RemoteQwenStabilityError(
+                "baseline case-result unexpectedly contains a prompt revision"
+            )
+    else:
+        if data.get("experiment_mode") != F3_F4_REVISION_MODE:
+            raise Phase4RemoteQwenStabilityError(
+                "revision case-result experiment mode drifted"
+            )
+        if data.get("prompt_revision") != prompt_revision:
+            raise Phase4RemoteQwenStabilityError(
+                "revision case-result prompt revision drifted"
+            )
+        if expected_historical_per_node_calls is None:
+            raise Phase4RemoteQwenStabilityError(
+                "revision case-result historical counts are missing"
+            )
+        historical_calls = data.get("historical_per_node_generate_calls")
+        aggregate_calls = data.get("aggregate_per_node_generate_calls")
+        if (
+            not isinstance(historical_calls, Mapping)
+            or not isinstance(aggregate_calls, Mapping)
+            or set(historical_calls) != set(_fresh.NODE_ORDER)
+            or set(aggregate_calls) != set(_fresh.NODE_ORDER)
+        ):
+            raise Phase4RemoteQwenStabilityError(
+                "revision case-result aggregate accounting is invalid"
+            )
+        for node_id in _fresh.NODE_ORDER:
+            if (
+                historical_calls[node_id]
+                != expected_historical_per_node_calls[node_id]
+                or aggregate_calls[node_id]
+                != expected_historical_per_node_calls[node_id] + calls[node_id]
+            ):
+                raise Phase4RemoteQwenStabilityError(
+                    "revision case-result historical call accounting drifted"
+                )
     for key in (
         "f4_called",
         "f4_raw_direct_pass",
@@ -2296,6 +2860,8 @@ def _validate_case_result(
         expected_profile_identity=expected_profile_identity,
         expected_model_inventory_identity=expected_model_inventory_identity,
         parent_experiment_binding=parent_experiment_binding,
+        expected_prompt_revision=prompt_revision,
+        expected_historical_per_node_calls=expected_historical_per_node_calls,
     )
     evidence_calls = evidence["calls"]
     if calls != evidence_calls:
@@ -2376,7 +2942,7 @@ def _aggregate(case_results: list[dict[str, object]]) -> dict[str, object]:
         if isinstance(item["per_node_failure_codes"], Mapping)
         and item["per_node_failure_codes"]["F4"] is not None
     )
-    return {
+    result = {
         "case_count": case_count,
         "per_node_called_count": per_node_called,
         "per_node_raw_contract_pass_count": per_node_raw_pass,
@@ -2427,6 +2993,30 @@ def _aggregate(case_results: list[dict[str, object]]) -> dict[str, object]:
         "failure_code_counts": dict(sorted(failure_counts.items())),
         "f4_raw_failure_code_counts": dict(sorted(f4_failure_counts.items())),
     }
+    if case_results and "historical_per_node_generate_calls" in case_results[0]:
+        historical = {node_id: 0 for node_id in _fresh.NODE_ORDER}
+        aggregate = {node_id: 0 for node_id in _fresh.NODE_ORDER}
+        for item in case_results:
+            item_historical = item.get("historical_per_node_generate_calls")
+            item_aggregate = item.get("aggregate_per_node_generate_calls")
+            if (
+                not isinstance(item_historical, Mapping)
+                or not isinstance(item_aggregate, Mapping)
+            ):
+                raise Phase4RemoteQwenStabilityError(
+                    "revision aggregate case accounting is incomplete"
+                )
+            for node_id in _fresh.NODE_ORDER:
+                historical[node_id] += int(item_historical[node_id])
+                aggregate[node_id] += int(item_aggregate[node_id])
+        result["historical_per_node_generate_started_count"] = historical
+        result["historical_total_model_generate_calls"] = sum(
+            historical.values()
+        )
+        result["aggregate_per_node_generate_started_count"] = aggregate
+        result["aggregate_total_model_generate_calls"] = sum(aggregate.values())
+        result["new_model_generate_calls"] = result["total_model_generate_calls"]
+    return result
 
 
 def _write_progress(
@@ -2471,6 +3061,8 @@ def _load_progress(
     experiment_policy_identity: Mapping[str, object],
     expected_profile_identity: Mapping[str, object] | None,
     expected_model_inventory_identity: Mapping[str, object] | None,
+    prompt_revision: str | None = None,
+    expected_historical_per_node_calls: Mapping[str, int] | None = None,
 ) -> list[dict[str, object]]:
     progress_root = result_root / "progress"
     if not progress_root.exists():
@@ -2565,6 +3157,10 @@ def _load_progress(
             expected_profile_identity=expected_profile_identity,
             expected_model_inventory_identity=expected_model_inventory_identity,
             parent_experiment_binding=child_parent_binding,
+            prompt_revision=prompt_revision,
+            expected_historical_per_node_calls=(
+                expected_historical_per_node_calls
+            ),
         )
         if progress.get("child_result_root") != validated_result.get(
             "child_result_root"
@@ -2657,9 +3253,39 @@ def _validate_summary(
             dict(parent_experiment_binding),
             "stability summary parent binding drifted",
         )
-    if data.get("baseline_complete") is not True:
+    experiment_mode = policy.get("experiment_mode", "baseline")
+    if data.get("experiment_mode", "baseline") != experiment_mode:
         raise Phase4RemoteQwenStabilityError(
-            "stability summary is not a complete baseline"
+            "stability summary experiment mode drifted"
+        )
+    prompt_revision: str | None = None
+    expected_historical_per_node_calls: Mapping[str, int] | None = None
+    if experiment_mode == "baseline":
+        if data.get("baseline_complete") is not True:
+            raise Phase4RemoteQwenStabilityError(
+                "stability summary is not a complete baseline"
+            )
+    elif experiment_mode == F3_F4_REVISION_MODE:
+        prompt_revision = F3_F4_PROMPT_REVISION
+        if data.get("revision_complete") is not True:
+            raise Phase4RemoteQwenStabilityError(
+                "stability summary is not a complete F3/F4 revision"
+            )
+        _assert_same_canonical(
+            data.get("baseline_binding"),
+            policy.get("baseline_binding"),
+            "stability revision summary baseline binding drifted",
+        )
+        if data.get("prompt_revision") != prompt_revision:
+            raise Phase4RemoteQwenStabilityError(
+                "stability revision summary prompt revision drifted"
+            )
+        expected_historical_per_node_calls = {
+            node_id: 1 for node_id in _fresh.NODE_ORDER
+        }
+    else:
+        raise Phase4RemoteQwenStabilityError(
+            "stability summary experiment mode is unknown"
         )
     case_results_value = data.get("case_results")
     if not isinstance(case_results_value, list) or len(case_results_value) != CASE_COUNT:
@@ -2695,6 +3321,10 @@ def _validate_summary(
                 expected_profile_identity=profile_identity,
                 expected_model_inventory_identity=model_inventory_identity,
                 parent_experiment_binding=child_parent_binding,
+                prompt_revision=prompt_revision,
+                expected_historical_per_node_calls=(
+                    expected_historical_per_node_calls
+                ),
             )
         )
     _assert_same_canonical(
@@ -2702,6 +3332,56 @@ def _validate_summary(
         _aggregate(validated_results),
         "stability summary aggregate drifted",
     )
+    if experiment_mode == F3_F4_REVISION_MODE:
+        expected_prompt_revision_identity = _fresh._identity(
+            {
+                "prompt_revision": F3_F4_PROMPT_REVISION,
+                "nodes": list(F3_F4_REVISION_NODES),
+            },
+            revision=f"{STABILITY_SCHEMA_PREFIX}.prompt_revision.v1",
+        )
+        _assert_same_canonical(
+            data.get("prompt_revision_identity"),
+            expected_prompt_revision_identity,
+            "stability revision prompt identity drifted",
+        )
+        aggregate = _require_mapping(
+            data.get("aggregate"),
+            "stability revision aggregate",
+        )
+        if data.get("new_model_generate_calls") != aggregate.get(
+            "total_model_generate_calls"
+        ):
+            raise Phase4RemoteQwenStabilityError(
+                "stability revision new-call summary drifted"
+            )
+        baseline_binding = _require_mapping(
+            policy.get("baseline_binding"),
+            "stability revision baseline binding",
+        )
+        if data.get(
+            "historical_aggregate_per_node_generate_started_count"
+        ) != baseline_binding.get(
+            "baseline_per_node_generate_started_count"
+        ):
+            raise Phase4RemoteQwenStabilityError(
+                "stability revision historical aggregate drifted"
+            )
+        expected_aggregate_counts = {
+            node_id: baseline_binding[
+                "baseline_per_node_generate_started_count"
+            ][node_id]
+            + aggregate["per_node_called_count"][node_id]
+            for node_id in _fresh.NODE_ORDER
+        }
+        if data.get("aggregate_per_node_generate_started_count") != (
+            expected_aggregate_counts
+        ) or data.get("aggregate_total_model_generate_calls") != sum(
+            expected_aggregate_counts.values()
+        ):
+            raise Phase4RemoteQwenStabilityError(
+                "stability revision cumulative aggregate drifted"
+            )
     summary_root = {
         key: value for key, value in data.items() if key != "summary_identity"
     }
@@ -2723,6 +3403,8 @@ def _validate_summary(
         ),
         expected_profile_identity=profile_identity,
         expected_model_inventory_identity=model_inventory_identity,
+        prompt_revision=prompt_revision,
+        expected_historical_per_node_calls=expected_historical_per_node_calls,
     )
     if len(progress) != CASE_COUNT:
         raise Phase4RemoteQwenStabilityError(
@@ -2969,15 +3651,338 @@ def run_phase4_remote_qwen_stability(
     return summary
 
 
+def run_phase4_remote_qwen_f3_f4_prompt_revision(
+    *,
+    model_root: Path,
+    integrity_evidence: Path,
+    baseline_root: Path,
+    result_root: Path,
+    confirm_f3_f4_prompt_revision: bool,
+    run_id: str | None = None,
+    console: object | None = None,
+    resume_existing: bool = False,
+    expected_profile_identity: Mapping[str, object] | None = None,
+    expected_model_inventory_identity: Mapping[str, object] | None = None,
+    parent_experiment_binding: Mapping[str, object] | None = None,
+) -> dict[str, object]:
+    """Execute the explicit ten-case F3/F4 reachability prompt revision."""
+
+    if confirm_f3_f4_prompt_revision is not True:
+        raise Phase4RemoteQwenStabilityError(
+            "explicit confirmation is required for the F3/F4 prompt revision"
+        )
+    prepared = prepare_phase4_remote_qwen_f3_f4_prompt_revision(
+        model_root=model_root,
+        integrity_evidence=integrity_evidence,
+        baseline_root=baseline_root,
+        result_root=result_root,
+        run_id=run_id,
+        resume_existing=resume_existing,
+        expected_profile_identity=expected_profile_identity,
+        expected_model_inventory_identity=expected_model_inventory_identity,
+        parent_experiment_binding=parent_experiment_binding,
+    )
+    if prepared.get("summary") is not None:
+        return _require_mapping(
+            prepared["summary"],
+            "existing F3/F4 revision summary",
+        )
+
+    selected_run_id = str(prepared["run_id"])
+    case_set = _require_mapping(
+        prepared["case_set"],
+        "prepared F3/F4 revision case set",
+    )
+    cases = case_set.get("cases")
+    if not isinstance(cases, list) or len(cases) != CASE_COUNT:
+        raise Phase4RemoteQwenStabilityError(
+            "prepared F3/F4 revision case set is invalid"
+        )
+    policy = _require_mapping(
+        prepared["policy"],
+        "prepared F3/F4 revision policy",
+    )
+    effective_profile_identity = _require_mapping(
+        policy.get("profile_identity"),
+        "prepared F3/F4 revision profile identity",
+    )
+    effective_model_inventory_identity = _require_mapping(
+        policy.get("model_inventory_identity"),
+        "prepared F3/F4 revision model inventory identity",
+    )
+    experiment_policy_identity = _require_mapping(
+        policy.get("policy_identity"),
+        "prepared F3/F4 revision policy identity",
+    )
+    baseline_binding = _require_mapping(
+        prepared.get("baseline_binding"),
+        "prepared F3/F4 revision baseline binding",
+    )
+    baseline_result_root = _fresh._safe_path(
+        Path(str(baseline_binding["baseline_result_root"])),
+        "revision baseline result root",
+        directory=True,
+    )
+    effective_parent_binding = _copy_optional_mapping(
+        parent_experiment_binding
+        if parent_experiment_binding is not None
+        else policy.get("parent_experiment_binding"),
+        "parent experiment binding",
+    )
+    expected_historical_per_case = {
+        node_id: 1 for node_id in _fresh.NODE_ORDER
+    }
+    _validate_cases_layout(result_root=result_root, case_set=case_set)
+    previous_results = _load_progress(
+        result_root=result_root,
+        case_set=case_set,
+        experiment_run_id=selected_run_id,
+        experiment_policy_identity=experiment_policy_identity,
+        expected_profile_identity=effective_profile_identity,
+        expected_model_inventory_identity=effective_model_inventory_identity,
+        prompt_revision=F3_F4_PROMPT_REVISION,
+        expected_historical_per_node_calls=expected_historical_per_case,
+    )
+    case_results = list(previous_results)
+    cases_root = result_root / "cases"
+    for index, case_value in enumerate(cases, start=1):
+        if not isinstance(case_value, Mapping):
+            raise Phase4RemoteQwenStabilityError(
+                "F3/F4 revision case row is invalid"
+            )
+        case = dict(case_value)
+        child_parent_binding = _child_parent_experiment_binding(
+            experiment_run_id=selected_run_id,
+            experiment_policy_identity=experiment_policy_identity,
+            index=index,
+            case=case,
+        )
+        child_root = _expected_child_root(result_root, index, case)
+        baseline_child_root = _expected_child_root(
+            baseline_result_root,
+            index,
+            case,
+        )
+        _assert_child_root(
+            cases_root=cases_root,
+            child_root=child_root,
+            must_exist=False,
+        )
+        _assert_child_root(
+            cases_root=baseline_result_root / "cases",
+            child_root=baseline_child_root,
+            must_exist=True,
+        )
+        _validate_child_b_input(
+            child_root=baseline_child_root,
+            case=case,
+        )
+        if index <= len(previous_results):
+            if console is not None:
+                print(
+                    f"[P4-05-STABILITY] revision case {index:02d}/{CASE_COUNT} "
+                    f"{case['case_id']} resumed from progress",
+                    file=console,
+                    flush=True,
+                )
+            continue
+        if console is not None:
+            print(
+                f"[P4-05-STABILITY] revision case {index:02d}/{CASE_COUNT} "
+                f"{case['case_id']} started",
+                file=console,
+                flush=True,
+            )
+        child_result: Mapping[str, object] | None
+        if child_root.exists():
+            child_result = None
+        else:
+            child_result = _fresh.run_phase4_remote_qwen_fresh_integrated(
+                model_root=model_root,
+                integrity_evidence=integrity_evidence,
+                result_root=child_root,
+                confirm_one_remote_fresh_integrated_run=True,
+                run_id=_expected_child_run_id(selected_run_id, index),
+                console=console,
+                history_result_roots=(baseline_child_root,),
+                resume_from_result_root=baseline_child_root,
+                resume_prefix=_fresh.P4_05_RESUME_PREFIX_F1_F2,
+                b_input=case,
+                prompt_revision=F3_F4_PROMPT_REVISION,
+                expected_profile_identity=effective_profile_identity,
+                expected_model_inventory_identity=effective_model_inventory_identity,
+                parent_experiment_binding=child_parent_binding,
+            )
+            if not isinstance(child_result, Mapping):
+                raise Phase4RemoteQwenStabilityError(
+                    "F3/F4 revision single-case runner returned a non-object"
+                )
+            if child_result.get("status") not in {
+                "delivery_terminal_success",
+                "failed_closed",
+            }:
+                raise Phase4RemoteQwenStabilityError(
+                    "F3/F4 revision single-case runner is not terminal"
+                )
+            if not child_root.is_dir():
+                raise Phase4RemoteQwenStabilityError(
+                    "F3/F4 revision child result root is missing"
+                )
+        case_result = _summarize_case(
+            experiment_run_id=selected_run_id,
+            index=index,
+            case=case,
+            child_root=child_root,
+            child_result=child_result,
+            exception=None,
+            expected_profile_identity=effective_profile_identity,
+            expected_model_inventory_identity=effective_model_inventory_identity,
+            parent_experiment_binding=child_parent_binding,
+            prompt_revision=F3_F4_PROMPT_REVISION,
+            baseline_binding=baseline_binding,
+            expected_historical_per_node_calls=expected_historical_per_case,
+        )
+        validated_case_result = _validate_case_result(
+            case_result,
+            experiment_run_id=selected_run_id,
+            index=index,
+            case=case,
+            result_root=result_root,
+            expected_profile_identity=effective_profile_identity,
+            expected_model_inventory_identity=effective_model_inventory_identity,
+            parent_experiment_binding=child_parent_binding,
+            prompt_revision=F3_F4_PROMPT_REVISION,
+            expected_historical_per_node_calls=expected_historical_per_case,
+        )
+        case_results.append(validated_case_result)
+        aggregate_so_far = _aggregate(case_results)
+        if (
+            int(aggregate_so_far["total_model_generate_calls"])
+            > index * len(F3_F4_REVISION_NODES)
+            or int(aggregate_so_far["total_model_generate_calls"])
+            > F3_F4_REVISION_TOTAL_CALL_CAP
+            or aggregate_so_far["per_node_called_count"].get("F1") != 0
+            or aggregate_so_far["per_node_called_count"].get("F2") != 0
+            or aggregate_so_far["per_node_called_count"].get("F3", 0) > index
+            or aggregate_so_far["per_node_called_count"].get("F4", 0) > index
+        ):
+            raise Phase4RemoteQwenStabilityError(
+                "F3/F4 revision exceeded its bounded new-call budget"
+            )
+        _write_progress(
+            result_root=result_root,
+            experiment_run_id=selected_run_id,
+            index=index,
+            case=case,
+            case_result=validated_case_result,
+            aggregate_so_far=aggregate_so_far,
+        )
+        if console is not None:
+            print(
+                f"[P4-05-STABILITY] revision case {index:02d}/{CASE_COUNT} "
+                f"status={validated_case_result['status']} "
+                f"f3_calls={validated_case_result['per_node_generate_calls']['F3']} "
+                f"f4_calls={validated_case_result['per_node_generate_calls']['F4']} "
+                f"f4_raw={validated_case_result['f4_raw_direct_pass']} "
+                f"delivery={validated_case_result['delivery_success']}",
+                file=console,
+                flush=True,
+            )
+
+    if len(case_results) != CASE_COUNT:
+        raise Phase4RemoteQwenStabilityError(
+            "F3/F4 revision did not complete all cases"
+        )
+    aggregate = _aggregate(case_results)
+    if int(aggregate["total_model_generate_calls"]) > F3_F4_REVISION_TOTAL_CALL_CAP:
+        raise Phase4RemoteQwenStabilityError(
+            "F3/F4 revision exceeded its total new-call cap"
+        )
+    historical_counts = dict(
+        baseline_binding["baseline_per_node_generate_started_count"]
+    )
+    aggregate_counts = {
+        node_id: historical_counts[node_id]
+        + aggregate["per_node_called_count"][node_id]
+        for node_id in _fresh.NODE_ORDER
+    }
+    prompt_revision_identity = _fresh._identity(
+        {
+            "prompt_revision": F3_F4_PROMPT_REVISION,
+            "nodes": list(F3_F4_REVISION_NODES),
+        },
+        revision=f"{STABILITY_SCHEMA_PREFIX}.prompt_revision.v1",
+    )
+    root = {
+        "schema_version": STABILITY_SUMMARY_SCHEMA_VERSION,
+        "experiment_mode": F3_F4_REVISION_MODE,
+        "run_id": selected_run_id,
+        "case_set_id": CASE_SET_ID,
+        "case_set_identity": case_set["case_set_identity"],
+        "policy_identity": policy["policy_identity"],
+        "profile_identity": effective_profile_identity,
+        "model_inventory_identity": effective_model_inventory_identity,
+        "parent_experiment_binding": effective_parent_binding,
+        "baseline_complete": False,
+        "revision_complete": True,
+        "baseline_binding": baseline_binding,
+        "prompt_revision": F3_F4_PROMPT_REVISION,
+        "prompt_revision_identity": prompt_revision_identity,
+        "revision_nodes": list(F3_F4_REVISION_NODES),
+        "case_results": case_results,
+        "aggregate": aggregate,
+        "new_model_generate_calls": aggregate["total_model_generate_calls"],
+        "historical_aggregate_per_node_generate_started_count": (
+            historical_counts
+        ),
+        "historical_aggregate_total_model_generate_calls": sum(
+            historical_counts.values()
+        ),
+        "aggregate_per_node_generate_started_count": aggregate_counts,
+        "aggregate_total_model_generate_calls": sum(aggregate_counts.values()),
+        "prompt_contract_revision_executed": True,
+        "training_executed": False,
+        "claim_boundary": (
+            "P4-05 explicit F3/F4 reachability prompt revision over a completed "
+            "ten-case baseline; F1/F2 are immutable baseline prefix artifacts, "
+            "F3/F4 are newly generated once per case where dependencies remain "
+            "executable, and raw model success remains separate from repair, "
+            "fallback, delivery, H1, browser, training, and formal quality"
+        ),
+        "action_state": _fresh._action_state(
+            model_action=aggregate["total_model_generate_calls"] > 0,
+            remote_action=aggregate["total_model_generate_calls"] > 0,
+        ),
+    }
+    summary = {
+        **root,
+        "summary_identity": _fresh._identity(
+            root,
+            revision=STABILITY_SUMMARY_SCHEMA_VERSION,
+        ),
+    }
+    _fresh._write_fsync(
+        result_root / "stability_summary.json",
+        _fresh._canonical_bytes(summary),
+    )
+    return summary
+
+
 __all__ = [
     "BASELINE_PER_CASE_PER_NODE_CALL_CAP",
     "BASELINE_TOTAL_CALL_CAP",
+    "F3_F4_PROMPT_REVISION",
+    "F3_F4_REVISION_MODE",
+    "F3_F4_REVISION_NODES",
+    "F3_F4_REVISION_TOTAL_CALL_CAP",
     "PROMPT_CONTRACT_REVISION_CAP",
     "Phase4RemoteQwenStabilityError",
     "STABILITY_POLICY_SCHEMA_VERSION",
     "STABILITY_PROGRESS_SCHEMA_VERSION",
     "STABILITY_RUN_PREFIX",
     "STABILITY_SUMMARY_SCHEMA_VERSION",
+    "prepare_phase4_remote_qwen_f3_f4_prompt_revision",
     "prepare_phase4_remote_qwen_stability",
+    "run_phase4_remote_qwen_f3_f4_prompt_revision",
     "run_phase4_remote_qwen_stability",
 ]

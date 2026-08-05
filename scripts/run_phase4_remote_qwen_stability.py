@@ -44,6 +44,25 @@ def build_parser() -> argparse.ArgumentParser:
             "validating its marker, policy, progress, and call ledger."
         ),
     )
+    parser.add_argument(
+        "--f3-f4-revision",
+        action="store_true",
+        help=(
+            "Run the explicit versioned F3/F4 reachability prompt revision "
+            "over a completed ten-case baseline root."
+        ),
+    )
+    parser.add_argument(
+        "--baseline-root",
+        default=None,
+        type=Path,
+        help="Completed P4-05 baseline root used by --f3-f4-revision.",
+    )
+    parser.add_argument(
+        "--confirm-f3-f4-revision",
+        action="store_true",
+        help="Confirm the bounded F3/F4 revision model calls.",
+    )
     return parser
 
 
@@ -71,14 +90,20 @@ def _summary_line(result: dict[str, object]) -> str:
     status = (
         "baseline_complete"
         if result.get("baseline_complete") is True
+        else "revision_complete"
+        if result.get("revision_complete") is True
         else "incomplete"
     )
+    new_calls = result.get("new_model_generate_calls")
+    if new_calls is None:
+        new_calls = aggregate.get("total_model_generate_calls", 0)
     return (
         "[P4-05-STABILITY] "
         f"status={status} "
         f"completed_cases={aggregate.get('case_count', 0)} "
         f"total_model_generate_calls="
         f"{aggregate.get('total_model_generate_calls', 0)} "
+        f"new_model_generate_calls={new_calls} "
         f"f4_raw_direct_pass={aggregate.get('f4_raw_direct_pass_count', 0)} "
         f"normalization={aggregate.get('f4_normalized_case_count', 0)} "
         f"repair_attempted={aggregate.get('repair_attempted_count', 0)} "
@@ -94,12 +119,24 @@ def _summary_line(result: dict[str, object]) -> str:
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
+    if args.f3_f4_revision and args.baseline_root is None:
+        parser.error("--baseline-root is required with --f3-f4-revision")
     if (
         args.preflight_only is False
+        and args.f3_f4_revision is False
         and args.confirm_ten_case_baseline is not True
     ):
         parser.error(
             "--confirm-ten-case-baseline is required before the baseline "
+            "may load or generate"
+        )
+    if (
+        args.preflight_only is False
+        and args.f3_f4_revision is True
+        and args.confirm_f3_f4_revision is not True
+    ):
+        parser.error(
+            "--confirm-f3-f4-revision is required before the revision "
             "may load or generate"
         )
 
@@ -109,13 +146,25 @@ def main(argv: list[str] | None = None) -> int:
         integrity_evidence = args.integrity_evidence.resolve(strict=True)
         result_root = args.result_root.resolve(strict=False)
         if args.preflight_only:
-            prepared = runtime.prepare_phase4_remote_qwen_stability(
-                model_root=model_root,
-                integrity_evidence=integrity_evidence,
-                result_root=result_root,
-                run_id=args.run_id,
-                resume_existing=args.resume_existing,
-            )
+            if args.f3_f4_revision:
+                prepared = (
+                    runtime.prepare_phase4_remote_qwen_f3_f4_prompt_revision(
+                        model_root=model_root,
+                        integrity_evidence=integrity_evidence,
+                        baseline_root=args.baseline_root.resolve(strict=True),
+                        result_root=result_root,
+                        run_id=args.run_id,
+                        resume_existing=args.resume_existing,
+                    )
+                )
+            else:
+                prepared = runtime.prepare_phase4_remote_qwen_stability(
+                    model_root=model_root,
+                    integrity_evidence=integrity_evidence,
+                    result_root=result_root,
+                    run_id=args.run_id,
+                    resume_existing=args.resume_existing,
+                )
             print(
                 "[P4-05-STABILITY] "
                 f"status={('existing_summary_validated' if prepared.get('summary') is not None else 'prepared_no_model')} "
@@ -125,21 +174,38 @@ def main(argv: list[str] | None = None) -> int:
             )
             return 0
 
+        run_label = (
+            "F3/F4 revision started"
+            if args.f3_f4_revision
+            else "baseline started"
+        )
         print(
             f"[P4-05-STABILITY] run_id={args.run_id or 'generated'} "
-            "baseline started",
+            f"{run_label}",
             file=sys.stderr,
             flush=True,
         )
-        result = runtime.run_phase4_remote_qwen_stability(
-            model_root=model_root,
-            integrity_evidence=integrity_evidence,
-            result_root=result_root,
-            confirm_ten_case_baseline=True,
-            run_id=args.run_id,
-            console=sys.stderr,
-            resume_existing=args.resume_existing,
-        )
+        if args.f3_f4_revision:
+            result = runtime.run_phase4_remote_qwen_f3_f4_prompt_revision(
+                model_root=model_root,
+                integrity_evidence=integrity_evidence,
+                baseline_root=args.baseline_root.resolve(strict=True),
+                result_root=result_root,
+                confirm_f3_f4_prompt_revision=True,
+                run_id=args.run_id,
+                console=sys.stderr,
+                resume_existing=args.resume_existing,
+            )
+        else:
+            result = runtime.run_phase4_remote_qwen_stability(
+                model_root=model_root,
+                integrity_evidence=integrity_evidence,
+                result_root=result_root,
+                confirm_ten_case_baseline=True,
+                run_id=args.run_id,
+                console=sys.stderr,
+                resume_existing=args.resume_existing,
+            )
     except (
         OSError,
         runtime.Phase4RemoteQwenStabilityError,
@@ -153,7 +219,12 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     print(_summary_line(result), flush=True)
-    return 0 if result.get("baseline_complete") is True else 2
+    return (
+        0
+        if result.get("baseline_complete") is True
+        or result.get("revision_complete") is True
+        else 2
+    )
 
 
 if __name__ == "__main__":
