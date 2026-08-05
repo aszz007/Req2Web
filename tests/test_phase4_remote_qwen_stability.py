@@ -719,6 +719,7 @@ class Phase4RemoteQwenStabilityRuntimeTests(unittest.TestCase):
             "result_root": Path("C:/p4-05-test-only/baseline"),
             "run_id": "baseline-run",
             "case_set": {},
+            "profile": _FakeProfile(),
             "summary": baseline_summary,
         }
         binding = runtime._build_revision_baseline_binding(
@@ -731,6 +732,54 @@ class Phase4RemoteQwenStabilityRuntimeTests(unittest.TestCase):
                 tampered,
                 baseline_prepared=prepared,
             )
+
+    def test_revision_profile_compatibility_ignores_only_volatile_gpu_binding(
+        self,
+    ) -> None:
+        class Profile:
+            def __init__(self, payload: dict[str, object]) -> None:
+                self.payload = payload
+
+            def validate(self) -> None:
+                return None
+
+            def to_dict(self) -> dict[str, object]:
+                return dict(self.payload)
+
+        baseline = {
+            "profile_id": "baseline-profile-id",
+            "device_uuid": "GPU-baseline",
+            "free_vram_bytes_at_preflight": 30_000,
+            "device_name": "NVIDIA GeForce RTX 5090",
+            "total_vram_bytes": 34_190_917_632,
+            "driver_version": "595.58.03",
+            "dtype": "bfloat16",
+            "quantization": "none",
+            "model_revision": "model-revision",
+        }
+        restarted = {
+            **baseline,
+            "profile_id": "restarted-profile-id",
+            "device_uuid": "GPU-reassigned-after-restart",
+            "free_vram_bytes_at_preflight": 31_000,
+        }
+        self.assertEqual(
+            runtime._revision_profile_compatibility_identity(
+                Profile(baseline)
+            ),
+            runtime._revision_profile_compatibility_identity(
+                Profile(restarted)
+            ),
+        )
+        incompatible = {**restarted, "device_name": "Different GPU"}
+        self.assertNotEqual(
+            runtime._revision_profile_compatibility_identity(
+                Profile(baseline)
+            ),
+            runtime._revision_profile_compatibility_identity(
+                Profile(incompatible)
+            ),
+        )
 
     def test_prepare_freezes_case_set_and_no_model_policy(self) -> None:
         result_root = (

@@ -63,6 +63,9 @@ F3_F4_REVISION_RUN_PREFIX = "p4-05-remote-qwen-stability-f3-f4-revision-"
 STABILITY_REVISION_BASELINE_BINDING_SCHEMA_VERSION = (
     f"{STABILITY_SCHEMA_PREFIX}.revision_baseline_binding.v1"
 )
+STABILITY_REVISION_PROFILE_COMPATIBILITY_SCHEMA_VERSION = (
+    f"{STABILITY_SCHEMA_PREFIX}.revision_profile_compatibility.v1"
+)
 
 
 class Phase4RemoteQwenStabilityError(ValueError):
@@ -396,6 +399,31 @@ def _profile_identity(profile: _fresh.RemoteFreshIntegratedProfile) -> dict[str,
     return _fresh._identity(
         stable_profile,
         revision=STABILITY_PROFILE_BINDING_SCHEMA_VERSION,
+    )
+
+
+def _revision_profile_compatibility_identity(
+    profile: object,
+) -> dict[str, object]:
+    validate = getattr(profile, "validate", None)
+    to_dict = getattr(profile, "to_dict", None)
+    if not callable(validate) or not callable(to_dict):
+        raise Phase4RemoteQwenStabilityError(
+            "revision baseline runtime profile is unavailable"
+        )
+    validate()
+    payload = to_dict()
+    if not isinstance(payload, Mapping):
+        raise Phase4RemoteQwenStabilityError(
+            "revision baseline runtime profile is invalid"
+        )
+    stable_profile = copy.deepcopy(dict(payload))
+    stable_profile.pop("profile_id", None)
+    stable_profile.pop("free_vram_bytes_at_preflight", None)
+    stable_profile.pop("device_uuid", None)
+    return _fresh._identity(
+        stable_profile,
+        revision=STABILITY_REVISION_PROFILE_COMPATIBILITY_SCHEMA_VERSION,
     )
 
 
@@ -878,6 +906,7 @@ def _build_revision_baseline_binding(
     baseline_root = baseline_prepared.get("result_root")
     summary = baseline_prepared.get("summary")
     case_set = baseline_prepared.get("case_set")
+    baseline_profile = baseline_prepared.get("profile")
     if not isinstance(baseline_root, Path):
         raise Phase4RemoteQwenStabilityError(
             "revision baseline result root is unavailable"
@@ -914,6 +943,9 @@ def _build_revision_baseline_binding(
         "baseline_policy_identity": summary.get("policy_identity"),
         "baseline_summary_identity": summary.get("summary_identity"),
         "baseline_profile_identity": summary.get("profile_identity"),
+        "baseline_profile_compatibility_identity": (
+            _revision_profile_compatibility_identity(baseline_profile)
+        ),
         "baseline_model_inventory_identity": summary.get(
             "model_inventory_identity"
         ),
@@ -1061,6 +1093,9 @@ def prepare_phase4_remote_qwen_stability(
         expected_model_inventory_identity=expected_model_inventory_identity,
     )
     profile_identity = _profile_identity(profile)
+    profile_compatibility_identity = (
+        _revision_profile_compatibility_identity(profile)
+    )
     inventory_identity = _require_mapping(
         inventory.get("inventory_identity"),
         "model inventory identity",
@@ -1256,9 +1291,9 @@ def prepare_phase4_remote_qwen_f3_f4_prompt_revision(
         "model inventory identity",
     )
     _assert_same_canonical(
-        profile_identity,
-        baseline_binding["baseline_profile_identity"],
-        "revision profile identity drifted from baseline",
+        profile_compatibility_identity,
+        baseline_binding["baseline_profile_compatibility_identity"],
+        "revision profile compatibility drifted from baseline",
     )
     _assert_same_canonical(
         inventory_identity,
@@ -1300,6 +1335,7 @@ def prepare_phase4_remote_qwen_f3_f4_prompt_revision(
         "policy_identity": policy["policy_identity"],
         "model_inventory_identity": inventory_identity,
         "profile_identity": profile_identity,
+        "profile_compatibility_identity": profile_compatibility_identity,
         "parent_experiment_binding": parent_binding,
         "model_root": str(model_root),
         "integrity_evidence": str(integrity_evidence),
