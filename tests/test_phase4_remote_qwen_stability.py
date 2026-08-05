@@ -781,6 +781,85 @@ class Phase4RemoteQwenStabilityRuntimeTests(unittest.TestCase):
             ),
         )
 
+    def test_revision_prepare_records_current_compatible_profile(self) -> None:
+        case_set = get_stability_case_set()
+        baseline_summary = {
+            "baseline_complete": True,
+            "experiment_mode": "baseline",
+            "case_set_identity": case_set["case_set_identity"],
+            "policy_identity": {"sha256": "policy"},
+            "summary_identity": {"sha256": "summary"},
+            "profile_identity": _PROFILE_IDENTITY,
+            "model_inventory_identity": _INVENTORY_IDENTITY,
+            "aggregate": {
+                "per_node_called_count": {
+                    node_id: runtime.CASE_COUNT
+                    for node_id in runtime._fresh.NODE_ORDER
+                },
+                "total_model_generate_calls": runtime.BASELINE_TOTAL_CALL_CAP,
+            },
+        }
+        baseline_prepared = {
+            "result_root": _ROOT,
+            "run_id": "baseline-run",
+            "case_set": case_set,
+            "inventory": {"inventory_identity": _INVENTORY_IDENTITY},
+            "profile": _FakeProfile(),
+            "summary": baseline_summary,
+        }
+        inventory = {"inventory_identity": _INVENTORY_IDENTITY}
+        gpu = {
+            "device_name": runtime._fresh._remote.REMOTE_DEVICE_NAME,
+            "total_vram_bytes": runtime._fresh._remote.REMOTE_MIN_VRAM_BYTES,
+        }
+        with _WorkspaceTempDirectory() as temp:
+            result_root = Path(temp) / "revision"
+            with patch.object(
+                runtime,
+                "_load_existing_prepared",
+                return_value=baseline_prepared,
+            ), patch.object(
+                runtime._fresh._remote,
+                "validate_remote_model_inventory",
+                return_value=inventory,
+            ), patch.object(
+                runtime._fresh._remote,
+                "_collect_remote_runtime_facts",
+                return_value={"runtime": "fake"},
+            ), patch.object(
+                runtime._fresh._remote,
+                "_probe_remote_gpu_facts",
+                return_value=gpu,
+            ), patch.object(
+                runtime._fresh.RemoteFreshIntegratedProfile,
+                "create",
+                return_value=_FakeProfile(),
+            ):
+                prepared = (
+                    runtime.prepare_phase4_remote_qwen_f3_f4_prompt_revision(
+                        model_root=_ROOT,
+                        integrity_evidence=(
+                            _ROOT / "docs" / "project_memory.md"
+                        ),
+                        baseline_root=_ROOT,
+                        result_root=result_root,
+                        run_id="revision-prepare-test",
+                    )
+                )
+        expected_compatibility = (
+            runtime._revision_profile_compatibility_identity(_FakeProfile())
+        )
+        self.assertEqual(
+            prepared["preflight"]["profile_compatibility_identity"],
+            expected_compatibility,
+        )
+        self.assertEqual(
+            prepared["baseline_binding"][
+                "baseline_profile_compatibility_identity"
+            ],
+            expected_compatibility,
+        )
+
     def test_prepare_freezes_case_set_and_no_model_policy(self) -> None:
         result_root = (
             _ROOT

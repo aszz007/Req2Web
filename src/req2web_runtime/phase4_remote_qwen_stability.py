@@ -1093,9 +1093,6 @@ def prepare_phase4_remote_qwen_stability(
         expected_model_inventory_identity=expected_model_inventory_identity,
     )
     profile_identity = _profile_identity(profile)
-    profile_compatibility_identity = (
-        _revision_profile_compatibility_identity(profile)
-    )
     inventory_identity = _require_mapping(
         inventory.get("inventory_identity"),
         "model inventory identity",
@@ -1286,6 +1283,9 @@ def prepare_phase4_remote_qwen_f3_f4_prompt_revision(
         gpu_facts=gpu_facts,
     )
     profile_identity = _profile_identity(profile)
+    profile_compatibility_identity = (
+        _revision_profile_compatibility_identity(profile)
+    )
     inventory_identity = _require_mapping(
         inventory.get("inventory_identity"),
         "model inventory identity",
