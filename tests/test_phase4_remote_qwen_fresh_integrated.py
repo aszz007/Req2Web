@@ -154,6 +154,18 @@ class Phase4RemoteFreshIntegratedProfileTests(unittest.TestCase):
             "reference_exact_keys",
             f4["exact_output_contract"],
         )
+        self.assertEqual(
+            f4["exact_output_contract"]["field_sources"]["use_case_refs"],
+            {
+                "source_path": (
+                    "projection.canonical_b_use_case_view."
+                    "use_cases[].use_case_id"
+                ),
+                "required_ref_type": "canonical_b_use_case",
+                "required_ref_revision": "canonical_b.use_case.v1",
+                "forbidden_ref_type": "registry_stable",
+            },
+        )
 
     def test_profile_is_exact_bf16_gpu0_no_offload_profile(self) -> None:
         profile = remote.RemoteFreshIntegratedProfile.create(

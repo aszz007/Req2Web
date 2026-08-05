@@ -54,7 +54,7 @@ P4_05_PROFILE_SCHEMA_VERSION = f"{P4_05_SCHEMA_PREFIX}.profile.v1"
 P4_05_POLICY_SCHEMA_VERSION = f"{P4_05_SCHEMA_PREFIX}.policy.v1"
 P4_05_RESULT_SCHEMA_VERSION = f"{P4_05_SCHEMA_PREFIX}.result.v1"
 P4_05_INPUT_SCHEMA_VERSION = f"{P4_05_SCHEMA_PREFIX}.input.v1"
-P4_05_PROMPT_SCHEMA_VERSION = f"{P4_05_SCHEMA_PREFIX}.prompt.v4"
+P4_05_PROMPT_SCHEMA_VERSION = f"{P4_05_SCHEMA_PREFIX}.prompt.v5"
 P4_05_PRE_CALL_SCHEMA_VERSION = f"{P4_05_SCHEMA_PREFIX}.pre_call.v1"
 P4_05_ATTEMPT_SCHEMA_VERSION = f"{P4_05_SCHEMA_PREFIX}.attempt.v2"
 P4_05_LEDGER_SCHEMA_VERSION = f"{P4_05_SCHEMA_PREFIX}.ledger.v1"
@@ -66,7 +66,7 @@ P4_05_AGGREGATE_LEDGER_SCHEMA_VERSION = (
 P4_05_SUPERVISOR_SCHEMA_VERSION = f"{P4_05_SCHEMA_PREFIX}.supervisor.v2"
 P4_05_STREAM_SCHEMA_VERSION = f"{P4_05_SCHEMA_PREFIX}.stream.v1"
 P4_05_WORKER_PROTOCOL = f"{P4_05_SCHEMA_PREFIX}.worker.v1"
-P4_05_PILOT_ID = "p4-05-remote-qwen-fresh-integrated-v5"
+P4_05_PILOT_ID = "p4-05-remote-qwen-fresh-integrated-v6"
 P4_05_RUN_PREFIX = "p4-05-remote-qwen-fresh-integrated-run-"
 P4_05_CASE_ID = "path3-commerce-checkout"
 P4_05_REQUEST_ID = "p4-02a-synthetic-request-001"
@@ -1676,6 +1676,29 @@ def _node_prompt(
                 "ref_id",
                 "ref_revision",
             ],
+            "field_sources": {
+                "use_case_refs": {
+                    "source_path": (
+                        "projection.canonical_b_use_case_view."
+                        "use_cases[].use_case_id"
+                    ),
+                    "required_ref_type": "canonical_b_use_case",
+                    "required_ref_revision": "canonical_b.use_case.v1",
+                    "forbidden_ref_type": "registry_stable",
+                },
+                "state_ref": {
+                    "source_path": (
+                        "projection.f2_registered_state_visibility_view."
+                        "states[].stable_id"
+                    ),
+                    "required_ref_type": "registry_stable",
+                    "required_ref_revision_source": (
+                        "projection.f2_registered_state_visibility_view."
+                        "registry_identity.revision"
+                    ),
+                    "forbidden_ref_type": "canonical_b_use_case",
+                },
+            },
             "invariants": [
                 "acceptance_checks is a non-empty array with unique non-empty local_id values",
                 "description has at least 8 characters",
@@ -1699,6 +1722,7 @@ def _node_prompt(
             "Use strict RFC 8259 JSON syntax: double-quoted keys and string values, a colon between every key and value, and no trailing commas.",
             "Every object must contain exactly the keys listed in exact_output_contract; do not add properties or alternate nesting.",
             "Every listed key is mandatory, including refs fields whose required value is the empty array [].",
+            "For F4, use_case_refs and state_ref use different namespaces; never copy a state_ref or any registry_stable reference into use_case_refs.",
             "Preserve the required node schema and semantic array order.",
             "Do not emit authoritative IDs, mappings, acceptance verdicts, or browser evidence.",
             "Do not abbreviate, truncate, omit, or split the object.",
