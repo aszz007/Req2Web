@@ -28,6 +28,7 @@ from typing import Callable, Mapping
 
 from req2web_orchestration.phase4_graph import (
     NODE_ORDER,
+    REGISTRY_REVISION,
     phase4_assemble_candidate,
     phase4_compose_candidate,
     phase4_create_mapping,
@@ -54,7 +55,7 @@ P4_05_PROFILE_SCHEMA_VERSION = f"{P4_05_SCHEMA_PREFIX}.profile.v1"
 P4_05_POLICY_SCHEMA_VERSION = f"{P4_05_SCHEMA_PREFIX}.policy.v1"
 P4_05_RESULT_SCHEMA_VERSION = f"{P4_05_SCHEMA_PREFIX}.result.v1"
 P4_05_INPUT_SCHEMA_VERSION = f"{P4_05_SCHEMA_PREFIX}.input.v1"
-P4_05_PROMPT_SCHEMA_VERSION = f"{P4_05_SCHEMA_PREFIX}.prompt.v5"
+P4_05_PROMPT_SCHEMA_VERSION = f"{P4_05_SCHEMA_PREFIX}.prompt.v6"
 P4_05_PRE_CALL_SCHEMA_VERSION = f"{P4_05_SCHEMA_PREFIX}.pre_call.v1"
 P4_05_ATTEMPT_SCHEMA_VERSION = f"{P4_05_SCHEMA_PREFIX}.attempt.v2"
 P4_05_LEDGER_SCHEMA_VERSION = f"{P4_05_SCHEMA_PREFIX}.ledger.v1"
@@ -66,7 +67,7 @@ P4_05_AGGREGATE_LEDGER_SCHEMA_VERSION = (
 P4_05_SUPERVISOR_SCHEMA_VERSION = f"{P4_05_SCHEMA_PREFIX}.supervisor.v2"
 P4_05_STREAM_SCHEMA_VERSION = f"{P4_05_SCHEMA_PREFIX}.stream.v1"
 P4_05_WORKER_PROTOCOL = f"{P4_05_SCHEMA_PREFIX}.worker.v1"
-P4_05_PILOT_ID = "p4-05-remote-qwen-fresh-integrated-v6"
+P4_05_PILOT_ID = "p4-05-remote-qwen-fresh-integrated-v7"
 P4_05_RUN_PREFIX = "p4-05-remote-qwen-fresh-integrated-run-"
 P4_05_CASE_ID = "path3-commerce-checkout"
 P4_05_REQUEST_ID = "p4-02a-synthetic-request-001"
@@ -1692,10 +1693,7 @@ def _node_prompt(
                         "states[].stable_id"
                     ),
                     "required_ref_type": "registry_stable",
-                    "required_ref_revision_source": (
-                        "projection.f2_registered_state_visibility_view."
-                        "registry_identity.revision"
-                    ),
+                    "required_ref_revision": REGISTRY_REVISION,
                     "forbidden_ref_type": "canonical_b_use_case",
                 },
             },

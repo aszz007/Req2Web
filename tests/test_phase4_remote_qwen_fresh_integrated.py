@@ -166,6 +166,12 @@ class Phase4RemoteFreshIntegratedProfileTests(unittest.TestCase):
                 "forbidden_ref_type": "registry_stable",
             },
         )
+        self.assertEqual(
+            f4["exact_output_contract"]["field_sources"]["state_ref"][
+                "required_ref_revision"
+            ],
+            "req2web.phase4.registry.p4_02a.v1",
+        )
 
     def test_profile_is_exact_bf16_gpu0_no_offload_profile(self) -> None:
         profile = remote.RemoteFreshIntegratedProfile.create(
