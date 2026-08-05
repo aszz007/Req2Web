@@ -225,7 +225,7 @@ class Phase4RemoteFreshIntegratedPolicyTests(unittest.TestCase):
 
 class Phase4RemoteFreshIntegratedArtifactTests(unittest.TestCase):
     def test_preflight_writes_only_offline_no_model_artifacts(self) -> None:
-        result_root = Path("C:/p4-05-test-only/preflight-result")
+        result_root = _ROOT / ".p4-05-test-only-preflight-result"
         with patch.object(
             remote._remote,
             "validate_remote_model_inventory",
@@ -305,7 +305,12 @@ class Phase4RemoteFreshIntegratedArtifactTests(unittest.TestCase):
                     node_id,
                     output,
                 )
-                raw = remote._canonical_bytes(output)
+                raw = json.dumps(
+                    output,
+                    ensure_ascii=False,
+                    separators=(",", ":"),
+                    allow_nan=False,
+                ).encode("utf-8")
                 attempt_root = source_root / "attempts" / node_id
                 attempt_root.mkdir(parents=True)
                 attempt = remote._attempt_record(
@@ -327,9 +332,31 @@ class Phase4RemoteFreshIntegratedArtifactTests(unittest.TestCase):
                 )
                 attempts[node_id] = attempt
                 (attempt_root / "raw_response.bin").write_bytes(raw)
-                (attempt_root / "validated_node_output.json").write_bytes(raw)
+                (attempt_root / "validated_node_output.json").write_bytes(
+                    remote._canonical_bytes(output)
+                )
                 (attempt_root / "attempt_result.json").write_bytes(
                     remote._canonical_bytes(attempt)
+                )
+                self.assertEqual(
+                    set(
+                        json.loads(
+                            (
+                                attempt_root
+                                / "validated_node_output.json"
+                            ).read_bytes()
+                        )
+                    ),
+                    (
+                        {
+                            "page_title",
+                            "layout_pattern",
+                            "sections",
+                            "components",
+                        }
+                        if node_id == "F1"
+                        else {"states"}
+                    ),
                 )
             ledger = remote._call_ledger(
                 run_id=f"{remote.P4_05_RUN_PREFIX}resume-source",
@@ -417,7 +444,7 @@ class Phase4RemoteFreshIntegratedWorkerBoundaryTests(unittest.TestCase):
             )
 
     def test_graph_bound_material_failure_precedes_model_worker(self) -> None:
-        result_root = Path("C:/p4-05-test-only/fixed-binding-failure")
+        result_root = _ROOT / ".p4-05-test-only-fixed-binding-failure"
         with patch.object(
             remote,
             "_prepare_graph_bound_delivery_materials",

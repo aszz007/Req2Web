@@ -2142,7 +2142,7 @@ def _restore_validated_prefix(
             raise Phase4RemoteFreshIntegratedError(
                 "resume validated nodes are not a contiguous prefix"
             )
-        output = _read_canonical_artifact(
+        validated_output = _read_canonical_artifact(
             output_path,
             f"resume {node_id} validated output",
         )
@@ -2151,8 +2151,23 @@ def _restore_validated_prefix(
             f"resume {node_id} attempt result",
         )
         raw_path = attempt_root / "raw_response.bin"
+        raw_bytes = (
+            b""
+            if raw_path.is_symlink() or not raw_path.is_file()
+            else raw_path.read_bytes()
+        )
+        output = (
+            None
+            if not raw_bytes
+            else _parse_model_json(
+                raw_bytes,
+                f"resume {node_id} raw response",
+            )
+        )
         if (
-            not isinstance(output, Mapping)
+            not isinstance(validated_output, Mapping)
+            or not isinstance(output, Mapping)
+            or _canonical_bytes(output) != _canonical_bytes(validated_output)
             or not isinstance(attempt, Mapping)
             or attempt.get("node_id") != node_id
             or attempt.get("pilot_id") != source_ledger.get("pilot_id")
@@ -2163,11 +2178,9 @@ def _restore_validated_prefix(
             or attempt.get("generate_started") is not True
             or attempt.get("call_count") != 1
             or attempt.get("retry_count") != P4_05_RETRY_COUNT
-            or raw_path.is_symlink()
-            or not raw_path.is_file()
             or attempt.get("raw_identity")
             != _identity(
-                raw_path.read_bytes(),
+                raw_bytes,
                 revision=f"{P4_05_SCHEMA_PREFIX}.raw.v1",
                 identity_kind="raw_bytes",
             )
@@ -2190,7 +2203,7 @@ def _restore_validated_prefix(
                     revision=P4_05_ATTEMPT_SCHEMA_VERSION,
                 ),
                 "validated_output_identity": _identity(
-                    output,
+                    validated_output,
                     revision=f"{node_id}.output.p4.v1",
                 ),
                 "raw_identity": attempt["raw_identity"],
