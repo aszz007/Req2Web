@@ -99,6 +99,8 @@ from req2web_provider.semantic_candidate import (  # noqa: E402
 from req2web_rag.corpus import ROLE_ORDER  # noqa: E402
 import req2web_runtime.phase4_fresh_delivery as fresh_delivery  # noqa: E402
 from req2web_runtime.phase4_fresh_delivery import (  # noqa: E402
+    PHASE4_FRESH_DELIVERY_POLICY_A07A_DIRECT_V1,
+    PHASE4_FRESH_DELIVERY_POLICY_FIELD_GATE_V1,
     PHASE4_FRESH_ROUTE_OUTCOME_SCHEMA_VERSION,
     PHASE4_GRAPH_BOUND_DELIVERY_MATERIALS_SCHEMA_VERSION,
     Phase4FreshDeliveryInput,
@@ -422,6 +424,7 @@ class Phase4FreshDeliveryTerminalIntegrationTests(unittest.TestCase):
         *,
         raw_candidate: bytes,
         acceptance_key: str,
+        delivery_policy: str = PHASE4_FRESH_DELIVERY_POLICY_FIELD_GATE_V1,
     ) -> tuple[object, dict[str, object]]:
         assembled = CanonicalPageSpecAssembler().assemble(
             ProviderRawResponse.from_bytes(raw_candidate),
@@ -519,6 +522,7 @@ class Phase4FreshDeliveryTerminalIntegrationTests(unittest.TestCase):
                 fallback_record=fallback_record,
                 fallback_snapshot_dir=Path(tempfile.gettempdir()),
                 scripted_acceptance_fixture=acceptance_key,
+                delivery_policy=delivery_policy,
                 **self.live_chain,
             )
         return result, captured
@@ -557,6 +561,17 @@ class Phase4FreshDeliveryTerminalIntegrationTests(unittest.TestCase):
             repair_patch.first_page_spec_sha256,
             report.first_page_spec_sha256,
         )
+
+    def test_direct_policy_bypasses_a07b_and_uses_existing_a07a(self) -> None:
+        receipt, captured = self._dispatch(
+            raw_candidate=self.raw_repair_candidate,
+            acceptance_key=SCRIPTED_ACCEPTANCE_PASS_KEY,
+            delivery_policy=PHASE4_FRESH_DELIVERY_POLICY_A07A_DIRECT_V1,
+        )
+        self.assertIsNotNone(receipt)
+        self.assertEqual(captured["runner"], "tier_a_07a")
+        self.assertNotIn("field_gate_report", captured)
+        self.assertNotIn("repair_patch", captured)
 
     def test_acceptance_failure_delivers_same_case_g0_fallback(self) -> None:
         receipt, captured = self._dispatch(

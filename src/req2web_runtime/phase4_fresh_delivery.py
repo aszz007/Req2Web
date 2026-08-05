@@ -72,6 +72,8 @@ from req2web_rag.corpus import ROLE_ORDER
 
 
 PHASE4_FRESH_DELIVERY_SOURCE_KIND = "phase4_fresh_integrated_assembled"
+PHASE4_FRESH_DELIVERY_POLICY_FIELD_GATE_V1 = "field_gate_then_one_repair_v1"
+PHASE4_FRESH_DELIVERY_POLICY_A07A_DIRECT_V1 = "a07a_direct_first_pass_v1"
 PHASE4_FRESH_ROUTE_OUTCOME_SCHEMA_VERSION = (
     "req2web.phase4.fresh_delivery.route_outcome.v1"
 )
@@ -1541,8 +1543,15 @@ def run_phase4_fresh_delivery(
     fallback_record: FrozenG0FallbackRecord,
     fallback_snapshot_dir: Path,
     scripted_acceptance_fixture: object | None = None,
+    delivery_policy: str = PHASE4_FRESH_DELIVERY_POLICY_FIELD_GATE_V1,
 ) -> Phase4FreshDeliveryReceipt:
     """Validate a fresh source and run existing no-model downstream gates."""
+
+    if delivery_policy not in {
+        PHASE4_FRESH_DELIVERY_POLICY_FIELD_GATE_V1,
+        PHASE4_FRESH_DELIVERY_POLICY_A07A_DIRECT_V1,
+    }:
+        raise Phase4FreshDeliveryError("fresh delivery policy is unsupported")
 
     source = Phase4FreshDeliveryInput.from_result_root(
         source_root,
@@ -1628,57 +1637,64 @@ def run_phase4_fresh_delivery(
         "fallback_output_dir": root / "fallback",
         "scripted_acceptance_fixture": fixture,
     }
-    try:
-        field_gate_report = create_tier_a_07b_field_gate_report(
-            case_id=source.case_id,
-            page_spec=source.assembled.page_spec,
-            local_request=local_request,
-        )
-        field_gate_report.validate_against(
-            source.case_id,
-            source.assembled.page_spec,
-            field_gate_report.request_sha256,
-        )
-    except Exception as exc:
-        raise Phase4FreshDeliveryError(
-            "fresh delivery field gate failed closed"
-        ) from exc
-
-    if field_gate_report.decision == "pass":
+    if delivery_policy == PHASE4_FRESH_DELIVERY_POLICY_A07A_DIRECT_V1:
         downstream = first_pass(object(), **common)
         downstream_kind = "tier_a_07a"
-    elif field_gate_report.decision == "repair" and field_gate_report.repair_eligible:
-        if (
-            field_gate_report.reported_field is None
-            or field_gate_report.expected is None
-        ):
-            raise Phase4FreshDeliveryError(
-                "fresh delivery repair report is incomplete"
-            )
-        repair_patch = TierA07bRepairPatch.create(
-            report_id=field_gate_report.report_id,
-            report_sha256=field_gate_report.sha256(),
-            first_page_id=source.assembled.page_spec.page_id,
-            first_page_spec_sha256=field_gate_report.first_page_spec_sha256,
-            attempt_index=1,
-            operations=(
-                (
-                    field_gate_report.reported_field,
-                    field_gate_report.expected,
-                ),
-            ),
-        )
-        downstream = one_repair(
-            object(),
-            **common,
-            field_gate_report=field_gate_report.canonical_bytes(),
-            repair_patch=repair_patch.canonical_bytes(),
-        )
-        downstream_kind = "tier_a_07b"
     else:
-        raise Phase4FreshDeliveryError(
-            "fresh delivery field gate returned a non-routable decision"
-        )
+        try:
+            field_gate_report = create_tier_a_07b_field_gate_report(
+                case_id=source.case_id,
+                page_spec=source.assembled.page_spec,
+                local_request=local_request,
+            )
+            field_gate_report.validate_against(
+                source.case_id,
+                source.assembled.page_spec,
+                field_gate_report.request_sha256,
+            )
+        except Exception as exc:
+            raise Phase4FreshDeliveryError(
+                "fresh delivery field gate failed closed"
+            ) from exc
+
+        if field_gate_report.decision == "pass":
+            downstream = first_pass(object(), **common)
+            downstream_kind = "tier_a_07a"
+        elif (
+            field_gate_report.decision == "repair"
+            and field_gate_report.repair_eligible
+        ):
+            if (
+                field_gate_report.reported_field is None
+                or field_gate_report.expected is None
+            ):
+                raise Phase4FreshDeliveryError(
+                    "fresh delivery repair report is incomplete"
+                )
+            repair_patch = TierA07bRepairPatch.create(
+                report_id=field_gate_report.report_id,
+                report_sha256=field_gate_report.sha256(),
+                first_page_id=source.assembled.page_spec.page_id,
+                first_page_spec_sha256=field_gate_report.first_page_spec_sha256,
+                attempt_index=1,
+                operations=(
+                    (
+                        field_gate_report.reported_field,
+                        field_gate_report.expected,
+                    ),
+                ),
+            )
+            downstream = one_repair(
+                object(),
+                **common,
+                field_gate_report=field_gate_report.canonical_bytes(),
+                repair_patch=repair_patch.canonical_bytes(),
+            )
+            downstream_kind = "tier_a_07b"
+        else:
+            raise Phase4FreshDeliveryError(
+                "fresh delivery field gate returned a non-routable decision"
+            )
     receipt = Phase4FreshDeliveryReceipt.create(
         source=source,
         route_outcome=route,
@@ -1693,6 +1709,8 @@ def run_phase4_fresh_delivery(
 
 __all__ = [
     "PHASE4_FRESH_CLAIM_BOUNDARY",
+    "PHASE4_FRESH_DELIVERY_POLICY_A07A_DIRECT_V1",
+    "PHASE4_FRESH_DELIVERY_POLICY_FIELD_GATE_V1",
     "PHASE4_FRESH_DELIVERY_RECEIPT_SCHEMA_VERSION",
     "PHASE4_FRESH_DELIVERY_SOURCE_KIND",
     "PHASE4_FRESH_ROUTE_OUTCOME_SCHEMA_VERSION",

@@ -1496,6 +1496,7 @@ def _read_attempt_evidence(
     expected_model_inventory_identity: Mapping[str, object] | None,
     parent_experiment_binding: Mapping[str, object] | None,
     expected_prompt_revision: str | None = None,
+    expected_prompt_nodes: tuple[str, ...] = F3_F4_REVISION_NODES,
 ) -> tuple[
     dict[str, int],
     dict[str, bool],
@@ -1647,7 +1648,7 @@ def _read_attempt_evidence(
         assert prompt_value is not None
         expected_node_prompt_revision = (
             expected_prompt_revision
-            if entry.name in F3_F4_REVISION_NODES
+            if entry.name in expected_prompt_nodes
             else None
         )
         if prompt_value.get("prompt_revision") != expected_node_prompt_revision:
@@ -2272,6 +2273,7 @@ def _inspect_child_evidence(
     expected_model_inventory_identity: Mapping[str, object] | None,
     parent_experiment_binding: Mapping[str, object] | None,
     expected_prompt_revision: str | None = None,
+    expected_prompt_nodes: tuple[str, ...] = F3_F4_REVISION_NODES,
     expected_historical_per_node_calls: Mapping[str, int] | None = None,
 ) -> dict[str, object]:
     cases_root = child_root.parent
@@ -2289,6 +2291,7 @@ def _inspect_child_evidence(
             expected_model_inventory_identity=expected_model_inventory_identity,
             parent_experiment_binding=parent_experiment_binding,
             expected_prompt_revision=expected_prompt_revision,
+            expected_prompt_nodes=expected_prompt_nodes,
         )
     )
     ledger = _read_json(
@@ -2505,6 +2508,8 @@ def _summarize_case(
     expected_model_inventory_identity: Mapping[str, object] | None = None,
     parent_experiment_binding: Mapping[str, object] | None = None,
     prompt_revision: str | None = None,
+    prompt_nodes: tuple[str, ...] = F3_F4_REVISION_NODES,
+    experiment_mode: str = F3_F4_REVISION_MODE,
     baseline_binding: Mapping[str, object] | None = None,
     expected_historical_per_node_calls: Mapping[str, int] | None = None,
 ) -> dict[str, object]:
@@ -2517,6 +2522,7 @@ def _summarize_case(
         expected_model_inventory_identity=expected_model_inventory_identity,
         parent_experiment_binding=parent_experiment_binding,
         expected_prompt_revision=prompt_revision,
+        expected_prompt_nodes=prompt_nodes,
         expected_historical_per_node_calls=expected_historical_per_node_calls,
     )
     ledger_calls = evidence["calls"]
@@ -2699,7 +2705,7 @@ def _summarize_case(
         "automatic_retry": False,
     }
     if prompt_revision is not None:
-        root["experiment_mode"] = F3_F4_REVISION_MODE
+        root["experiment_mode"] = experiment_mode
         root["prompt_revision"] = prompt_revision
         root["baseline_binding"] = (
             None
@@ -2728,6 +2734,8 @@ def _validate_case_result(
     expected_model_inventory_identity: Mapping[str, object] | None,
     parent_experiment_binding: Mapping[str, object] | None,
     prompt_revision: str | None = None,
+    prompt_nodes: tuple[str, ...] = F3_F4_REVISION_NODES,
+    experiment_mode: str = F3_F4_REVISION_MODE,
     expected_historical_per_node_calls: Mapping[str, int] | None = None,
 ) -> dict[str, object]:
     data = dict(case_result)
@@ -2835,7 +2843,7 @@ def _validate_case_result(
                 "baseline case-result unexpectedly contains a prompt revision"
             )
     else:
-        if data.get("experiment_mode") != F3_F4_REVISION_MODE:
+        if data.get("experiment_mode") != experiment_mode:
             raise Phase4RemoteQwenStabilityError(
                 "revision case-result experiment mode drifted"
             )
@@ -2897,6 +2905,7 @@ def _validate_case_result(
         expected_model_inventory_identity=expected_model_inventory_identity,
         parent_experiment_binding=parent_experiment_binding,
         expected_prompt_revision=prompt_revision,
+        expected_prompt_nodes=prompt_nodes,
         expected_historical_per_node_calls=expected_historical_per_node_calls,
     )
     evidence_calls = evidence["calls"]
@@ -3098,6 +3107,8 @@ def _load_progress(
     expected_profile_identity: Mapping[str, object] | None,
     expected_model_inventory_identity: Mapping[str, object] | None,
     prompt_revision: str | None = None,
+    prompt_nodes: tuple[str, ...] = F3_F4_REVISION_NODES,
+    experiment_mode: str = F3_F4_REVISION_MODE,
     expected_historical_per_node_calls: Mapping[str, int] | None = None,
 ) -> list[dict[str, object]]:
     progress_root = result_root / "progress"
@@ -3194,6 +3205,8 @@ def _load_progress(
             expected_model_inventory_identity=expected_model_inventory_identity,
             parent_experiment_binding=child_parent_binding,
             prompt_revision=prompt_revision,
+            prompt_nodes=prompt_nodes,
+            experiment_mode=experiment_mode,
             expected_historical_per_node_calls=(
                 expected_historical_per_node_calls
             ),

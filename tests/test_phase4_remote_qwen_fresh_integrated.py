@@ -67,7 +67,9 @@ except ModuleNotFoundError as exc:
 import req2web_runtime.phase4_remote_qwen as remote_base
 import req2web_runtime.phase4_remote_qwen_fresh_integrated as remote
 from req2web_orchestration.phase4_graph import (
+    phase4_create_mapping,
     phase4_create_portable_authority_state,
+    phase4_project_node_input_authority,
     phase4_register_node_output,
     phase4_synthetic_fixture_output,
     synthetic_commerce_b_input,
@@ -148,6 +150,61 @@ class Phase4RemoteFreshIntegratedProfileTests(unittest.TestCase):
                 prompt_revision=remote.P4_05_F3_F4_PROMPT_REVISION,
             )
         )
+        f4_direct = json.loads(
+            remote._node_prompt(
+                node_id="F4",
+                input_bytes=input_bytes,
+                prompt_revision=(
+                    remote.P4_05_F4_DIRECT_ACCEPTANCE_PROMPT_REVISION
+                ),
+            )
+        )
+        b_input = synthetic_commerce_b_input()
+        state = phase4_create_portable_authority_state(b_input)
+        for upstream_node_id in ("F1", "F2"):
+            state = phase4_register_node_output(
+                state,
+                upstream_node_id,
+                phase4_synthetic_fixture_output(upstream_node_id, state),
+            )
+        f3_full_input_bytes = remote._node_input(
+            node_id="F3",
+            b_input=b_input,
+            state=state,
+            authority_projection=phase4_project_node_input_authority(
+                state,
+                "F3",
+            ),
+        )
+        f3_full_direct = json.loads(
+            remote._node_prompt(
+                node_id="F3",
+                input_bytes=f3_full_input_bytes,
+                prompt_revision=remote.P4_05_FULL_DIRECT_PROMPT_REVISION,
+            )
+        )
+        state = phase4_register_node_output(
+            state,
+            "F3",
+            phase4_synthetic_fixture_output("F3", state),
+        )
+        phase4_create_mapping(state)
+        f4_full_input_bytes = remote._node_input(
+            node_id="F4",
+            b_input=b_input,
+            state=state,
+            authority_projection=phase4_project_node_input_authority(
+                state,
+                "F4",
+            ),
+        )
+        f4_full_direct = json.loads(
+            remote._node_prompt(
+                node_id="F4",
+                input_bytes=f4_full_input_bytes,
+                prompt_revision=remote.P4_05_FULL_DIRECT_PROMPT_REVISION,
+            )
+        )
 
         self.assertEqual(
             f1["schema_version"],
@@ -199,6 +256,197 @@ class Phase4RemoteFreshIntegratedProfileTests(unittest.TestCase):
             "assign use cases monotonically across the supplied F2 state order: use the state at the same zero-based position when available, otherwise reuse only the final supplied state",
             f4_revision["exact_output_contract"]["invariants"],
         )
+        self.assertEqual(
+            f4_direct["prompt_revision"],
+            remote.P4_05_F4_DIRECT_ACCEPTANCE_PROMPT_REVISION,
+        )
+        self.assertIn(
+            "derive every state_ref from the actual supplied f3_registered_interaction_view; the selected stable state ID must appear as target_state_stable_id on at least one mapped interaction for that use case",
+            f4_direct["exact_output_contract"]["invariants"],
+        )
+        self.assertEqual(
+            f3_full_direct["prompt_revision"],
+            remote.P4_05_FULL_DIRECT_PROMPT_REVISION,
+        )
+        self.assertIn(
+            "for every adjacent pair in supplied F2 state order, include at least one forward transition from the earlier state to the later state",
+            f3_full_direct["exact_output_contract"]["invariants"],
+        )
+        self.assertIn(
+            "let N be the number of supplied F2 states and emit exactly 2*N-1 interactions",
+            f3_full_direct["exact_output_contract"]["invariants"],
+        )
+        self.assertIn(
+            "use this exact interaction order: same-state work for state 0, forward transition state 0 to state 1, same-state work for state 1, then continue alternating until same-state work for the final state",
+            f3_full_direct["exact_output_contract"]["invariants"],
+        )
+        f3_input = json.loads(f3_full_input_bytes)
+        state_local_ids = [
+            row["local_id"]
+            for row in f3_input["projection"][
+                "f2_registered_state_visibility_view"
+            ]["states"]
+        ]
+        expected_plan: list[tuple[str, str, str]] = []
+        for state_index, state_local_id in enumerate(state_local_ids):
+            expected_plan.append(
+                ("same_state_work", state_local_id, state_local_id)
+            )
+            if state_index + 1 < len(state_local_ids):
+                expected_plan.append(
+                    (
+                        "forward_transition",
+                        state_local_id,
+                        state_local_ids[state_index + 1],
+                    )
+                )
+        self.assertEqual(
+            [
+                (
+                    row["transition_kind"],
+                    row["source_state_local_id"],
+                    row["target_state_local_id"],
+                )
+                for row in f3_full_direct["required_interaction_plan"]
+            ],
+            expected_plan,
+        )
+        self.assertEqual(
+            f4_full_direct["prompt_revision"],
+            remote.P4_05_FULL_DIRECT_PROMPT_REVISION,
+        )
+        self.assertIn(
+            "derive every state_ref from the actual supplied f3_registered_interaction_view; the selected stable state ID must appear as target_state_stable_id on at least one mapped interaction for that use case",
+            f4_full_direct["exact_output_contract"]["invariants"],
+        )
+        f4_input = json.loads(f4_full_input_bytes)
+        f4_use_cases = f4_input["projection"]["canonical_b_use_case_view"][
+            "use_cases"
+        ]
+        f4_states = f4_input["projection"][
+            "f2_registered_state_visibility_view"
+        ]["states"]
+        self.assertEqual(
+            [
+                (
+                    row["use_case_ref"]["ref_id"],
+                    row["state_ref"]["ref_id"],
+                )
+                for row in f4_full_direct[
+                    "required_acceptance_target_plan"
+                ]
+            ],
+            [
+                (
+                    use_case["use_case_id"],
+                    f4_states[min(index, len(f4_states) - 1)]["stable_id"],
+                )
+                for index, use_case in enumerate(f4_use_cases)
+            ],
+        )
+
+    def test_f4_direct_acceptance_receipt_is_replayable_and_non_rewriting(
+        self,
+    ) -> None:
+        b_input = synthetic_commerce_b_input()
+        state = phase4_create_portable_authority_state(b_input)
+        for node_id in ("F1", "F2"):
+            state = phase4_register_node_output(
+                state,
+                node_id,
+                phase4_synthetic_fixture_output(node_id, state),
+            )
+        f3 = phase4_synthetic_fixture_output("F3", state)
+        f3["interactions"][0]["target_state_local_id"] = "state-checkout"
+        state = phase4_register_node_output(state, "F3", f3)
+        phase4_create_mapping(state)
+        input_bytes = remote._node_input(
+            node_id="F4",
+            b_input=b_input,
+            state=state,
+            authority_projection=phase4_project_node_input_authority(
+                state,
+                "F4",
+            ),
+        )
+        output = phase4_synthetic_fixture_output("F4", state)
+        before = copy.deepcopy(output)
+        raw = remote._canonical_bytes(output)
+
+        receipt = remote._f4_direct_acceptance_policy_receipt(
+            input_bytes=input_bytes,
+            output=output,
+            raw_bytes=raw,
+        )
+
+        self.assertEqual(output, before)
+        self.assertIs(receipt["automatic_rewrite"], False)
+        self.assertIs(receipt["automatic_retry"], False)
+        self.assertEqual(receipt["a07b_status"], "not_executed_by_policy")
+        self.assertEqual(len(receipt["selected_targets"]), 2)
+
+    def test_f4_direct_acceptance_receipt_rejects_unreachable_or_backward_targets(
+        self,
+    ) -> None:
+        b_input = synthetic_commerce_b_input()
+        state = phase4_create_portable_authority_state(b_input)
+        for node_id in ("F1", "F2"):
+            state = phase4_register_node_output(
+                state,
+                node_id,
+                phase4_synthetic_fixture_output(node_id, state),
+            )
+        f3 = phase4_synthetic_fixture_output("F3", state)
+        f3["interactions"][0]["target_state_local_id"] = "state-checkout"
+        state = phase4_register_node_output(state, "F3", f3)
+        phase4_create_mapping(state)
+        input_bytes = remote._node_input(
+            node_id="F4",
+            b_input=b_input,
+            state=state,
+            authority_projection=phase4_project_node_input_authority(
+                state,
+                "F4",
+            ),
+        )
+        output = phase4_synthetic_fixture_output("F4", state)
+        state_rows = [
+            row
+            for row in state["registry_inventory"]
+            if row["node_id"] == "F2"
+        ]
+        initial_state_id = state_rows[0]["stable_id"]
+        checkout_state_id = state_rows[1]["stable_id"]
+        final_state_id = state_rows[2]["stable_id"]
+
+        unreachable = copy.deepcopy(output)
+        unreachable["acceptance_checks"][0]["state_ref"]["ref_id"] = (
+            initial_state_id
+        )
+        with self.assertRaisesRegex(
+            remote.Phase4RemoteFreshIntegratedError,
+            "actual reachable mapped interaction target",
+        ):
+            remote._f4_direct_acceptance_policy_receipt(
+                input_bytes=input_bytes,
+                output=unreachable,
+                raw_bytes=remote._canonical_bytes(unreachable),
+            )
+
+        backward = copy.deepcopy(output)
+        backward["acceptance_checks"][0]["state_ref"]["ref_id"] = final_state_id
+        backward["acceptance_checks"][1]["state_ref"]["ref_id"] = (
+            checkout_state_id
+        )
+        with self.assertRaisesRegex(
+            remote.Phase4RemoteFreshIntegratedError,
+            "target order is not monotonic",
+        ):
+            remote._f4_direct_acceptance_policy_receipt(
+                input_bytes=input_bytes,
+                output=backward,
+                raw_bytes=remote._canonical_bytes(backward),
+            )
 
     def test_profile_is_exact_bf16_gpu0_no_offload_profile(self) -> None:
         profile = remote.RemoteFreshIntegratedProfile.create(

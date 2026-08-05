@@ -45,6 +45,8 @@ from req2web_runtime import phase4_local_qwen as _local
 from req2web_runtime import phase4_local_qwen_fresh_integrated as _fresh
 from req2web_runtime import phase4_remote_qwen as _remote
 from req2web_runtime.phase4_fresh_delivery import (
+    PHASE4_FRESH_DELIVERY_POLICY_A07A_DIRECT_V1,
+    PHASE4_FRESH_DELIVERY_POLICY_FIELD_GATE_V1,
     Phase4GraphBoundDeliveryMaterials,
     build_phase4_graph_bound_delivery_materials,
     run_phase4_fresh_delivery,
@@ -86,7 +88,18 @@ P4_05_GENERATE_CALL_CAP = 1
 P4_05_TOTAL_REAL_MODEL_CALL_CAP_PER_NODE = 3
 P4_05_RETRY_COUNT = 0
 P4_05_F3_F4_PROMPT_REVISION = "f3_f4_unique_reachable_acceptance_v1"
+P4_05_F4_DIRECT_ACCEPTANCE_PROMPT_REVISION = (
+    "f4_actual_interaction_target_a07a_direct_v2"
+)
+P4_05_FULL_DIRECT_PROMPT_REVISION = (
+    "f3_f4_explicit_actual_state_plan_a07a_direct_v3"
+)
 P4_05_REVISION_PROMPT_NODES = ("F3", "F4")
+P4_05_F4_DIRECT_ACCEPTANCE_PROMPT_NODES = ("F4",)
+P4_05_FULL_DIRECT_PROMPT_NODES = ("F3", "F4")
+P4_05_F4_DIRECT_ACCEPTANCE_POLICY_RECEIPT_SCHEMA_VERSION = (
+    f"{P4_05_SCHEMA_PREFIX}.f4_direct_acceptance_policy_receipt.v1"
+)
 P4_05_RESUME_PREFIX_F1_F2 = "F1-F2"
 P4_05_RESUME_PREFIX_F1_F3 = "F1-F3"
 P4_05_DTYPE = "bfloat16"
@@ -338,10 +351,14 @@ def _validate_prompt_revision(
 ) -> None:
     if prompt_revision is None:
         return
-    if (
-        prompt_revision != P4_05_F3_F4_PROMPT_REVISION
-        or node_id not in P4_05_REVISION_PROMPT_NODES
-    ):
+    prompt_nodes = {
+        P4_05_F3_F4_PROMPT_REVISION: P4_05_REVISION_PROMPT_NODES,
+        P4_05_F4_DIRECT_ACCEPTANCE_PROMPT_REVISION: (
+            P4_05_F4_DIRECT_ACCEPTANCE_PROMPT_NODES
+        ),
+        P4_05_FULL_DIRECT_PROMPT_REVISION: P4_05_FULL_DIRECT_PROMPT_NODES,
+    }.get(prompt_revision)
+    if prompt_nodes is None or node_id not in prompt_nodes:
         raise Phase4RemoteFreshIntegratedError(
             "unsupported P4-05 prompt revision for node"
         )
@@ -356,9 +373,169 @@ def _prompt_revision_for_node(
         node_id=node_id,
         prompt_revision=prompt_revision,
     )
-    if node_id not in P4_05_REVISION_PROMPT_NODES:
+    prompt_nodes = {
+        P4_05_F3_F4_PROMPT_REVISION: P4_05_REVISION_PROMPT_NODES,
+        P4_05_F4_DIRECT_ACCEPTANCE_PROMPT_REVISION: (
+            P4_05_F4_DIRECT_ACCEPTANCE_PROMPT_NODES
+        ),
+        P4_05_FULL_DIRECT_PROMPT_REVISION: P4_05_FULL_DIRECT_PROMPT_NODES,
+    }.get(prompt_revision, ())
+    if node_id not in prompt_nodes:
         return None
     return prompt_revision
+
+
+def _prompt_nodes_for_revision(prompt_revision: str | None) -> tuple[str, ...]:
+    if prompt_revision is None:
+        return ()
+    prompt_nodes = {
+        P4_05_F3_F4_PROMPT_REVISION: P4_05_REVISION_PROMPT_NODES,
+        P4_05_F4_DIRECT_ACCEPTANCE_PROMPT_REVISION: (
+            P4_05_F4_DIRECT_ACCEPTANCE_PROMPT_NODES
+        ),
+        P4_05_FULL_DIRECT_PROMPT_REVISION: P4_05_FULL_DIRECT_PROMPT_NODES,
+    }.get(prompt_revision)
+    if prompt_nodes is None:
+        raise Phase4RemoteFreshIntegratedError(
+            "unsupported P4-05 prompt revision"
+        )
+    return prompt_nodes
+
+
+def _uses_f4_direct_acceptance(prompt_revision: str | None) -> bool:
+    return prompt_revision in {
+        P4_05_F4_DIRECT_ACCEPTANCE_PROMPT_REVISION,
+        P4_05_FULL_DIRECT_PROMPT_REVISION,
+    }
+
+
+def _f3_required_interaction_plan(input_bytes: bytes) -> list[dict[str, object]]:
+    value = _strict_json(input_bytes, "F3 full-direct input")
+    envelope = _validate_node_input_value(value, "F3")
+    projection = envelope["projection"]
+    if not isinstance(projection, Mapping):
+        raise Phase4RemoteFreshIntegratedError(
+            "F3 full-direct projection is invalid"
+        )
+    state_view = projection.get("f2_registered_state_visibility_view")
+    if not isinstance(state_view, Mapping):
+        raise Phase4RemoteFreshIntegratedError(
+            "F3 full-direct state view is unavailable"
+        )
+    states = state_view.get("states")
+    if not isinstance(states, list) or not states:
+        raise Phase4RemoteFreshIntegratedError(
+            "F3 full-direct state order is unavailable"
+        )
+
+    plan: list[dict[str, object]] = []
+    for state_index, state in enumerate(states):
+        if not isinstance(state, Mapping):
+            raise Phase4RemoteFreshIntegratedError(
+                "F3 full-direct state row is invalid"
+            )
+        local_id = state.get("local_id")
+        visible = state.get("visible_component_local_ids")
+        if (
+            not isinstance(local_id, str)
+            or not local_id
+            or not isinstance(visible, list)
+            or not visible
+            or any(not isinstance(item, str) or not item for item in visible)
+        ):
+            raise Phase4RemoteFreshIntegratedError(
+                "F3 full-direct state binding is invalid"
+            )
+        plan.append(
+            {
+                "position": len(plan),
+                "transition_kind": "same_state_work",
+                "source_state_local_id": local_id,
+                "target_state_local_id": local_id,
+                "allowed_trigger_component_local_ids": list(visible),
+            }
+        )
+        if state_index + 1 < len(states):
+            next_state = states[state_index + 1]
+            if not isinstance(next_state, Mapping) or not isinstance(
+                next_state.get("local_id"), str
+            ):
+                raise Phase4RemoteFreshIntegratedError(
+                    "F3 full-direct next-state binding is invalid"
+                )
+            plan.append(
+                {
+                    "position": len(plan),
+                    "transition_kind": "forward_transition",
+                    "source_state_local_id": local_id,
+                    "target_state_local_id": str(next_state["local_id"]),
+                    "allowed_trigger_component_local_ids": list(visible),
+                }
+            )
+    return plan
+
+
+def _f4_required_acceptance_target_plan(
+    input_bytes: bytes,
+) -> list[dict[str, object]]:
+    value = _strict_json(input_bytes, "F4 full-direct input")
+    envelope = _validate_node_input_value(value, "F4")
+    projection = envelope["projection"]
+    if not isinstance(projection, Mapping):
+        raise Phase4RemoteFreshIntegratedError(
+            "F4 full-direct projection is invalid"
+        )
+    use_case_view = projection.get("canonical_b_use_case_view")
+    state_view = projection.get("f2_registered_state_visibility_view")
+    if not isinstance(use_case_view, Mapping) or not isinstance(
+        state_view, Mapping
+    ):
+        raise Phase4RemoteFreshIntegratedError(
+            "F4 full-direct authority views are unavailable"
+        )
+    use_cases = use_case_view.get("use_cases")
+    states = state_view.get("states")
+    if (
+        not isinstance(use_cases, list)
+        or not use_cases
+        or not isinstance(states, list)
+        or not states
+    ):
+        raise Phase4RemoteFreshIntegratedError(
+            "F4 full-direct authority arrays are unavailable"
+        )
+
+    plan: list[dict[str, object]] = []
+    for index, use_case in enumerate(use_cases):
+        if not isinstance(use_case, Mapping) or not isinstance(
+            use_case.get("use_case_id"), str
+        ):
+            raise Phase4RemoteFreshIntegratedError(
+                "F4 full-direct use-case binding is invalid"
+            )
+        state = states[min(index, len(states) - 1)]
+        if not isinstance(state, Mapping) or not isinstance(
+            state.get("stable_id"), str
+        ):
+            raise Phase4RemoteFreshIntegratedError(
+                "F4 full-direct state binding is invalid"
+            )
+        plan.append(
+            {
+                "position": index,
+                "use_case_ref": {
+                    "ref_type": "canonical_b_use_case",
+                    "ref_id": str(use_case["use_case_id"]),
+                    "ref_revision": "canonical_b.use_case.v1",
+                },
+                "state_ref": {
+                    "ref_type": "registry_stable",
+                    "ref_id": str(state["stable_id"]),
+                    "ref_revision": REGISTRY_REVISION,
+                },
+            }
+        )
+    return plan
 
 
 def _validated_node_output(
@@ -1044,10 +1221,7 @@ def create_p4_05_policy(
     prompt_revision: str | None = None,
     parent_experiment_binding: Mapping[str, object] | None = None,
 ) -> dict[str, object]:
-    if prompt_revision is not None and prompt_revision != P4_05_F3_F4_PROMPT_REVISION:
-        raise Phase4RemoteFreshIntegratedError(
-            "unsupported P4-05 policy prompt revision"
-        )
+    prompt_nodes = _prompt_nodes_for_revision(prompt_revision)
     profile.validate()
     parent_binding = _validate_parent_experiment_binding(
         parent_experiment_binding,
@@ -1100,7 +1274,13 @@ def create_p4_05_policy(
     }
     if prompt_revision is not None:
         root["prompt_revision"] = prompt_revision
-        root["prompt_revision_nodes"] = list(P4_05_REVISION_PROMPT_NODES)
+        root["prompt_revision_nodes"] = list(prompt_nodes)
+    if _uses_f4_direct_acceptance(prompt_revision):
+        root["downstream_policy"] = PHASE4_FRESH_DELIVERY_POLICY_A07A_DIRECT_V1
+        root["a07b_status"] = "not_executed_by_policy"
+        root["f4_direct_acceptance_policy_receipt_schema_version"] = (
+            P4_05_F4_DIRECT_ACCEPTANCE_POLICY_RECEIPT_SCHEMA_VERSION
+        )
     root["policy_id"] = _identity(
         {key: value for key, value in root.items()},
         revision=P4_05_POLICY_SCHEMA_VERSION,
@@ -1887,7 +2067,46 @@ def _node_prompt(
         }[node_id],
         "exact_output_contract": output_contracts[node_id],
     }
-    if prompt_revision == P4_05_F3_F4_PROMPT_REVISION:
+    if (
+        prompt_revision == P4_05_FULL_DIRECT_PROMPT_REVISION
+        and node_id == "F3"
+    ):
+        payload["required_interaction_plan"] = _f3_required_interaction_plan(
+            input_bytes
+        )
+        payload["instructions"] = [
+            *payload["instructions"],
+            (
+                "Copy every source state, target state, row position, and one "
+                "allowed trigger component from required_interaction_plan. "
+                "Emit exactly one interaction for every plan row in the same "
+                "order; do not omit, merge, or add rows."
+            ),
+        ]
+    if (
+        prompt_revision == P4_05_FULL_DIRECT_PROMPT_REVISION
+        and node_id == "F4"
+    ):
+        payload["required_acceptance_target_plan"] = (
+            _f4_required_acceptance_target_plan(input_bytes)
+        )
+        payload["instructions"] = [
+            *payload["instructions"],
+            (
+                "Emit exactly one acceptance check for every row in "
+                "required_acceptance_target_plan and in the same order. Copy "
+                "each use_case_ref and state_ref object exactly; do not select "
+                "a different state, omit a row, or add a row."
+            ),
+        ]
+    applied_prompt_revision = prompt_revision
+    if prompt_revision == P4_05_FULL_DIRECT_PROMPT_REVISION:
+        applied_prompt_revision = (
+            P4_05_F3_F4_PROMPT_REVISION
+            if node_id == "F3"
+            else P4_05_F4_DIRECT_ACCEPTANCE_PROMPT_REVISION
+        )
+    if applied_prompt_revision == P4_05_F3_F4_PROMPT_REVISION:
         if node_id == "F3":
             output_contracts["F3"]["invariants"] = [
                 *output_contracts["F3"]["invariants"],
@@ -1924,6 +2143,41 @@ def _node_prompt(
                 ),
                 "do not add or fabricate use-case reference fields",
             ]
+            if prompt_revision == P4_05_FULL_DIRECT_PROMPT_REVISION:
+                output_contracts["F3"]["invariants"] = [
+                    *output_contracts["F3"]["invariants"],
+                    (
+                        "let N be the number of supplied F2 states and emit "
+                        "exactly 2*N-1 interactions"
+                    ),
+                    (
+                        "use this exact interaction order: same-state work for "
+                        "state 0, forward transition state 0 to state 1, "
+                        "same-state work for state 1, then continue alternating "
+                        "until same-state work for the final state"
+                    ),
+                    (
+                        "every same-state interaction must use the same supplied "
+                        "state local ID for source_state_local_id and "
+                        "target_state_local_id"
+                    ),
+                    (
+                        "every forward transition must connect one supplied "
+                        "state directly to the next supplied state in array "
+                        "order; never skip a state"
+                    ),
+                    (
+                        "choose each trigger_component_local_id only from the "
+                        "source state's visible_component_local_ids; never use "
+                        "a component that is visible only in the target state"
+                    ),
+                    (
+                        "the initial state's same-state interaction performs "
+                        "the first canonical use case's in-state work, and each "
+                        "later state's same-state interaction performs that "
+                        "state's main work or validation"
+                    ),
+                ]
         else:
             output_contracts["F4"]["invariants"] = [
                 *output_contracts["F4"]["invariants"],
@@ -1960,7 +2214,288 @@ def _node_prompt(
                 "registry, mapping, composition, assembler, or gates."
             ),
         ]
+    elif applied_prompt_revision == P4_05_F4_DIRECT_ACCEPTANCE_PROMPT_REVISION:
+        output_contracts["F4"]["invariants"] = [
+            *output_contracts["F4"]["invariants"],
+            (
+                "emit exactly one acceptance check for each canonical use "
+                "case, in canonical use-case order, and put exactly that one "
+                "use-case reference in the check"
+            ),
+            (
+                "derive every state_ref from the actual supplied "
+                "f3_registered_interaction_view; the selected stable state ID "
+                "must appear as target_state_stable_id on at least one mapped "
+                "interaction for that use case"
+            ),
+            (
+                "do not select the first supplied F2 state merely because it "
+                "is the initial state; it is eligible only when an actual "
+                "supplied interaction targets that state"
+            ),
+            (
+                "choose the earliest eligible target state in supplied F2 "
+                "state order that matches the use-case outcome, and keep the "
+                "selected state positions monotonically non-decreasing across "
+                "canonical use-case order"
+            ),
+            (
+                "when later use cases have no later eligible target, reuse "
+                "only the final eligible target state; never invent an "
+                "interaction, state, or registry identity"
+            ),
+            (
+                "never emit a second acceptance target for the same use case"
+            ),
+        ]
+        payload["prompt_revision"] = prompt_revision
+        payload["instructions"] = [
+            *payload["instructions"],
+            (
+                "This versioned F4 revision selects acceptance targets from "
+                "the actual validated F3 graph for the P4-05 direct A-07a "
+                "first-pass experiment. Do not change the schema, registry, "
+                "mapping, composition, assembler, consistency, or acceptance "
+                "authorities."
+            ),
+        ]
     return _canonical_bytes(payload)
+
+
+def _f4_direct_acceptance_policy_receipt(
+    *,
+    input_bytes: bytes,
+    output: Mapping[str, object],
+    raw_bytes: bytes,
+) -> dict[str, object]:
+    input_value = _strict_json(input_bytes, "F4 direct-acceptance input")
+    input_envelope = _validate_node_input_value(input_value, "F4")
+    projection = input_envelope["projection"]
+    if not isinstance(projection, Mapping):
+        raise Phase4RemoteFreshIntegratedError(
+            "F4 direct-acceptance projection is invalid"
+        )
+
+    use_case_view = projection.get("canonical_b_use_case_view")
+    state_view = projection.get("f2_registered_state_visibility_view")
+    interaction_view = projection.get("f3_registered_interaction_view")
+    mapping_view = projection.get("deterministic_use_case_mapping_view")
+    if not all(
+        isinstance(value, Mapping)
+        for value in (use_case_view, state_view, interaction_view, mapping_view)
+    ):
+        raise Phase4RemoteFreshIntegratedError(
+            "F4 direct-acceptance authority views are unavailable"
+        )
+
+    use_cases = use_case_view.get("use_cases")
+    states = state_view.get("states")
+    interactions = interaction_view.get("interactions")
+    mappings = mapping_view.get("ordered_mappings")
+    checks = output.get("acceptance_checks")
+    if not all(
+        isinstance(value, list)
+        for value in (use_cases, states, interactions, mappings, checks)
+    ):
+        raise Phase4RemoteFreshIntegratedError(
+            "F4 direct-acceptance authority arrays are invalid"
+        )
+    if not states:
+        raise Phase4RemoteFreshIntegratedError(
+            "F4 direct-acceptance state order is empty"
+        )
+
+    use_case_ids: list[str] = []
+    for row in use_cases:
+        if not isinstance(row, Mapping) or not isinstance(
+            row.get("use_case_id"), str
+        ):
+            raise Phase4RemoteFreshIntegratedError(
+                "F4 direct-acceptance use-case view is invalid"
+            )
+        use_case_ids.append(str(row["use_case_id"]))
+
+    state_ids: list[str] = []
+    for row in states:
+        if not isinstance(row, Mapping) or not isinstance(
+            row.get("stable_id"), str
+        ):
+            raise Phase4RemoteFreshIntegratedError(
+                "F4 direct-acceptance state view is invalid"
+            )
+        state_ids.append(str(row["stable_id"]))
+    if len(state_ids) != len(set(state_ids)):
+        raise Phase4RemoteFreshIntegratedError(
+            "F4 direct-acceptance state identity is duplicated"
+        )
+    state_position = {
+        stable_id: index for index, stable_id in enumerate(state_ids)
+    }
+
+    interaction_rows: dict[str, tuple[str, str]] = {}
+    adjacency: dict[str, list[str]] = {
+        stable_id: [] for stable_id in state_ids
+    }
+    targeted_states: set[str] = set()
+    for row in interactions:
+        if not isinstance(row, Mapping):
+            raise Phase4RemoteFreshIntegratedError(
+                "F4 direct-acceptance interaction view is invalid"
+            )
+        stable_id = row.get("stable_id")
+        source_id = row.get("source_state_stable_id")
+        target_id = row.get("target_state_stable_id")
+        if (
+            not isinstance(stable_id, str)
+            or not isinstance(source_id, str)
+            or not isinstance(target_id, str)
+            or stable_id in interaction_rows
+            or source_id not in state_position
+            or target_id not in state_position
+        ):
+            raise Phase4RemoteFreshIntegratedError(
+                "F4 direct-acceptance interaction binding is invalid"
+            )
+        interaction_rows[stable_id] = (source_id, target_id)
+        adjacency[source_id].append(target_id)
+        targeted_states.add(target_id)
+
+    reachable = {state_ids[0]}
+    frontier = [state_ids[0]]
+    while frontier:
+        source_id = frontier.pop(0)
+        for target_id in adjacency[source_id]:
+            if target_id not in reachable:
+                reachable.add(target_id)
+                frontier.append(target_id)
+
+    mapping_rows: dict[str, tuple[str, ...]] = {}
+    for row in mappings:
+        if (
+            not isinstance(row, Mapping)
+            or not isinstance(row.get("use_case_id"), str)
+            or not isinstance(row.get("interaction_stable_ids"), list)
+        ):
+            raise Phase4RemoteFreshIntegratedError(
+                "F4 direct-acceptance mapping view is invalid"
+            )
+        use_case_id = str(row["use_case_id"])
+        interaction_ids = tuple(row["interaction_stable_ids"])
+        if (
+            use_case_id in mapping_rows
+            or any(
+                not isinstance(interaction_id, str)
+                or interaction_id not in interaction_rows
+                for interaction_id in interaction_ids
+            )
+        ):
+            raise Phase4RemoteFreshIntegratedError(
+                "F4 direct-acceptance mapping binding is invalid"
+            )
+        mapping_rows[use_case_id] = interaction_ids
+    if list(mapping_rows) != use_case_ids:
+        raise Phase4RemoteFreshIntegratedError(
+            "F4 direct-acceptance mapping order drifted"
+        )
+    if len(checks) != len(use_case_ids):
+        raise Phase4RemoteFreshIntegratedError(
+            "F4 direct-acceptance check count drifted"
+        )
+
+    selected_rows: list[dict[str, object]] = []
+    previous_position = -1
+    for use_case_id, check in zip(use_case_ids, checks, strict=True):
+        if not isinstance(check, Mapping):
+            raise Phase4RemoteFreshIntegratedError(
+                "F4 direct-acceptance check is invalid"
+            )
+        use_case_refs = check.get("use_case_refs")
+        state_ref = check.get("state_ref")
+        if (
+            not isinstance(use_case_refs, list)
+            or len(use_case_refs) != 1
+            or not isinstance(use_case_refs[0], Mapping)
+            or use_case_refs[0].get("ref_type") != "canonical_b_use_case"
+            or use_case_refs[0].get("ref_id") != use_case_id
+            or use_case_refs[0].get("ref_revision")
+            != "canonical_b.use_case.v1"
+            or not isinstance(state_ref, Mapping)
+            or state_ref.get("ref_type") != "registry_stable"
+            or state_ref.get("ref_revision") != REGISTRY_REVISION
+            or not isinstance(state_ref.get("ref_id"), str)
+        ):
+            raise Phase4RemoteFreshIntegratedError(
+                "F4 direct-acceptance check binding is invalid"
+            )
+        selected_state_id = str(state_ref["ref_id"])
+        eligible_state_ids = sorted(
+            {
+                interaction_rows[interaction_id][1]
+                for interaction_id in mapping_rows[use_case_id]
+                if interaction_rows[interaction_id][1] in reachable
+                and interaction_rows[interaction_id][1] in targeted_states
+            },
+            key=state_position.__getitem__,
+        )
+        if selected_state_id not in eligible_state_ids:
+            raise Phase4RemoteFreshIntegratedError(
+                "F4 direct-acceptance target is not an actual reachable "
+                "mapped interaction target"
+            )
+        selected_position = state_position[selected_state_id]
+        if selected_position < previous_position:
+            raise Phase4RemoteFreshIntegratedError(
+                "F4 direct-acceptance target order is not monotonic"
+            )
+        previous_position = selected_position
+        selected_rows.append(
+            {
+                "use_case_id": use_case_id,
+                "selected_state_id": selected_state_id,
+                "selected_state_position": selected_position,
+                "eligible_state_ids": eligible_state_ids,
+            }
+        )
+
+    root = {
+        "schema_version": (
+            P4_05_F4_DIRECT_ACCEPTANCE_POLICY_RECEIPT_SCHEMA_VERSION
+        ),
+        "policy": P4_05_F4_DIRECT_ACCEPTANCE_PROMPT_REVISION,
+        "downstream_policy": PHASE4_FRESH_DELIVERY_POLICY_A07A_DIRECT_V1,
+        "a07b_status": "not_executed_by_policy",
+        "input_identity": _identity(
+            input_bytes,
+            revision=P4_05_INPUT_SCHEMA_VERSION,
+            identity_kind="raw_bytes",
+        ),
+        "raw_identity": _identity(
+            raw_bytes,
+            revision=f"{P4_05_SCHEMA_PREFIX}.raw.v1",
+            identity_kind="raw_bytes",
+        ),
+        "validated_output_identity": _identity(
+            output,
+            revision=f"{P4_05_SCHEMA_PREFIX}.f4_validated_output.v1",
+        ),
+        "initial_state_id": state_ids[0],
+        "reachable_state_ids": [
+            stable_id for stable_id in state_ids if stable_id in reachable
+        ],
+        "actual_target_state_ids": [
+            stable_id for stable_id in state_ids if stable_id in targeted_states
+        ],
+        "selected_targets": selected_rows,
+        "automatic_rewrite": False,
+        "automatic_retry": False,
+    }
+    return {
+        **root,
+        "receipt_id": _identity(
+            root,
+            revision=P4_05_F4_DIRECT_ACCEPTANCE_POLICY_RECEIPT_SCHEMA_VERSION,
+        )["sha256"],
+    }
 
 
 def _node_config(
@@ -2500,15 +3035,11 @@ def _restore_validated_prefix(
         if not candidate_roots:
             encountered_gap = True
             continue
-        if len(candidate_roots) != 1:
-            raise Phase4RemoteFreshIntegratedError(
-                f"resume {node_id} validated source is not unique"
-            )
         if encountered_gap:
             raise Phase4RemoteFreshIntegratedError(
                 "resume validated nodes are not a contiguous prefix"
             )
-        node_source_root = candidate_roots[0]
+        node_source_root = candidate_roots[-1]
         source_ledger = _read_canonical_artifact(
             node_source_root / "model_call_ledger.json",
             f"resume {node_id} source model-call ledger",
@@ -2760,10 +3291,7 @@ def prepare_phase4_remote_qwen_fresh_integrated(
         gpu_facts=gpu_facts,
     )
     selected_run_id = run_id or f"{P4_05_RUN_PREFIX}{uuid.uuid4().hex[:16]}"
-    if prompt_revision is not None and prompt_revision != P4_05_F3_F4_PROMPT_REVISION:
-        raise Phase4RemoteFreshIntegratedError(
-            "unsupported P4-05 preparation prompt revision"
-        )
+    prompt_nodes = _prompt_nodes_for_revision(prompt_revision)
     parent_binding = _validate_parent_experiment_binding(
         parent_experiment_binding,
         case_id=str(selected_b_input["case_id"]),
@@ -2807,7 +3335,12 @@ def prepare_phase4_remote_qwen_fresh_integrated(
     }
     if prompt_revision is not None:
         preflight["prompt_revision"] = prompt_revision
-        preflight["prompt_revision_nodes"] = list(P4_05_REVISION_PROMPT_NODES)
+        preflight["prompt_revision_nodes"] = list(prompt_nodes)
+    if _uses_f4_direct_acceptance(prompt_revision):
+        preflight["downstream_policy"] = (
+            PHASE4_FRESH_DELIVERY_POLICY_A07A_DIRECT_V1
+        )
+        preflight["a07b_status"] = "not_executed_by_policy"
     _write_fsync(result_root / "model_inventory.json", _canonical_bytes(inventory))
     _write_fsync(result_root / "remote_profile.json", profile.canonical_bytes())
     _write_fsync(result_root / "p4_05_policy.json", _canonical_bytes(policy))
@@ -2854,6 +3387,7 @@ def run_phase4_remote_qwen_fresh_integrated(
         raise Phase4RemoteFreshIntegratedError(
             "explicit P4-05 remote generation confirmation is required"
         )
+    prompt_nodes = _prompt_nodes_for_revision(prompt_revision)
     mirror = FreshIntegratedStreamMirror(console)
     prepared = prepare_phase4_remote_qwen_fresh_integrated(
         model_root=model_root,
@@ -2936,6 +3470,17 @@ def run_phase4_remote_qwen_fresh_integrated(
     node_results: dict[str, object] = {}
     source_f4_raw_success = False
     normalized_node_success = False
+    f4_direct_acceptance_policy_receipt: dict[str, object] | None = None
+    delivery_policy = (
+        PHASE4_FRESH_DELIVERY_POLICY_A07A_DIRECT_V1
+        if _uses_f4_direct_acceptance(prompt_revision)
+        else PHASE4_FRESH_DELIVERY_POLICY_FIELD_GATE_V1
+    )
+    a07b_status = (
+        "not_executed_by_policy"
+        if delivery_policy == PHASE4_FRESH_DELIVERY_POLICY_A07A_DIRECT_V1
+        else "eligible_under_historical_field_gate_policy"
+    )
     failure: dict[str, object] | None = None
     delivery_result: dict[str, object] | None = None
     terminal_status = "not_started"
@@ -2990,9 +3535,7 @@ def run_phase4_remote_qwen_fresh_integrated(
                 authority_projection=authority,
             )
             node_prompt_revision = (
-                prompt_revision
-                if node_id in P4_05_REVISION_PROMPT_NODES
-                else None
+                prompt_revision if node_id in prompt_nodes else None
             )
             _validate_prompt_revision(
                 node_id=node_id,
@@ -3080,6 +3623,28 @@ def run_phase4_remote_qwen_fresh_integrated(
                         result_root / "core_f4_normalization_receipt.json",
                         _canonical_bytes(normalization_receipt),
                     )
+                    if _uses_f4_direct_acceptance(prompt_revision):
+                        f4_direct_acceptance_policy_receipt = (
+                            _f4_direct_acceptance_policy_receipt(
+                                input_bytes=input_bytes,
+                                output=output,
+                                raw_bytes=raw,
+                            )
+                        )
+                        _write_fsync(
+                            attempt_root
+                            / "f4_direct_acceptance_policy_receipt.json",
+                            _canonical_bytes(
+                                f4_direct_acceptance_policy_receipt
+                            ),
+                        )
+                        _write_fsync(
+                            result_root
+                            / "f4_direct_acceptance_policy_receipt.json",
+                            _canonical_bytes(
+                                f4_direct_acceptance_policy_receipt
+                            ),
+                        )
                 else:
                     phase4_validate_node_output(node_id, output, state)
                 state = phase4_register_node_output(state, node_id, output)
@@ -3238,6 +3803,18 @@ def run_phase4_remote_qwen_fresh_integrated(
                 "composition_status": "composed",
                 "assembler_status": "assembled",
                 "downstream": "not_executed",
+                "downstream_policy": delivery_policy,
+                "a07b_status": a07b_status,
+                "f4_direct_acceptance_policy_receipt_identity": (
+                    None
+                    if f4_direct_acceptance_policy_receipt is None
+                    else _identity(
+                        f4_direct_acceptance_policy_receipt,
+                        revision=(
+                            P4_05_F4_DIRECT_ACCEPTANCE_POLICY_RECEIPT_SCHEMA_VERSION
+                        ),
+                    )
+                ),
                 "historical_strict_result": "0/2_unchanged",
                 "claim_boundary": (
                     "P4-05 remote BF16 fresh integrated result; "
@@ -3278,6 +3855,7 @@ def run_phase4_remote_qwen_fresh_integrated(
                     scripted_acceptance_fixture=live_delivery[
                         "scripted_acceptance_fixture"
                     ],
+                    delivery_policy=delivery_policy,
                 )
             except Exception as exc:
                 delivery = {
@@ -3501,6 +4079,11 @@ __all__ = [
     "P4_05_MODEL_CONTEXT_TOKENS",
     "P4_05_PARENT_BINDING_SCHEMA_VERSION",
     "P4_05_PILOT_ID",
+    "P4_05_F4_DIRECT_ACCEPTANCE_POLICY_RECEIPT_SCHEMA_VERSION",
+    "P4_05_F4_DIRECT_ACCEPTANCE_PROMPT_NODES",
+    "P4_05_F4_DIRECT_ACCEPTANCE_PROMPT_REVISION",
+    "P4_05_FULL_DIRECT_PROMPT_NODES",
+    "P4_05_FULL_DIRECT_PROMPT_REVISION",
     "P4_05_F3_F4_PROMPT_REVISION",
     "P4_05_PRE_CALL_SCHEMA_VERSION",
     "P4_05_QUANTIZATION",
