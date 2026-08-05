@@ -784,7 +784,24 @@ class Phase4FreshRouteOutcome:
         self.validate()
         if self.frozen_g0_reference.to_dict() != frozen_g0_reference.to_dict():
             raise Phase4FreshDeliveryError("fresh route G0 reference drifted")
-        self.validate_context_guidance(context, guidance)
+        context.validate()
+        guidance.validate()
+        _identity_matches(
+            _json_identity(
+                context.to_dict(),
+                revision="req2web.agent.context.v1",
+            ),
+            self.source_identities["context"],
+            "context",
+        )
+        _identity_matches(
+            _json_identity(
+                guidance.to_dict(),
+                revision="req2web.retrieval.guidance.v1",
+            ),
+            self.source_identities["guidance"],
+            "guidance",
+        )
         frozen_g0_reference.validate_against(package, context, guidance)
 
     def to_dict(self) -> dict[str, object]:
@@ -1582,8 +1599,13 @@ def run_phase4_fresh_delivery(
     )
     fixture = _acceptance_fixture(scripted_acceptance_fixture)
     root = Path(delivery_root)
-    if root.exists() and root.is_symlink():
-        raise Phase4FreshDeliveryError("delivery root must not be a symlink")
+    if root.exists():
+        if root.is_symlink() or not root.is_dir() or any(root.iterdir()):
+            raise Phase4FreshDeliveryError(
+                "delivery root must be a new or empty real directory"
+            )
+    else:
+        root.mkdir(parents=True, exist_ok=False)
     root = root.resolve(strict=False)
     common = {
         "model_route_outcome": route,
