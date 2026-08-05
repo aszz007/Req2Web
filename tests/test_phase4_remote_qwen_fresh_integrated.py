@@ -116,6 +116,38 @@ def _fake_graph_bound_delivery() -> dict[str, object]:
 
 
 class Phase4RemoteFreshIntegratedProfileTests(unittest.TestCase):
+    def test_node_prompts_expose_exact_contracts_without_semantic_examples(self) -> None:
+        input_bytes = remote._canonical_bytes(
+            {
+                "schema_version": remote.P4_05_INPUT_SCHEMA_VERSION,
+                "node_id": "F1",
+            }
+        )
+
+        f1 = json.loads(remote._node_prompt(node_id="F1", input_bytes=input_bytes))
+        f4 = json.loads(remote._node_prompt(node_id="F4", input_bytes=input_bytes))
+
+        self.assertEqual(
+            f1["schema_version"],
+            remote.P4_05_PROMPT_SCHEMA_VERSION,
+        )
+        self.assertEqual(
+            f1["exact_output_contract"]["section_constants"],
+            {"entity_type": "section", "refs": []},
+        )
+        self.assertIn(
+            "components array order exactly equals the concatenation of sections[].component_local_ids",
+            f1["exact_output_contract"]["invariants"],
+        )
+        self.assertEqual(
+            f4["exact_output_contract"]["acceptance_check_constants"],
+            {"entity_type": "candidate_acceptance_check", "refs": []},
+        )
+        self.assertIn(
+            "reference_exact_keys",
+            f4["exact_output_contract"],
+        )
+
     def test_profile_is_exact_bf16_gpu0_no_offload_profile(self) -> None:
         profile = remote.RemoteFreshIntegratedProfile.create(
             inventory=_fake_inventory(),

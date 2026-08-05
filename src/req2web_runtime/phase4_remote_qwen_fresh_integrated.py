@@ -53,14 +53,14 @@ P4_05_PROFILE_SCHEMA_VERSION = f"{P4_05_SCHEMA_PREFIX}.profile.v1"
 P4_05_POLICY_SCHEMA_VERSION = f"{P4_05_SCHEMA_PREFIX}.policy.v1"
 P4_05_RESULT_SCHEMA_VERSION = f"{P4_05_SCHEMA_PREFIX}.result.v1"
 P4_05_INPUT_SCHEMA_VERSION = f"{P4_05_SCHEMA_PREFIX}.input.v1"
-P4_05_PROMPT_SCHEMA_VERSION = f"{P4_05_SCHEMA_PREFIX}.prompt.v2"
+P4_05_PROMPT_SCHEMA_VERSION = f"{P4_05_SCHEMA_PREFIX}.prompt.v3"
 P4_05_PRE_CALL_SCHEMA_VERSION = f"{P4_05_SCHEMA_PREFIX}.pre_call.v1"
 P4_05_ATTEMPT_SCHEMA_VERSION = f"{P4_05_SCHEMA_PREFIX}.attempt.v2"
 P4_05_LEDGER_SCHEMA_VERSION = f"{P4_05_SCHEMA_PREFIX}.ledger.v1"
 P4_05_SUPERVISOR_SCHEMA_VERSION = f"{P4_05_SCHEMA_PREFIX}.supervisor.v2"
 P4_05_STREAM_SCHEMA_VERSION = f"{P4_05_SCHEMA_PREFIX}.stream.v1"
 P4_05_WORKER_PROTOCOL = f"{P4_05_SCHEMA_PREFIX}.worker.v1"
-P4_05_PILOT_ID = "p4-05-remote-qwen-fresh-integrated-v2"
+P4_05_PILOT_ID = "p4-05-remote-qwen-fresh-integrated-v3"
 P4_05_RUN_PREFIX = "p4-05-remote-qwen-fresh-integrated-run-"
 P4_05_CASE_ID = "path3-commerce-checkout"
 P4_05_REQUEST_ID = "p4-02a-synthetic-request-001"
@@ -1579,6 +1579,105 @@ def _node_prompt(
     node_id: str,
     input_bytes: bytes,
 ) -> bytes:
+    output_contracts: dict[str, dict[str, object]] = {
+        "F1": {
+            "exact_top_level_keys": [
+                "page_title",
+                "layout_pattern",
+                "sections",
+                "components",
+            ],
+            "section_exact_keys": [
+                "local_id",
+                "entity_type",
+                "title",
+                "purpose",
+                "component_local_ids",
+                "refs",
+            ],
+            "section_constants": {"entity_type": "section", "refs": []},
+            "component_exact_keys": [
+                "local_id",
+                "entity_type",
+                "component_type",
+                "section_local_id",
+                "label",
+                "purpose",
+                "refs",
+            ],
+            "component_constants": {"entity_type": "component", "refs": []},
+            "invariants": [
+                "sections and components are non-empty arrays",
+                "all local_id values are non-empty and unique across sections and components",
+                "sections contain component IDs only; components are separate top-level rows and are never nested inside sections",
+                "components array order exactly equals the concatenation of sections[].component_local_ids",
+                "each component.section_local_id names the section that lists that component local ID",
+            ],
+        },
+        "F2": {
+            "exact_top_level_keys": ["states"],
+            "state_exact_keys": [
+                "local_id",
+                "entity_type",
+                "name",
+                "description",
+                "visible_component_local_ids",
+                "refs",
+            ],
+            "state_constants": {"entity_type": "state", "refs": []},
+            "invariants": [
+                "states is a non-empty array with unique non-empty local_id values",
+                "visible_component_local_ids contains only F1 component local IDs supplied in this input",
+                "visible_component_local_ids preserves the F1 component order",
+            ],
+        },
+        "F3": {
+            "exact_top_level_keys": ["interactions"],
+            "interaction_exact_keys": [
+                "local_id",
+                "entity_type",
+                "trigger_component_local_id",
+                "source_state_local_id",
+                "action",
+                "target_state_local_id",
+                "user_feedback",
+                "refs",
+            ],
+            "interaction_constants": {"entity_type": "interaction", "refs": []},
+            "invariants": [
+                "interactions is a non-empty array with unique non-empty local_id values",
+                "trigger_component_local_id names an F1 component local ID supplied in this input",
+                "source_state_local_id and target_state_local_id name F2 state local IDs supplied in this input",
+            ],
+        },
+        "F4": {
+            "exact_top_level_keys": ["acceptance_checks"],
+            "acceptance_check_exact_keys": [
+                "local_id",
+                "entity_type",
+                "description",
+                "use_case_refs",
+                "state_ref",
+                "refs",
+            ],
+            "acceptance_check_constants": {
+                "entity_type": "candidate_acceptance_check",
+                "refs": [],
+            },
+            "reference_exact_keys": [
+                "ref_type",
+                "ref_id",
+                "ref_revision",
+            ],
+            "invariants": [
+                "acceptance_checks is a non-empty array with unique non-empty local_id values",
+                "description has at least 8 characters",
+                "use_case_refs uses only canonical_b_use_case IDs supplied in this input, revision canonical_b.use_case.v1, and preserves canonical use-case order",
+                "the union of use_case_refs covers every canonical use-case ID supplied in this input",
+                "state_ref uses ref_type registry_stable, a supplied F2 stable ID, and the supplied registry revision",
+            ],
+        },
+    }
     payload = {
         "schema_version": P4_05_PROMPT_SCHEMA_VERSION,
         "node_id": node_id,
@@ -1591,6 +1690,7 @@ def _node_prompt(
         "instructions": [
             "Return exactly one JSON object and no prose.",
             "Use strict RFC 8259 JSON syntax: double-quoted keys and string values, a colon between every key and value, and no trailing commas.",
+            "Every object must contain exactly the keys listed in exact_output_contract; do not add properties or alternate nesting.",
             "Preserve the required node schema and semantic array order.",
             "Do not emit authoritative IDs, mappings, acceptance verdicts, or browser evidence.",
             "Do not abbreviate, truncate, omit, or split the object.",
@@ -1602,6 +1702,7 @@ def _node_prompt(
             "F3": ["interactions"],
             "F4": ["acceptance_checks"],
         }[node_id],
+        "exact_output_contract": output_contracts[node_id],
     }
     return _canonical_bytes(payload)
 
