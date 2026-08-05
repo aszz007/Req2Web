@@ -289,8 +289,10 @@ class Phase4RemoteFreshIntegratedArtifactTests(unittest.TestCase):
         ) as temporary:
             temp_root = Path(temporary)
             source_root = temp_root / "source"
+            child_root = temp_root / "child"
             result_root = temp_root / "result"
             source_root.mkdir()
+            child_root.mkdir()
             result_root.mkdir()
             (source_root / "b_input.json").write_bytes(
                 remote._canonical_bytes(b_input)
@@ -365,28 +367,87 @@ class Phase4RemoteFreshIntegratedArtifactTests(unittest.TestCase):
             (source_root / "model_call_ledger.json").write_bytes(
                 remote._canonical_bytes(ledger)
             )
+            (child_root / "b_input.json").write_bytes(
+                remote._canonical_bytes(b_input)
+            )
+            f3_output = phase4_synthetic_fixture_output(
+                "F3",
+                source_state,
+            )
+            f3_raw = json.dumps(
+                f3_output,
+                ensure_ascii=False,
+                separators=(",", ":"),
+                allow_nan=False,
+            ).encode("utf-8")
+            f3_attempt_root = child_root / "attempts" / "F3"
+            f3_attempt_root.mkdir(parents=True)
+            f3_attempt = remote._attempt_record(
+                run_id=f"{remote.P4_05_RUN_PREFIX}resume-child",
+                case_id=remote.P4_05_CASE_ID,
+                request_id=remote.P4_05_REQUEST_ID,
+                node_id="F3",
+                input_bytes=b"{}",
+                prompt_bytes=b"{}",
+                config_bytes=b"{}",
+                request_bytes=b"{}",
+                pre_call_record={},
+                worker_id="worker-child",
+                worker_pid=2,
+                raw=f3_raw,
+                generate_started=True,
+                status="validated",
+                failure_code=None,
+            )
+            (f3_attempt_root / "raw_response.bin").write_bytes(f3_raw)
+            (f3_attempt_root / "validated_node_output.json").write_bytes(
+                remote._canonical_bytes(f3_output)
+            )
+            (f3_attempt_root / "attempt_result.json").write_bytes(
+                remote._canonical_bytes(f3_attempt)
+            )
+            child_ledger = remote._call_ledger(
+                run_id=f"{remote.P4_05_RUN_PREFIX}resume-child",
+                node_results={"F3": f3_attempt},
+            )
+            (child_root / "model_call_ledger.json").write_bytes(
+                remote._canonical_bytes(child_ledger)
+            )
+            (child_root / "resume_receipt.json").write_bytes(
+                remote._canonical_bytes(
+                    {
+                        "schema_version": (
+                            f"{remote.P4_05_SCHEMA_PREFIX}.resume.v1"
+                        ),
+                        "source_result_root": str(source_root.resolve()),
+                        "model_generate_calls": 0,
+                        "automatic_retry": False,
+                        "budget_reset": False,
+                    }
+                )
+            )
 
             history = remote._build_call_history(
-                history_result_roots=(source_root,),
+                history_result_roots=(source_root, child_root),
                 result_root=result_root,
             )
             restored, receipt = remote._restore_validated_prefix(
-                resume_from_result_root=source_root,
+                resume_from_result_root=child_root,
                 result_root=result_root,
                 b_input=b_input,
                 state=phase4_create_portable_authority_state(b_input),
                 history_receipt=history,
             )
 
-        self.assertEqual(receipt["resumed_nodes"], ["F1", "F2"])
-        self.assertEqual(receipt["next_node"], "F3")
+        self.assertEqual(receipt["resumed_nodes"], ["F1", "F2", "F3"])
+        self.assertEqual(receipt["next_node"], "F4")
         self.assertEqual(
             history["aggregate_per_node_generate_started_count"],
-            {"F1": 1, "F2": 1, "F3": 0, "F4": 0},
+            {"F1": 1, "F2": 1, "F3": 1, "F4": 0},
         )
         self.assertEqual(
             list(restored["node_results"]),
-            ["F1", "F2"],
+            ["F1", "F2", "F3"],
         )
 
 

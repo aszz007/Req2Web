@@ -59,14 +59,14 @@ P4_05_PRE_CALL_SCHEMA_VERSION = f"{P4_05_SCHEMA_PREFIX}.pre_call.v1"
 P4_05_ATTEMPT_SCHEMA_VERSION = f"{P4_05_SCHEMA_PREFIX}.attempt.v2"
 P4_05_LEDGER_SCHEMA_VERSION = f"{P4_05_SCHEMA_PREFIX}.ledger.v1"
 P4_05_HISTORY_SCHEMA_VERSION = f"{P4_05_SCHEMA_PREFIX}.history.v1"
-P4_05_RESUME_SCHEMA_VERSION = f"{P4_05_SCHEMA_PREFIX}.resume.v1"
+P4_05_RESUME_SCHEMA_VERSION = f"{P4_05_SCHEMA_PREFIX}.resume.v2"
 P4_05_AGGREGATE_LEDGER_SCHEMA_VERSION = (
     f"{P4_05_SCHEMA_PREFIX}.aggregate_ledger.v1"
 )
 P4_05_SUPERVISOR_SCHEMA_VERSION = f"{P4_05_SCHEMA_PREFIX}.supervisor.v2"
 P4_05_STREAM_SCHEMA_VERSION = f"{P4_05_SCHEMA_PREFIX}.stream.v1"
 P4_05_WORKER_PROTOCOL = f"{P4_05_SCHEMA_PREFIX}.worker.v1"
-P4_05_PILOT_ID = "p4-05-remote-qwen-fresh-integrated-v4"
+P4_05_PILOT_ID = "p4-05-remote-qwen-fresh-integrated-v5"
 P4_05_RUN_PREFIX = "p4-05-remote-qwen-fresh-integrated-run-"
 P4_05_CASE_ID = "path3-commerce-checkout"
 P4_05_REQUEST_ID = "p4-02a-synthetic-request-001"
@@ -2102,29 +2102,73 @@ def _restore_validated_prefix(
         raise Phase4RemoteFreshIntegratedError(
             "history receipt rows are unavailable"
         )
-    matching_history = [
-        row
+    history_root_counts = {
+        str(row["result_root"]): sum(
+            1
+            for candidate in history_rows
+            if isinstance(candidate, Mapping)
+            and candidate.get("result_root") == row.get("result_root")
+        )
         for row in history_rows
         if isinstance(row, Mapping)
-        and row.get("result_root") == str(source_root)
-    ]
-    if len(matching_history) != 1:
-        raise Phase4RemoteFreshIntegratedError(
-            "resume source must be included exactly once in call history"
+        and isinstance(row.get("result_root"), str)
+    }
+    source_chain_reversed: list[Path] = []
+    seen_source_roots: set[str] = set()
+    cursor = source_root
+    while True:
+        cursor_text = str(cursor)
+        if cursor_text in seen_source_roots:
+            raise Phase4RemoteFreshIntegratedError(
+                "resume source ancestry contains a cycle"
+            )
+        if history_root_counts.get(cursor_text) != 1:
+            raise Phase4RemoteFreshIntegratedError(
+                "every resume source must be included exactly once in call history"
+            )
+        seen_source_roots.add(cursor_text)
+        source_chain_reversed.append(cursor)
+        source_b_input = _read_canonical_artifact(
+            cursor / "b_input.json",
+            "resume source B input",
         )
-    source_b_input = _read_canonical_artifact(
-        source_root / "b_input.json",
-        "resume source B input",
-    )
-    if source_b_input != dict(b_input):
-        raise Phase4RemoteFreshIntegratedError(
-            "resume source B input binding drifted"
+        if source_b_input != dict(b_input):
+            raise Phase4RemoteFreshIntegratedError(
+                "resume source B input binding drifted"
+            )
+        source_resume_path = cursor / "resume_receipt.json"
+        if not source_resume_path.exists():
+            break
+        source_resume = _read_canonical_artifact(
+            source_resume_path,
+            "source resume receipt",
         )
-    source_ledger = _read_canonical_artifact(
+        if (
+            not isinstance(source_resume, Mapping)
+            or source_resume.get("schema_version")
+            not in {
+                f"{P4_05_SCHEMA_PREFIX}.resume.v1",
+                P4_05_RESUME_SCHEMA_VERSION,
+            }
+            or not isinstance(source_resume.get("source_result_root"), str)
+            or source_resume.get("model_generate_calls") != 0
+            or source_resume.get("automatic_retry") is not False
+            or source_resume.get("budget_reset") is not False
+        ):
+            raise Phase4RemoteFreshIntegratedError(
+                "source resume receipt binding drifted"
+            )
+        cursor = _safe_path(
+            Path(str(source_resume["source_result_root"])),
+            "ancestor resume source result root",
+            directory=True,
+        )
+    source_chain = list(reversed(source_chain_reversed))
+    primary_source_ledger = _read_canonical_artifact(
         source_root / "model_call_ledger.json",
         "resume source model-call ledger",
     )
-    if not isinstance(source_ledger, Mapping):
+    if not isinstance(primary_source_ledger, Mapping):
         raise Phase4RemoteFreshIntegratedError(
             "resume source model-call ledger is invalid"
         )
@@ -2133,15 +2177,38 @@ def _restore_validated_prefix(
     node_bindings: list[dict[str, object]] = []
     encountered_gap = False
     for node_id in NODE_ORDER:
-        attempt_root = source_root / "attempts" / node_id
-        output_path = attempt_root / "validated_node_output.json"
-        if not output_path.exists():
+        candidate_roots = [
+            candidate_root
+            for candidate_root in source_chain
+            if (
+                candidate_root
+                / "attempts"
+                / node_id
+                / "validated_node_output.json"
+            ).is_file()
+        ]
+        if not candidate_roots:
             encountered_gap = True
             continue
+        if len(candidate_roots) != 1:
+            raise Phase4RemoteFreshIntegratedError(
+                f"resume {node_id} validated source is not unique"
+            )
         if encountered_gap:
             raise Phase4RemoteFreshIntegratedError(
                 "resume validated nodes are not a contiguous prefix"
             )
+        node_source_root = candidate_roots[0]
+        source_ledger = _read_canonical_artifact(
+            node_source_root / "model_call_ledger.json",
+            f"resume {node_id} source model-call ledger",
+        )
+        if not isinstance(source_ledger, Mapping):
+            raise Phase4RemoteFreshIntegratedError(
+                f"resume {node_id} source ledger is invalid"
+            )
+        attempt_root = node_source_root / "attempts" / node_id
+        output_path = attempt_root / "validated_node_output.json"
         validated_output = _read_canonical_artifact(
             output_path,
             f"resume {node_id} validated output",
@@ -2198,6 +2265,7 @@ def _restore_validated_prefix(
         node_bindings.append(
             {
                 "node_id": node_id,
+                "source_result_root": str(node_source_root),
                 "source_attempt_identity": _identity(
                     attempt,
                     revision=P4_05_ATTEMPT_SCHEMA_VERSION,
@@ -2217,10 +2285,13 @@ def _restore_validated_prefix(
         "schema_version": P4_05_RESUME_SCHEMA_VERSION,
         "pilot_id": P4_05_PILOT_ID,
         "source_result_root": str(source_root),
-        "source_pilot_id": source_ledger["pilot_id"],
-        "source_run_id": source_ledger["run_id"],
+        "source_chain_result_roots": [
+            str(item) for item in source_chain
+        ],
+        "source_pilot_id": primary_source_ledger["pilot_id"],
+        "source_run_id": primary_source_ledger["run_id"],
         "source_model_call_ledger_identity": _identity(
-            source_ledger,
+            primary_source_ledger,
             revision=P4_05_LEDGER_SCHEMA_VERSION,
         ),
         "resumed_nodes": resumed_nodes,
@@ -2519,10 +2590,8 @@ def run_phase4_remote_qwen_fresh_integrated(
                 )  # type: ignore[union-attr]
                 mirror.target.flush()  # type: ignore[union-attr]
                 continue
-            if node_id == "F4" and state.get("mapping_record") is None:
+            if node_id == "F4":
                 mapping_before_f4 = phase4_create_mapping(state)
-                state = copy.deepcopy(dict(state))
-                state["mapping_record"] = mapping_before_f4
                 _write_fsync(
                     result_root / "mapping.json",
                     _canonical_bytes(mapping_before_f4),
