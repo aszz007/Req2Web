@@ -259,7 +259,7 @@ def _validate_parent_experiment_binding(
         "case_id",
         "request_id",
     )
-    if tuple(data) != expected_keys:
+    if set(data) != set(expected_keys):
         raise Phase4RemoteFreshIntegratedError(
             "parent experiment binding exact keys drifted"
         )
@@ -281,8 +281,8 @@ def _validate_parent_experiment_binding(
     policy_identity = data["experiment_policy_identity"]
     if (
         not isinstance(policy_identity, dict)
-        or tuple(policy_identity)
-        != ("identity_kind", "sha256", "byte_length", "revision")
+        or set(policy_identity)
+        != {"identity_kind", "sha256", "byte_length", "revision"}
         or policy_identity["identity_kind"] != "canonical_json"
         or not isinstance(policy_identity["sha256"], str)
         or not str(policy_identity["sha256"]).startswith("sha256:")

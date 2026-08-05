@@ -282,16 +282,22 @@ class Phase4RemoteFreshIntegratedPolicyTests(unittest.TestCase):
             "request_id": "p4-05-stability-request-01",
         }
 
+        roundtripped_parent = json.loads(
+            remote._canonical_bytes(parent).decode("utf-8")
+        )
         policy = remote.create_p4_05_policy(
             run_id=f"{remote.P4_05_RUN_PREFIX}stability-child",
             result_root_marker=remote.P4_05_ROOT_MARKER,
             profile=profile,
             case_id=str(parent["case_id"]),
             request_id=str(parent["request_id"]),
-            parent_experiment_binding=parent,
+            parent_experiment_binding=roundtripped_parent,
         )
 
-        self.assertEqual(policy["parent_experiment_binding"], parent)
+        self.assertEqual(
+            policy["parent_experiment_binding"],
+            roundtripped_parent,
+        )
         invalid = copy.deepcopy(parent)
         invalid["case_id"] = "wrong-case"
         with self.assertRaises(remote.Phase4RemoteFreshIntegratedError):
