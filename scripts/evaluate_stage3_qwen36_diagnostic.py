@@ -23,10 +23,34 @@ from req2web_runtime.qwen36_diagnostic_route import (  # noqa: E402
 )
 
 RUN_FILE = "qwen36_diagnostic_evaluation.json"
+ENTRYPOINT_STATUS = "historical"
+ENTRYPOINT_MODE = "diagnostic_only"
+ACTIVE_DEFAULT_ENTRY = False
+_ENTRYPOINT_HELP = (
+    "HISTORICAL STAGE 3 ENTRYPOINT; NOT THE ACTIVE DEFAULT FULL-FLOW ENTRY. "
+    "entrypoint_status=historical active_default_entry=false "
+    "entrypoint_mode=diagnostic_only."
+)
 
 
 class Qwen36DiagnosticEvaluationError(ValueError):
     """Stored diagnostic evaluation sidecars do not replay exactly."""
+
+
+def _emit_entrypoint_notice() -> None:
+    print(
+        json.dumps(
+            {
+                "active_default_entry": ACTIVE_DEFAULT_ENTRY,
+                "entrypoint_mode": ENTRYPOINT_MODE,
+                "entrypoint_status": ENTRYPOINT_STATUS,
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+        ),
+        file=sys.stderr,
+        flush=True,
+    )
 
 
 def _canonical(value: object) -> bytes:
@@ -115,7 +139,8 @@ def _validate_existing(root: Path, record: Mapping[str, Any]) -> None:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description=(
-            "Validate captured Qwen3.6 raw results and replay the unchanged "
+            _ENTRYPOINT_HELP
+            + " Validate captured Qwen3.6 raw results and replay the unchanged "
             "Parser/Assembler/gate/one-repair/G0 route without loading a model."
         )
     )
@@ -136,6 +161,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
+    _emit_entrypoint_notice()
     try:
         record = _evaluate(args)
         if args.validate_only:
@@ -155,6 +181,8 @@ def main(argv: list[str] | None = None) -> int:
             "model_loaded": False,
             "provider_call_performed": False,
             "retry_performed": False,
+            "real_browser_executed": False,
+            "formal_browser_success": False,
         }
         sys.stdout.buffer.write(_canonical(result) + b"\n")
         return 0

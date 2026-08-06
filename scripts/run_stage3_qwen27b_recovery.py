@@ -22,10 +22,37 @@ from req2web_runtime.qwen27b_recovery_runner import (  # noqa: E402
 )
 
 
+ENTRYPOINT_STATUS = "historical"
+ENTRYPOINT_MODE = "historical_execution"
+ACTIVE_DEFAULT_ENTRY = False
+_ENTRYPOINT_HELP = (
+    "HISTORICAL STAGE 3 ENTRYPOINT; NOT THE ACTIVE DEFAULT FULL-FLOW ENTRY. "
+    "entrypoint_status=historical active_default_entry=false "
+    "entrypoint_mode=historical_execution."
+)
+
+
+def _emit_entrypoint_notice() -> None:
+    print(
+        json.dumps(
+            {
+                "active_default_entry": ACTIVE_DEFAULT_ENTRY,
+                "entrypoint_mode": ENTRYPOINT_MODE,
+                "entrypoint_status": ENTRYPOINT_STATUS,
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+        ),
+        file=sys.stderr,
+        flush=True,
+    )
+
+
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description=(
-            "Run the fixed two-case Qwen3.5-27B recovery pilot. Partial stream "
+            _ENTRYPOINT_HELP
+            + " Run the fixed two-case Qwen3.5-27B recovery pilot. Partial stream "
             "output is observational; persisted final raw responses are authoritative."
         )
     )
@@ -188,6 +215,7 @@ def _parent(args: argparse.Namespace) -> int:
 
 def main(argv: list[str] | None = None) -> int:
     args = _parser().parse_args(argv)
+    _emit_entrypoint_notice()
     try:
         return _worker(args) if args.worker else _parent(args)
     except Qwen27BRecoveryRunnerError as exc:

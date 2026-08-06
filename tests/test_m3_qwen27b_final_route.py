@@ -168,6 +168,10 @@ class Qwen27BFinalRouteTests(unittest.TestCase):
         )
         self.assertEqual(media["semantic_coverage"]["decision"], "pass")
         self.assertEqual(media["decision"], "recovery_pass")
+        self.assertFalse(media["claims"]["real_browser_executed"])
+        self.assertFalse(media["claims"]["formal_browser_success"])
+        self.assertFalse(record["claims"]["real_browser_executed"])
+        self.assertFalse(record["claims"]["formal_browser_success"])
 
     def test_standalone_forged_pass_cannot_promote_fallback(self):
         forged_pass = {
@@ -222,6 +226,29 @@ class Qwen27BFinalRouteTests(unittest.TestCase):
             self.assertNotEqual(extracted.read_bytes(), dirty_case.read_bytes())
         finally:
             dirty_case.write_bytes(working_original)
+
+    def test_context_guidance_cross_binding_drift_fails_closed(self):
+        bundle = final_route._case_bundle.build_qwen27b_case_bundle(
+            Qwen27BCaseBundleTests.first_archive_path,
+            Qwen27BCaseBundleTests.first_manifest_path,
+            self.work / "cross-bind-bundle",
+        )
+        material_root = final_route._prepare_work_root(
+            self.work / "cross-bind-materials"
+        )
+        materials = build_fixed_trusted_remote_case_materials_v2(
+            ROOT,
+            material_root,
+        )
+        final_route._cross_bind_case_bundle(bundle, materials)
+        materials.manifest["cases"][0]["retrieval_guidance"][
+            "source_context"
+        ]["sha256"] = "0" * 64
+        with self.assertRaisesRegex(
+            final_route.Qwen27BFinalRouteError,
+            "retrieval_guidance_cross_binding",
+        ):
+            final_route._cross_bind_case_bundle(bundle, materials)
 
 
 if __name__ == "__main__":

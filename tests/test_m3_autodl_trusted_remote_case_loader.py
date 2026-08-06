@@ -77,6 +77,20 @@ class TrustedRemoteCaseLoaderTests(unittest.TestCase):
                 "model_repository_enumeration": False,
             },
         )
+        for row in materials.manifest["cases"]:
+            self.assertEqual(
+                row["agent_context"]["schema_version"],
+                "req2web.agent.context.v1",
+            )
+            self.assertGreater(row["agent_context"]["byte_length"], 0)
+            self.assertEqual(
+                row["retrieval_guidance"]["schema_version"],
+                "req2web.retrieval.guidance.v1",
+            )
+            self.assertEqual(
+                row["retrieval_guidance"]["source_context"],
+                row["agent_context"],
+            )
         plan = self._plan_for_materials(materials)
         package = executor.prepare_trusted_remote_execution_package_v2(
             plan,
@@ -88,6 +102,18 @@ class TrustedRemoteCaseLoaderTests(unittest.TestCase):
             loader.bind_fixed_trusted_remote_case_inputs_v2(materials, package),
             materials,
         )
+        manifest_row = materials.manifest["cases"][0]
+        original_context_binding = manifest_row["agent_context"]
+        manifest_row["agent_context"] = {
+            **original_context_binding,
+            "sha256": "0" * 64,
+        }
+        with self.assertRaisesRegex(
+            loader.TrustedRemoteCaseLoaderError,
+            "case_manifest_agent_context_binding",
+        ):
+            loader.bind_fixed_trusted_remote_case_inputs_v2(materials, package)
+        manifest_row["agent_context"] = original_context_binding
         materials.case_payloads["path3-media-analysis"]["provider_input"] = b"{}"
         with self.assertRaisesRegex(
             loader.TrustedRemoteCaseLoaderError,

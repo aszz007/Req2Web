@@ -50,6 +50,29 @@ def _sha(raw):
     return hashlib.sha256(raw).hexdigest()
 
 
+def _context_guidance_bindings(context, guidance):
+    context_raw = _dumps(context.to_dict())
+    guidance_raw = _dumps(guidance.to_dict())
+    context_binding = {
+        "schema_version": context.schema_version,
+        "sha256": _sha(context_raw),
+        "byte_length": len(context_raw),
+    }
+    if guidance.source_context_schema_version != context.schema_version:
+        raise TrustedRemoteCaseLoaderError(
+            "retrieval_guidance_source_context_schema_invalid"
+        )
+    return {
+        "agent_context": context_binding,
+        "retrieval_guidance": {
+            "schema_version": guidance.schema_version,
+            "sha256": _sha(guidance_raw),
+            "byte_length": len(guidance_raw),
+            "source_context": dict(context_binding),
+        },
+    }
+
+
 def _load_json(path, label):
     try:
         value = json.loads(Path(path).read_text(encoding="utf-8"))
@@ -177,7 +200,17 @@ def build_fixed_trusted_remote_case_materials_v2(repository_root, project_temp_r
             "scripted_acceptance_fixture": ScriptedAcceptanceFixture.create(SCRIPTED_ACCEPTANCE_PASS_KEY),
         }
         case_payloads[case_id] = {"provider_input": provider_raw, "prompt": executor_prompt}
-        manifest_rows.append({"case_id": case_id, "provider_input_id": selected.selection_record.input_view_id, "provider_input_sha256": _sha(provider_raw), "provider_input_byte_length": len(provider_raw), "prompt_sha256": _sha(executor_prompt), "prompt_byte_length": len(executor_prompt), "local_request_sha256": _sha(raws["local_request"]), "frozen_g0_reference_sha256": _sha(raws["same_case_frozen_g0_reference"])})
+        manifest_rows.append({
+            "case_id": case_id,
+            "provider_input_id": selected.selection_record.input_view_id,
+            "provider_input_sha256": _sha(provider_raw),
+            "provider_input_byte_length": len(provider_raw),
+            "prompt_sha256": _sha(executor_prompt),
+            "prompt_byte_length": len(executor_prompt),
+            "local_request_sha256": _sha(raws["local_request"]),
+            "frozen_g0_reference_sha256": _sha(raws["same_case_frozen_g0_reference"]),
+            **_context_guidance_bindings(context, guidance),
+        })
     manifest = {"schema_version": CASE_INPUTS_MANIFEST_SCHEMA, "case_ids": list(_REQUIRED_CASE_IDS), "cases": manifest_rows, "source": {"case_set": _CASE_SET_RELATIVE_PATH, "tracked_preparation_record": _TRACKED_RECORD_RELATIVE_PATH, "rag_index": _RAG_INDEX_RELATIVE_PATH}, "boundary": {"non_h1": True, "reference_only": False, "model_repository_enumeration": False}}
     (project_temp_root / "case-loader" / "case_inputs_manifest.json").write_bytes(_dumps(manifest))
     return FixedTrustedRemoteCaseInputsV2(case_inputs, case_payloads, manifest)
@@ -191,9 +224,21 @@ def bind_fixed_trusted_remote_case_inputs_v2(materials, execution_package):
     for row in package_cases:
         case_id = row["case_id"]
         payload = materials.case_payloads[case_id]
+        manifest_row = materials.manifest["cases"][
+            list(_REQUIRED_CASE_IDS).index(case_id)
+        ]
+        expected_semantic_bindings = _context_guidance_bindings(
+            materials.case_inputs[case_id]["context"],
+            materials.case_inputs[case_id]["guidance"],
+        )
+        for key, expected in expected_semantic_bindings.items():
+            if manifest_row.get(key) != expected:
+                raise TrustedRemoteCaseLoaderError(
+                    f"case_manifest_{key}_binding_invalid"
+                )
         provider_raw = payload["provider_input"]
         prompt_raw = payload["prompt"]
-        expected_provider = {"input_id": materials.manifest["cases"][list(_REQUIRED_CASE_IDS).index(case_id)]["provider_input_id"], "sha256": _sha(provider_raw), "byte_length": len(provider_raw)}
+        expected_provider = {"input_id": manifest_row["provider_input_id"], "sha256": _sha(provider_raw), "byte_length": len(provider_raw)}
         if row["provider_input"] != expected_provider or row["provider_input_file"]["sha256"] != expected_provider["sha256"] or row["provider_input_file"]["byte_length"] != expected_provider["byte_length"]:
             raise TrustedRemoteCaseLoaderError("execution_package_provider_input_binding_invalid")
         if row["prompt_file"]["sha256"] != _sha(prompt_raw) or row["prompt_file"]["byte_length"] != len(prompt_raw):

@@ -29,10 +29,34 @@ from req2web_runtime.qwen27b_recovery_runner import (  # noqa: E402
 
 RUN_FILE = "qwen27b_recovery_evaluation.json"
 CASE_IDS = ("path3-commerce-checkout", "path3-media-analysis")
+ENTRYPOINT_STATUS = "historical"
+ENTRYPOINT_MODE = "replay_only"
+ACTIVE_DEFAULT_ENTRY = False
+_ENTRYPOINT_HELP = (
+    "HISTORICAL STAGE 3 ENTRYPOINT; NOT THE ACTIVE DEFAULT FULL-FLOW ENTRY. "
+    "entrypoint_status=historical active_default_entry=false "
+    "entrypoint_mode=replay_only."
+)
 
 
 class RecoveryEvaluationError(ValueError):
     """The fixed recovery-pilot evaluation could not be replayed exactly."""
+
+
+def _emit_entrypoint_notice() -> None:
+    print(
+        json.dumps(
+            {
+                "active_default_entry": ACTIVE_DEFAULT_ENTRY,
+                "entrypoint_mode": ENTRYPOINT_MODE,
+                "entrypoint_status": ENTRYPOINT_STATUS,
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+        ),
+        file=sys.stderr,
+        flush=True,
+    )
 
 
 def _canonical(value: Any) -> bytes:
@@ -149,6 +173,8 @@ def _result(mode: str, record: Mapping[str, Any], output_root: Path) -> None:
         "model_loaded": False,
         "provider_call_performed": False,
         "retry_performed": False,
+        "real_browser_executed": False,
+        "formal_browser_success": False,
     }
     sys.stdout.buffer.write(_canonical(value) + b"\n")
 
@@ -156,7 +182,8 @@ def _result(mode: str, record: Mapping[str, Any], output_root: Path) -> None:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description=(
-            "Validate captured Qwen3.5-27B raw results against the frozen "
+            _ENTRYPOINT_HELP
+            + " Validate captured Qwen3.5-27B raw results against the frozen "
             "pre-run artifacts, replay accepted A-07a/A-07b delivery semantics, "
             "and recompute the pre-registered semantic coverage. This command "
             "does not load a model, call a Provider, retry, or open a network."
@@ -184,6 +211,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
+    _emit_entrypoint_notice()
     try:
         record = _evaluate(args)
         if args.validate_only:

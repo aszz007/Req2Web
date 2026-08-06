@@ -23,10 +23,37 @@ from req2web_runtime.qwen27b_recovery_runner import (  # noqa: E402
 from req2web_runtime import qwen36_diagnostic as diagnostic  # noqa: E402
 
 
+ENTRYPOINT_STATUS = "historical"
+ENTRYPOINT_MODE = "diagnostic_only"
+ACTIVE_DEFAULT_ENTRY = False
+_ENTRYPOINT_HELP = (
+    "HISTORICAL STAGE 3 ENTRYPOINT; NOT THE ACTIVE DEFAULT FULL-FLOW ENTRY. "
+    "entrypoint_status=historical active_default_entry=false "
+    "entrypoint_mode=diagnostic_only."
+)
+
+
+def _emit_entrypoint_notice() -> None:
+    print(
+        json.dumps(
+            {
+                "active_default_entry": ACTIVE_DEFAULT_ENTRY,
+                "entrypoint_mode": ENTRYPOINT_MODE,
+                "entrypoint_status": ENTRYPOINT_STATUS,
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+        ),
+        file=sys.stderr,
+        flush=True,
+    )
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description=(
-            "Run exactly two unchanged-contract Qwen3.6-27B diagnostic calls. "
+            _ENTRYPOINT_HELP
+            + " Run exactly two unchanged-contract Qwen3.6-27B diagnostic calls. "
             "Stream output is observational; persisted raw bytes are authoritative."
         )
     )
@@ -199,6 +226,7 @@ def _parent(args: argparse.Namespace) -> int:
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
+    _emit_entrypoint_notice()
     try:
         return _worker(args) if args.worker else _parent(args)
     except (

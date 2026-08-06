@@ -14,8 +14,15 @@ from typing import Mapping
 from uuid import uuid4
 import zipfile
 
-from req2web_agent import DeterministicRequirementProvider, MinimalAgentChain
-from req2web_generation import RetrievalGuidanceBuilder
+from req2web_agent import (
+    AGENT_BUNDLE_SCHEMA_VERSION,
+    DeterministicRequirementProvider,
+    MinimalAgentChain,
+)
+from req2web_generation import (
+    RETRIEVAL_GUIDANCE_SCHEMA_VERSION,
+    RetrievalGuidanceBuilder,
+)
 from req2web_provider.d17_audit import create_d17_path3_pre_invocation_audit_record
 from req2web_provider.d17_input_view import select_d17_path3_provider_input
 from req2web_provider.d17_manifest import D17Path3TierAManifest
@@ -89,6 +96,66 @@ def _binding(raw: bytes, *, identifier: str | None = None) -> dict[str, object]:
     if identifier is not None:
         result["id"] = identifier
     return result
+
+
+def _context_guidance_bindings(context, guidance) -> dict[str, object]:
+    context_raw = _canonical(context.to_dict())
+    guidance_raw = _canonical(guidance.to_dict())
+    context_binding = {
+        "schema_version": context.schema_version,
+        "sha256": _sha(context_raw),
+        "byte_length": len(context_raw),
+    }
+    if guidance.source_context_schema_version != context.schema_version:
+        raise Qwen27BCaseBundleError(
+            "retrieval_guidance_source_context_schema_invalid"
+        )
+    return {
+        "agent_context": context_binding,
+        "retrieval_guidance": {
+            "schema_version": guidance.schema_version,
+            "sha256": _sha(guidance_raw),
+            "byte_length": len(guidance_raw),
+            "source_context": dict(context_binding),
+        },
+    }
+
+
+def _validate_context_guidance_binding_shape(
+    row: Mapping[str, object],
+) -> bool:
+    context = row.get("agent_context")
+    guidance = row.get("retrieval_guidance")
+    if context is None and guidance is None:
+        return False
+    if (
+        type(context) is not dict
+        or set(context) != {"schema_version", "sha256", "byte_length"}
+        or context["schema_version"] != AGENT_BUNDLE_SCHEMA_VERSION
+        or type(context["byte_length"]) is not int
+        or context["byte_length"] <= 0
+    ):
+        raise Qwen27BCaseBundleError("case_bundle_agent_context_binding_invalid")
+    _hex64(context["sha256"], "case_bundle_agent_context_sha256")
+    if (
+        type(guidance) is not dict
+        or set(guidance)
+        != {
+            "schema_version",
+            "sha256",
+            "byte_length",
+            "source_context",
+        }
+        or guidance["schema_version"] != RETRIEVAL_GUIDANCE_SCHEMA_VERSION
+        or type(guidance["byte_length"]) is not int
+        or guidance["byte_length"] <= 0
+        or guidance["source_context"] != context
+    ):
+        raise Qwen27BCaseBundleError(
+            "case_bundle_retrieval_guidance_binding_invalid"
+        )
+    _hex64(guidance["sha256"], "case_bundle_retrieval_guidance_sha256")
+    return True
 
 
 def _validate_binding(
@@ -363,8 +430,55 @@ def _build_case_bytes(
         "local_request": _binding(local_request_raw),
         "context_sha256": _sha(_canonical(context.to_dict())),
         "guidance_sha256": _sha(_canonical(guidance.to_dict())),
+        **_context_guidance_bindings(context, guidance),
     }
     return prompt, provider_input, metadata
+
+
+def _rebuild_case_authority(
+    *,
+    bundle_root: Path,
+    archive_path: Path,
+    archive_manifest: repository_archive.RepositoryArchiveManifest,
+) -> tuple[dict[str, object], dict[str, dict[str, object]]]:
+    extraction_root = bundle_root.parent / (
+        "." + bundle_root.name + ".authority-source-" + uuid4().hex
+    )
+    extraction_root.mkdir(parents=False, exist_ok=False)
+    try:
+        archive_authority, archive_rows = _extract_bundle_sources(
+            archive_path, archive_manifest, extraction_root
+        )
+        cases, tracked_by_case, source = _validate_source_documents(
+            extraction_root, archive_authority, archive_rows
+        )
+        retriever = create_retriever(
+            RetrieverConfig(
+                index_dir=extraction_root / _RAG_INDEX_PATH,
+                backend="tfidf",
+            )
+        )
+        chain = MinimalAgentChain(
+            DeterministicRequirementProvider(), retriever, top_k_per_role=2
+        )
+        rebuilt: dict[str, dict[str, object]] = {}
+        for case in cases:
+            case_id = case["case_id"]
+            prompt, provider_input, row = _build_case_bytes(
+                extraction_root, case, tracked_by_case[case_id], chain
+            )
+            rebuilt[case_id] = {
+                "prompt_bytes": prompt,
+                "provider_input_bytes": provider_input,
+                "metadata": row,
+                "semantic_bindings": {
+                    "agent_context": row["agent_context"],
+                    "retrieval_guidance": row["retrieval_guidance"],
+                },
+            }
+        return source, rebuilt
+    finally:
+        shutil.rmtree(extraction_root, ignore_errors=True)
 
 
 def _inventory(root: Path) -> list[dict[str, object]]:
@@ -512,6 +626,7 @@ def _validate_manifest_shape(data: object) -> dict[str, object]:
 class Qwen27BCaseBundle:
     root: Path
     manifest: dict[str, object]
+    verified_case_bindings: dict[str, dict[str, object]] | None = None
 
     def validate(self) -> None:
         validate_qwen27b_case_bundle(self.root, expected_manifest=self.manifest)
@@ -625,10 +740,13 @@ def validate_qwen27b_case_bundle(
         repository_archive_manifest_path is None
     ):
         raise Qwen27BCaseBundleError("case_bundle_archive_pair_required")
+    rebuilt_source: dict[str, object] | None = None
+    rebuilt_cases: dict[str, dict[str, object]] | None = None
     if repository_archive_path is not None:
+        archive_path = Path(repository_archive_path).resolve(strict=True)
         try:
             owner = repository_archive.validate_archive_file(
-                repository_archive_path,
+                archive_path,
                 repository_archive_manifest_path,
             )
         except repository_archive.RepositoryArchiveError as exc:
@@ -641,6 +759,15 @@ def validate_qwen27b_case_bundle(
         ):
             raise Qwen27BCaseBundleError(
                 "case_bundle_archive_authority_mismatch"
+            )
+        rebuilt_source, rebuilt_cases = _rebuild_case_authority(
+            bundle_root=root,
+            archive_path=archive_path,
+            archive_manifest=owner,
+        )
+        if rebuilt_source != data["source"]:
+            raise Qwen27BCaseBundleError(
+                "case_bundle_source_authority_mismatch"
             )
     rows = _inventory(root)
     inventory = data.get("inventory")
@@ -657,6 +784,7 @@ def validate_qwen27b_case_bundle(
     ) != CASE_IDS:
         raise Qwen27BCaseBundleError("case_bundle_case_rows_invalid")
     for row in case_rows:
+        has_semantic_bindings = _validate_context_guidance_binding_shape(row)
         prompt_relative, provider_relative = _case_relative_paths(row["case_id"])
         prompt = _safe_file(root, prompt_relative).read_bytes()
         provider_input = _safe_file(root, provider_relative).read_bytes()
@@ -704,7 +832,46 @@ def validate_qwen27b_case_bundle(
             or type(provider_document) is not dict
         ):
             raise Qwen27BCaseBundleError("case_bundle_document_contract_invalid")
-    return Qwen27BCaseBundle(root, data)
+        if rebuilt_cases is not None:
+            rebuilt = rebuilt_cases[row["case_id"]]
+            if (
+                prompt != rebuilt["prompt_bytes"]
+                or provider_input != rebuilt["provider_input_bytes"]
+            ):
+                raise Qwen27BCaseBundleError(
+                    "case_bundle_upstream_payload_mismatch"
+                )
+            rebuilt_row = rebuilt["metadata"]
+            for key in (
+                "provider_input_id",
+                "provider_input",
+                "prompt",
+                "canonical_prompt_artifact",
+                "local_request",
+                "context_sha256",
+                "guidance_sha256",
+            ):
+                if row.get(key) != rebuilt_row[key]:
+                    raise Qwen27BCaseBundleError(
+                        f"case_bundle_upstream_{key}_mismatch"
+                    )
+            if has_semantic_bindings and (
+                row["agent_context"] != rebuilt_row["agent_context"]
+                or row["retrieval_guidance"]
+                != rebuilt_row["retrieval_guidance"]
+            ):
+                raise Qwen27BCaseBundleError(
+                    "case_bundle_upstream_context_guidance_mismatch"
+                )
+    verified = (
+        None
+        if rebuilt_cases is None
+        else {
+            case_id: dict(rebuilt_cases[case_id]["semantic_bindings"])
+            for case_id in CASE_IDS
+        }
+    )
+    return Qwen27BCaseBundle(root, data, verified)
 
 
 def compose_qwen27b_model_text(

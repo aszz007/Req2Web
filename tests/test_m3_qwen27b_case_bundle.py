@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 from pathlib import Path
 import shutil
@@ -132,6 +133,27 @@ class Qwen27BCaseBundleTests(unittest.TestCase):
             repository_archive_manifest_path=self.first_manifest_path,
         )
         self.assertEqual(replay.sha256(), bundle.sha256())
+        self.assertEqual(tuple(replay.verified_case_bindings), CASE_IDS)
+        for row in bundle.manifest["cases"]:
+            self.assertEqual(
+                row["agent_context"]["schema_version"],
+                "req2web.agent.context.v1",
+            )
+            self.assertEqual(
+                row["retrieval_guidance"]["schema_version"],
+                "req2web.retrieval.guidance.v1",
+            )
+            self.assertEqual(
+                row["retrieval_guidance"]["source_context"],
+                row["agent_context"],
+            )
+            self.assertEqual(
+                replay.verified_case_bindings[row["case_id"]],
+                {
+                    "agent_context": row["agent_context"],
+                    "retrieval_guidance": row["retrieval_guidance"],
+                },
+            )
         for case_id in CASE_IDS:
             text = compose_qwen27b_model_text(bundle, case_id)
             self.assertIn("<provider_visible_input>", text)
@@ -190,6 +212,89 @@ class Qwen27BCaseBundleTests(unittest.TestCase):
         )
         with self.assertRaisesRegex(Qwen27BCaseBundleError, "model_profile"):
             validate_qwen27b_case_bundle(bundle.root)
+
+    def test_upstream_context_guidance_identity_drift_fails_closed(self) -> None:
+        bundle = self.build()
+        manifest_path = bundle.root / CASE_BUNDLE_MANIFEST
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        row = manifest["cases"][0]
+        row["agent_context"]["sha256"] = "0" * 64
+        row["retrieval_guidance"]["source_context"] = dict(
+            row["agent_context"]
+        )
+        body = {
+            key: value for key, value in manifest.items() if key != "bundle_id"
+        }
+        manifest["bundle_id"] = (
+            "qwen35-27b-case-bundle-v1-"
+            + hashlib.sha256(
+                json.dumps(
+                    body,
+                    ensure_ascii=False,
+                    sort_keys=True,
+                    separators=(",", ":"),
+                    allow_nan=False,
+                ).encode("utf-8")
+            ).hexdigest()
+        )
+        manifest_path.write_text(
+            json.dumps(
+                manifest,
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+            ),
+            encoding="utf-8",
+            newline="\n",
+        )
+        with self.assertRaisesRegex(
+            Qwen27BCaseBundleError,
+            "upstream_context_guidance_mismatch",
+        ):
+            validate_qwen27b_case_bundle(
+                bundle.root,
+                repository_archive_path=self.first_archive_path,
+                repository_archive_manifest_path=self.first_manifest_path,
+            )
+
+    def test_legacy_manifest_replay_derives_verified_upstream_bindings(self) -> None:
+        bundle = self.build()
+        manifest_path = bundle.root / CASE_BUNDLE_MANIFEST
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        for row in manifest["cases"]:
+            row.pop("agent_context")
+            row.pop("retrieval_guidance")
+        body = {
+            key: value for key, value in manifest.items() if key != "bundle_id"
+        }
+        manifest["bundle_id"] = (
+            "qwen35-27b-case-bundle-v1-"
+            + hashlib.sha256(
+                json.dumps(
+                    body,
+                    ensure_ascii=False,
+                    sort_keys=True,
+                    separators=(",", ":"),
+                    allow_nan=False,
+                ).encode("utf-8")
+            ).hexdigest()
+        )
+        manifest_path.write_text(
+            json.dumps(
+                manifest,
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+            ),
+            encoding="utf-8",
+            newline="\n",
+        )
+        replay = validate_qwen27b_case_bundle(
+            bundle.root,
+            repository_archive_path=self.first_archive_path,
+            repository_archive_manifest_path=self.first_manifest_path,
+        )
+        self.assertEqual(tuple(replay.verified_case_bindings), CASE_IDS)
 
     def test_nonempty_output_root_is_rejected(self) -> None:
         output = self.work / "nonempty"

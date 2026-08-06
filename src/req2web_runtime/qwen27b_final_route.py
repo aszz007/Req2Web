@@ -165,6 +165,20 @@ def _cross_bind_case_bundle(
     }
     if tuple(rows) != _case_bundle.CASE_IDS:
         raise Qwen27BFinalRouteError("final_route_case_bundle_order_invalid")
+    verified = bundle.verified_case_bindings
+    if not isinstance(verified, Mapping) or tuple(verified) != _case_bundle.CASE_IDS:
+        raise Qwen27BFinalRouteError(
+            "final_route_case_bundle_upstream_authority_missing"
+        )
+    material_rows = {
+        row["case_id"]: row
+        for row in materials.manifest["cases"]
+        if isinstance(row, Mapping)
+    }
+    if tuple(material_rows) != _case_bundle.CASE_IDS:
+        raise Qwen27BFinalRouteError(
+            "final_route_case_loader_order_invalid"
+        )
     for case_id in _case_bundle.CASE_IDS:
         payloads = materials.case_payloads[case_id]
         row = rows[case_id]
@@ -178,6 +192,36 @@ def _cross_bind_case_bundle(
                 not isinstance(binding, Mapping)
                 or binding.get("byte_length") != len(raw)
                 or binding.get("sha256") != _sha(raw)
+            ):
+                raise Qwen27BFinalRouteError(
+                    f"final_route_{key}_cross_binding_invalid"
+                )
+        context = materials.case_inputs[case_id]["context"]
+        guidance = materials.case_inputs[case_id]["guidance"]
+        context_raw = _canonical(context.to_dict())
+        guidance_raw = _canonical(guidance.to_dict())
+        context_binding = {
+            "schema_version": context.schema_version,
+            "sha256": _sha(context_raw),
+            "byte_length": len(context_raw),
+        }
+        if guidance.source_context_schema_version != context.schema_version:
+            raise Qwen27BFinalRouteError(
+                "final_route_guidance_source_context_schema_invalid"
+            )
+        expected_semantic_bindings = {
+            "agent_context": context_binding,
+            "retrieval_guidance": {
+                "schema_version": guidance.schema_version,
+                "sha256": _sha(guidance_raw),
+                "byte_length": len(guidance_raw),
+                "source_context": dict(context_binding),
+            },
+        }
+        for key, expected in expected_semantic_bindings.items():
+            if (
+                material_rows[case_id].get(key) != expected
+                or verified[case_id].get(key) != expected
             ):
                 raise Qwen27BFinalRouteError(
                     f"final_route_{key}_cross_binding_invalid"
@@ -606,6 +650,8 @@ def _route_case(
             "formal_quality": False,
             "h1": False,
             "browser_quality": False,
+            "real_browser_executed": False,
+            "formal_browser_success": False,
             "evidence_use": False,
             "original_model_raw_preserved": True,
             "semantic_closure_is_system_owned": (
@@ -686,6 +732,8 @@ def evaluate_qwen27b_final_route(
             "formal_quality": False,
             "h1": False,
             "browser_quality": False,
+            "real_browser_executed": False,
+            "formal_browser_success": False,
             "evidence_use": False,
             "model_loaded_by_this_adapter": False,
             "provider_call_by_this_adapter": False,
