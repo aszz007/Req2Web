@@ -166,6 +166,31 @@ class Phase5FormalQwenWorkerContractTest(unittest.TestCase):
         self.assertEqual(started, ["F1"])
         self.assertIn("load_started", target.value)
 
+    def test_stream_mirror_preserves_non_json_worker_stderr(self) -> None:
+        class _Target:
+            def __init__(self) -> None:
+                self.value = ""
+                self.flush_count = 0
+
+            def write(self, value: str) -> None:
+                self.value += value
+
+            def flush(self) -> None:
+                self.flush_count += 1
+
+        target = _Target()
+        mirror = _StreamMirror(target)
+        raw = b"[transformers] optional kernel unavailable; using torch\n"
+
+        mirror.feed(raw)
+
+        self.assertEqual(target.value, raw.decode("utf-8"))
+        self.assertEqual(target.flush_count, 1)
+        self.assertEqual(bytes(mirror.stderr_bytes), raw)
+        self.assertEqual(bytes(mirror.token_bytes), b"")
+        self.assertEqual(mirror.started_nodes, set())
+        self.assertEqual(mirror.completed_nodes, set())
+
 
 if __name__ == "__main__":
     unittest.main()

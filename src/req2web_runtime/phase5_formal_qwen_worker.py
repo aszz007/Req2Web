@@ -530,7 +530,7 @@ class _StreamMirror:
                 raw.rstrip(b"\r\n"),
                 "formal worker stream event",
             )
-        except Phase5FormalRunnerError:
+        except _formal.Phase5FormalRunnerError:
             self.target.write(raw.decode("utf-8", errors="replace"))  # type: ignore[union-attr]
             self.target.flush()  # type: ignore[union-attr]
             return
