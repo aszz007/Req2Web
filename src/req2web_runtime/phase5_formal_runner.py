@@ -573,7 +573,7 @@ def _node_input(
     )
     payload = static["provider_payload"]
     if not isinstance(payload, Mapping):
-        raise Phase5FormalRunnerError("Path 1 static projection is invalid")
+        raise Phase5FormalRunnerError("formal static projection is invalid")
     dynamic = _dynamic_projection(
         node_id=node_id,
         state=state,

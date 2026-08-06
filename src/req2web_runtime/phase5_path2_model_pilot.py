@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Mapping
 
 from .phase5_action_authority import (
+    PATH2_SCHEMA_VERSION,
     Phase5FinalActionAuthority,
     create_phase5_final_action_authority,
     write_phase5_final_action_authority,
@@ -308,7 +309,7 @@ def prepare_phase5_path2_model_pilot(
     }
     authority = create_phase5_final_action_authority(
         {
-            "schema_version": "req2web.phase5.final_action_authority.v1",
+            "schema_version": PATH2_SCHEMA_VERSION,
             "status": "owner_approved_ready_for_exact_action",
             "route": PATH2_ROUTE,
             "run_id": run_id,

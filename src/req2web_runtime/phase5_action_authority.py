@@ -21,6 +21,7 @@ from .phase5_sealed_action_package import Phase5SealedActionPackage
 
 
 SCHEMA_VERSION = "req2web.phase5.final_action_authority.v1"
+PATH2_SCHEMA_VERSION = "req2web.phase5.final_action_authority.v2"
 _POSIX_ABSOLUTE = re.compile(r"^/(?:[^/\x00]+/)*[^/\x00]*$")
 _PROHIBITED_KEYS = {
     "credential",
@@ -125,16 +126,21 @@ def _validate_payload(value: object) -> dict[str, object]:
         ),
         "final action authority",
     )
-    if receipt["schema_version"] != SCHEMA_VERSION:
-        raise ValueError("final action authority schema drifted")
-    if receipt["status"] != "owner_approved_ready_for_exact_action":
-        raise ValueError("final action authority status drifted")
     route = receipt["route"]
     if route not in {
         "path_1_licensed_minimal_real_material",
         "path_2_public_or_project_authored_synthetic_fixture",
     }:
         raise ValueError("final action authority route drifted")
+    expected_schema = (
+        PATH2_SCHEMA_VERSION
+        if route == "path_2_public_or_project_authored_synthetic_fixture"
+        else SCHEMA_VERSION
+    )
+    if receipt["schema_version"] != expected_schema:
+        raise ValueError("final action authority schema drifted")
+    if receipt["status"] != "owner_approved_ready_for_exact_action":
+        raise ValueError("final action authority status drifted")
     _text(receipt["run_id"], "final action run id")
     _commit(receipt["source_action_commit"], "final action source commit")
     bindings = _exact(

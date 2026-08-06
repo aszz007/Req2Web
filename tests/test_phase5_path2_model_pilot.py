@@ -12,6 +12,7 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "src"))
 
 from req2web_runtime.phase5_action_authority import (  # noqa: E402
+    PATH2_SCHEMA_VERSION,
     create_phase5_final_action_authority,
     validate_phase5_action_authority_against_package,
 )
@@ -20,8 +21,15 @@ from req2web_runtime.phase5_formal_runner import (  # noqa: E402
     synthetic_phase5_worker_factory,
     validate_phase5_formal_result_root,
 )
+from req2web_runtime.phase5_formal_qwen_worker import (  # noqa: E402
+    validate_phase5_formal_generation_artifacts,
+)
 from req2web_runtime.phase5_path2_model_pilot import (  # noqa: E402
     prepare_phase5_path2_model_pilot,
+)
+from req2web_runtime.phase5_result_return import (  # noqa: E402
+    create_phase5_result_return,
+    validate_phase5_result_return,
 )
 from req2web_runtime.phase5_sealed_action_package import (  # noqa: E402
     PATH2_PROJECTION_SCHEMA_VERSION,
@@ -54,7 +62,7 @@ def _path2_source() -> tuple[dict[str, object], dict[str, object]]:
     bindings = dict(source["authority_bindings"])
     bindings.pop("final_action_receipt_sha256")
     authority_source = {
-        "schema_version": "req2web.phase5.final_action_authority.v1",
+        "schema_version": PATH2_SCHEMA_VERSION,
         "status": "owner_approved_ready_for_exact_action",
         "route": PATH2_ROUTE,
         "run_id": source["run_id"],
@@ -174,6 +182,36 @@ class Phase5Path2ModelPilotTest(unittest.TestCase):
             ),
             summary,
         )
+        first_case = sorted((result_root / "cases").iterdir())[0]
+        attempt = first_case / "attempts" / "F1"
+        artifacts = validate_phase5_formal_generation_artifacts(
+            node_id="F1",
+            input_bytes=(attempt / "input.json").read_bytes(),
+            prompt_bytes=(attempt / "prompt.json").read_bytes(),
+            config_bytes=(attempt / "config.json").read_bytes(),
+            request_bytes=(attempt / "request.json").read_bytes(),
+            require_formal_action_receipt=True,
+        )
+        self.assertIn(
+            "path2_static_projection",
+            artifacts["input"],
+        )
+        tar_path = (self.temp / "path2-pilot-return.tar").resolve()
+        manifest_path = (
+            self.temp / "path2-pilot-return.manifest.json"
+        ).resolve()
+        created_return = create_phase5_result_return(
+            result_root=result_root,
+            tar_path=tar_path,
+            manifest_path=manifest_path,
+        )
+        self.assertEqual(
+            validate_phase5_result_return(
+                tar_path=tar_path,
+                manifest_path=manifest_path,
+            ),
+            created_return,
+        )
 
     def test_path2_authority_cannot_open_real_h1(self) -> None:
         _, authority_source = _path2_source()
@@ -181,6 +219,13 @@ class Phase5Path2ModelPilotTest(unittest.TestCase):
             "real_h1_projection_open_allowed"
         ] = True
         with self.assertRaisesRegex(ValueError, "real H1 authorization"):
+            create_phase5_final_action_authority(authority_source)
+
+        _, authority_source = _path2_source()
+        authority_source["schema_version"] = (
+            "req2web.phase5.final_action_authority.v1"
+        )
+        with self.assertRaisesRegex(ValueError, "schema drifted"):
             create_phase5_final_action_authority(authority_source)
 
     def test_preparation_writes_replayable_external_artifacts(self) -> None:

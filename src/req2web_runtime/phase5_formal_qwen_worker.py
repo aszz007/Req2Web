@@ -1,7 +1,8 @@
-"""Case-isolated Qwen worker for the sealed Phase 5 formal runner.
+"""Case-isolated Qwen worker for the sealed Phase 5 action runner.
 
 This module reuses the Phase 4 BF16/no-quantization loader and complete-JSON
-stopping behavior, but validates the distinct Phase 5 Path 1 input schema.
+stopping behavior, but validates the distinct Phase 5 route-specific input
+schema.
 Importing the module performs no model, GPU, subprocess, network, or remote
 action.
 """
@@ -121,12 +122,17 @@ def validate_phase5_formal_generation_artifacts(
         raise Phase5FormalQwenWorkerError(
             "formal worker artifacts must be JSON objects"
         )
-    if set(input_value) != {
+    static_keys = [
+        key
+        for key in ("path1_static_projection", "path2_static_projection")
+        if key in input_value
+    ]
+    if len(static_keys) != 1 or set(input_value) != {
         "schema_version",
         "node_id",
         "provider_case_ref",
         "provider_request_ref",
-        "path1_static_projection",
+        static_keys[0],
         "same_run_validated_upstream_projection",
     }:
         raise Phase5FormalQwenWorkerError("formal worker input keys drifted")
@@ -163,7 +169,12 @@ def validate_phase5_formal_generation_artifacts(
         raise Phase5FormalQwenWorkerError("formal worker prompt keys drifted")
     if (
         prompt["schema_version"] != _formal.NODE_PROMPT_SCHEMA_VERSION
-        or prompt["prompt_revision"] != _formal.PROMPT_REVISION
+        or prompt["prompt_revision"]
+        != (
+            _formal.PATH2_PROMPT_REVISION
+            if static_keys[0] == "path2_static_projection"
+            else _formal.PROMPT_REVISION
+        )
         or prompt["node_id"] != node_id
         or prompt["input_identity"] != _formal._identity(input_bytes)
     ):
