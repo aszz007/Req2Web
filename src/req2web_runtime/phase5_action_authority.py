@@ -256,8 +256,14 @@ def _validate_payload(value: object) -> dict[str, object]:
     )
     if state["receipt_created"] is not True:
         raise ValueError("final action receipt must record its creation")
+    expected_ssh_connected = (
+        route == "path_2_public_or_project_authored_synthetic_fixture"
+    )
+    if state["ssh_connected"] is not expected_ssh_connected:
+        raise ValueError(
+            "final action SSH state drifted from selected action route"
+        )
     for key in (
-        "ssh_connected",
         "model_loaded",
         "holdout_executed",
         "formal_quality_claimed",

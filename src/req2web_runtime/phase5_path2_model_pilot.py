@@ -350,7 +350,7 @@ def prepare_phase5_path2_model_pilot(
             },
             "action_state": {
                 "receipt_created": True,
-                "ssh_connected": False,
+                "ssh_connected": True,
                 "model_loaded": False,
                 "holdout_executed": False,
                 "formal_quality_claimed": False,
