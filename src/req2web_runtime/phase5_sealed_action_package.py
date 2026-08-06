@@ -1,4 +1,4 @@
-"""Owner-sealed Phase 5 action package and Path 1 static projections.
+"""Owner-sealed Phase 5 action package and route-specific static projections.
 
 Real packages may contain the frozen Provider-visible requirement projection
 and licensed short evidence summaries, but never gold. They must be created and
@@ -19,6 +19,11 @@ from typing import Mapping, Sequence
 
 SCHEMA_VERSION = "req2web.phase5.sealed_action_package.v1"
 PROJECTION_SCHEMA_VERSION = "req2web.phase5.path1.static_provider_projection.v1"
+PATH2_PROJECTION_SCHEMA_VERSION = (
+    "req2web.phase5.path2.static_provider_projection.v1"
+)
+PATH1_ROUTE = "path_1_licensed_minimal_real_material"
+PATH2_ROUTE = "path_2_public_or_project_authored_synthetic_fixture"
 FORMAL_AUTHORITY_SHA256 = (
     "60ea4aabd352ae5ac863a963a9963cf576ca2334354f8708a43771038861eb87"
 )
@@ -36,6 +41,7 @@ OWNER_CUSTODY_LAYOUT_SHA256 = (
 )
 _PACKAGE_KINDS = (
     "owner_sealed_formal_h1",
+    "project_authored_path2_model_pilot",
     "synthetic_validation_only",
 )
 _NODES = ("F1", "F2", "F3", "F4")
@@ -288,7 +294,12 @@ def _evidence_order(item: Mapping[str, object]) -> tuple[int, str, int]:
     )
 
 
-def _validate_runtime_row(value: object, index: int) -> dict[str, object]:
+def _validate_runtime_row(
+    value: object,
+    index: int,
+    *,
+    allowed_g0_statuses: Sequence[str],
+) -> dict[str, object]:
     name = f"sealed action runtime row {index}"
     row = _exact(
         value,
@@ -352,7 +363,8 @@ def _validate_runtime_row(value: object, index: int) -> dict[str, object]:
         ("status", "package_id", "package_sha256"),
         f"{name}.g0_reference",
     )
-    if g0["status"] != "prefrozen_valid":
+    g0_status = _text(g0["status"], f"{name}.g0_reference.status")
+    if g0_status not in allowed_g0_statuses:
         raise ValueError(f"{name}.g0_reference status drifted")
     return {
         "row_order": _integer(row["row_order"], f"{name}.row_order", minimum=1),
@@ -375,7 +387,7 @@ def _validate_runtime_row(value: object, index: int) -> dict[str, object]:
         "b_input": _validate_b_input(row["b_input"], f"{name}.b_input"),
         "evidence_items": evidence,
         "g0_reference": {
-            "status": "prefrozen_valid",
+            "status": g0_status,
             "package_id": _text(
                 g0["package_id"],
                 f"{name}.g0_reference.package_id",
@@ -407,10 +419,16 @@ def _validate_payload(value: object) -> dict[str, object]:
         "sealed action package",
     )
     package_kind = _text(package["package_kind"], "package_kind")
+    route = _text(package["route"], "route")
+    expected_route = {
+        "owner_sealed_formal_h1": PATH1_ROUTE,
+        "project_authored_path2_model_pilot": PATH2_ROUTE,
+        "synthetic_validation_only": PATH1_ROUTE,
+    }.get(package_kind)
     if (
         package["schema_version"] != SCHEMA_VERSION
         or package_kind not in _PACKAGE_KINDS
-        or package["route"] != "path_1_licensed_minimal_real_material"
+        or route != expected_route
     ):
         raise ValueError("sealed action package authority drifted")
     _text(package["run_id"], "sealed action run id")
@@ -462,7 +480,15 @@ def _validate_payload(value: object) -> dict[str, object]:
     )
 
     rows = [
-        _validate_runtime_row(item, index)
+        _validate_runtime_row(
+            item,
+            index,
+            allowed_g0_statuses=(
+                ("not_materialized_path2_pilot_no_fallback",)
+                if package_kind == "project_authored_path2_model_pilot"
+                else ("prefrozen_valid",)
+            ),
+        )
         for index, item in enumerate(
             _array(package["runtime_rows"], "sealed action runtime rows"),
             start=1,
@@ -553,7 +579,7 @@ def _validate_payload(value: object) -> dict[str, object]:
             for row in rows
         ):
             raise ValueError("synthetic sealed action package has a non-synthetic case")
-    else:
+    elif package_kind == "owner_sealed_formal_h1":
         if final_action_receipt is None:
             raise ValueError("formal sealed action package requires a final receipt")
         for key in (
@@ -568,6 +594,24 @@ def _validate_payload(value: object) -> dict[str, object]:
         for key in ("external_action_occurred", "holdout_executed"):
             if state[key] is not False:
                 raise ValueError(f"formal sealed action state {key} must remain false")
+    else:
+        if final_action_receipt is None:
+            raise ValueError("Path 2 model pilot requires a final receipt")
+        for key in (
+            "owner_sealed",
+            "final_action_authorized",
+            "model_action_authorized",
+            "gpu_or_remote_action_authorized",
+        ):
+            if state[key] is not True:
+                raise ValueError(f"Path 2 model pilot state {key} must be true")
+        if state["contains_real_h1_projection"] is not False:
+            raise ValueError(
+                "Path 2 model pilot must not claim a real H1 projection"
+            )
+        for key in ("external_action_occurred", "holdout_executed"):
+            if state[key] is not False:
+                raise ValueError(f"Path 2 model pilot state {key} must remain false")
 
     normalized = {
         **package,
@@ -662,7 +706,7 @@ def build_phase5_node_static_projection(
     matrix_row_id: str,
     node_id: str,
 ) -> dict[str, object]:
-    """Build the model-visible static Path 1 projection for one runtime row."""
+    """Build the model-visible static projection for one runtime row."""
 
     package.validate()
     if node_id not in _NODES:
@@ -693,8 +737,20 @@ def build_phase5_node_static_projection(
             continue
         evidence.append(item)
     b_input = row["b_input"]
+    package_payload = package.to_dict()
+    route = package_payload["route"]
+    projection_schema = (
+        PATH2_PROJECTION_SCHEMA_VERSION
+        if route == PATH2_ROUTE
+        else PROJECTION_SCHEMA_VERSION
+    )
+    evidence_key = (
+        "project_authored_evidence"
+        if route == PATH2_ROUTE
+        else "licensed_evidence"
+    )
     provider_payload = {
-        "schema_version": PROJECTION_SCHEMA_VERSION,
+        "schema_version": projection_schema,
         "node_id": node_id,
         "provider_case_ref": (
             "phase5-provider-case-"
@@ -715,14 +771,14 @@ def build_phase5_node_static_projection(
         "consumer_specific_preregistered_structural_signals": b_input[
             "structural_signals"
         ],
-        "licensed_evidence": evidence,
+        evidence_key: evidence,
     }
     if _scan_keys(provider_payload) & _PROHIBITED_KEYS:
         raise ValueError("Phase 5 provider payload contains a prohibited key")
     payload_bytes = _canonical(provider_payload)
     binding = {
-        "schema_version": PROJECTION_SCHEMA_VERSION,
-        "package_id": package.to_dict()["package_id"],
+        "schema_version": projection_schema,
+        "package_id": package_payload["package_id"],
         "package_sha256": package.sha256(),
         "matrix_row_id": matrix_row_id,
         "node_id": node_id,
@@ -735,7 +791,14 @@ def build_phase5_node_static_projection(
         "intervention_name_visible": False,
     }
     return {
-        "projection_id": _record_id("phase5-path1-static-projection", binding),
+        "projection_id": _record_id(
+            (
+                "phase5-path2-static-projection"
+                if route == PATH2_ROUTE
+                else "phase5-path1-static-projection"
+            ),
+            binding,
+        ),
         **binding,
     }
 

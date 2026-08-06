@@ -202,7 +202,10 @@ def main(argv: list[str] | None = None) -> int:
             worker_factory = synthetic_phase5_worker_factory
             result_root = args.result_root.resolve(strict=False)
         else:
-            if payload["package_kind"] != "owner_sealed_formal_h1":
+            if payload["package_kind"] not in {
+                "owner_sealed_formal_h1",
+                "project_authored_path2_model_pilot",
+            }:
                 parser.error("real execution requires an owner-sealed formal package")
             if args.confirm_formal_holdout_action is not True:
                 parser.error("--confirm-formal-holdout-action is required")

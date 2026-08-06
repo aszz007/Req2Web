@@ -42,6 +42,7 @@ from .phase5_action_authority import (
     validate_phase5_action_authority_against_package,
 )
 from .phase5_sealed_action_package import (
+    PATH2_ROUTE,
     Phase5SealedActionPackage,
     build_phase5_node_static_projection,
 )
@@ -64,6 +65,7 @@ CALL_LEDGER_SCHEMA_VERSION = "req2web.phase5.formal_call_ledger.v1"
 CASE_RESULT_SCHEMA_VERSION = "req2web.phase5.formal_case_result.v1"
 RUN_SUMMARY_SCHEMA_VERSION = "req2web.phase5.formal_run_summary.v1"
 PROMPT_REVISION = "phase5_path1_f3_f4_explicit_plan_v1"
+PATH2_PROMPT_REVISION = "phase5_path2_f3_f4_explicit_plan_v1"
 NODE_ORDER = ("F1", "F2", "F3", "F4")
 MODEL_CONTEXT_TOKENS = 262_144
 PER_NODE_TIMEOUT_SECONDS = 1_200
@@ -577,12 +579,17 @@ def _node_input(
         state=state,
         authority=authority,
     )
+    static_key = (
+        "path2_static_projection"
+        if package.to_dict()["route"] == PATH2_ROUTE
+        else "path1_static_projection"
+    )
     value = {
         "schema_version": NODE_INPUT_SCHEMA_VERSION,
         "node_id": node_id,
         "provider_case_ref": payload["provider_case_ref"],
         "provider_request_ref": payload["provider_request_ref"],
-        "path1_static_projection": copy.deepcopy(dict(payload)),
+        static_key: copy.deepcopy(dict(payload)),
         "same_run_validated_upstream_projection": dynamic,
     }
     prohibited = _scan_keys(value) & _PROHIBITED_PROVIDER_KEYS
@@ -683,7 +690,16 @@ def _node_prompt(node_id: str, input_bytes: bytes) -> bytes:
     if not isinstance(input_value, Mapping):
         raise Phase5FormalRunnerError(f"{node_id} formal input is invalid")
     dynamic = input_value["same_run_validated_upstream_projection"]
-    static = input_value["path1_static_projection"]
+    static_keys = [
+        key
+        for key in ("path1_static_projection", "path2_static_projection")
+        if key in input_value
+    ]
+    if len(static_keys) != 1:
+        raise Phase5FormalRunnerError(
+            f"{node_id} formal static projection route is invalid"
+        )
+    static = input_value[static_keys[0]]
     if not isinstance(dynamic, Mapping) or not isinstance(static, Mapping):
         raise Phase5FormalRunnerError(f"{node_id} formal projections are invalid")
     instructions = [
@@ -696,7 +712,11 @@ def _node_prompt(node_id: str, input_bytes: bytes) -> bytes:
     ]
     value: dict[str, object] = {
         "schema_version": NODE_PROMPT_SCHEMA_VERSION,
-        "prompt_revision": PROMPT_REVISION,
+        "prompt_revision": (
+            PATH2_PROMPT_REVISION
+            if static_keys[0] == "path2_static_projection"
+            else PROMPT_REVISION
+        ),
         "node_id": node_id,
         "input_identity": _identity(input_bytes),
         "output_format": "one_complete_canonical_json_object",
@@ -1218,7 +1238,11 @@ def _run_manifest(package: Phase5SealedActionPackage) -> dict[str, object]:
         ],
         "node_order": list(NODE_ORDER),
         "runtime_row_count": len(payload["runtime_rows"]),
-        "prompt_revision": PROMPT_REVISION,
+        "prompt_revision": (
+            PATH2_PROMPT_REVISION
+            if payload["route"] == PATH2_ROUTE
+            else PROMPT_REVISION
+        ),
         "case_boundary_recovery_only": True,
         "partial_case_generate_resume_allowed": False,
         "automatic_retry_allowed": False,
@@ -1438,7 +1462,10 @@ def run_phase5_formal_runner(
             raise Phase5FormalRunnerError(
                 "synthetic runner execution must not carry final action authority"
             )
-    elif payload["package_kind"] != "owner_sealed_formal_h1":
+    elif payload["package_kind"] not in {
+        "owner_sealed_formal_h1",
+        "project_authored_path2_model_pilot",
+    }:
         raise Phase5FormalRunnerError("formal package kind is unsupported")
     else:
         if action_authority is None:

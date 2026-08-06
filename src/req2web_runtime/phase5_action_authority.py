@@ -129,7 +129,11 @@ def _validate_payload(value: object) -> dict[str, object]:
         raise ValueError("final action authority schema drifted")
     if receipt["status"] != "owner_approved_ready_for_exact_action":
         raise ValueError("final action authority status drifted")
-    if receipt["route"] != "path_1_licensed_minimal_real_material":
+    route = receipt["route"]
+    if route not in {
+        "path_1_licensed_minimal_real_material",
+        "path_2_public_or_project_authored_synthetic_fixture",
+    }:
         raise ValueError("final action authority route drifted")
     _text(receipt["run_id"], "final action run id")
     _commit(receipt["source_action_commit"], "final action source commit")
@@ -219,13 +223,18 @@ def _validate_payload(value: object) -> dict[str, object]:
     )
     for key in (
         "owner_approved_exact_run",
-        "real_h1_projection_open_allowed",
         "model_action_allowed",
         "gpu_remote_paid_action_allowed",
         "single_owner_evaluation_allowed",
     ):
         if authorization[key] is not True:
             raise ValueError(f"final action authorization {key} must be true")
+    if authorization["real_h1_projection_open_allowed"] is not (
+        route == "path_1_licensed_minimal_real_material"
+    ):
+        raise ValueError(
+            "final action real H1 authorization drifted from selected route"
+        )
     for key in (
         "training_allowed",
         "lora_allowed",
@@ -343,7 +352,13 @@ def validate_phase5_action_authority_against_package(
     package.validate()
     receipt = authority.to_dict()
     sealed = package.to_dict()
-    if sealed["package_kind"] != "owner_sealed_formal_h1":
+    expected_kind = {
+        "path_1_licensed_minimal_real_material": "owner_sealed_formal_h1",
+        "path_2_public_or_project_authored_synthetic_fixture": (
+            "project_authored_path2_model_pilot"
+        ),
+    }[receipt["route"]]
+    if sealed["package_kind"] != expected_kind:
         raise ValueError("final action authority requires a formal sealed package")
     if (
         sealed["route"] != receipt["route"]
