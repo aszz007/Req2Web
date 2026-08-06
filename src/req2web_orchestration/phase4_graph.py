@@ -1877,6 +1877,8 @@ def phase4_create_portable_authority_state(
 def _phase4_validate_authority_state(
     state: Mapping[str, object],
     required_nodes: tuple[str, ...],
+    *,
+    expected_source_kind: str = "deterministic_synthetic_fixture",
 ) -> Phase4GraphState:
     """Validate the P4-03 in-memory facade state without graph event claims."""
 
@@ -1884,7 +1886,7 @@ def _phase4_validate_authority_state(
     if (
         data["schema_version"] != STATE_SCHEMA_VERSION
         or data["graph_revision"] != GRAPH_REVISION
-        or data["source_kind"] != "deterministic_synthetic_fixture"
+        or data["source_kind"] != expected_source_kind
         or data["status"] != "ready"
         or data["failure"] is not None
     ):
@@ -1925,6 +1927,26 @@ def _phase4_validate_authority_state(
     ):
         raise Phase4ContractError("P4-03 registry authority drifted")
     return data  # type: ignore[return-value]
+
+
+def phase4_create_sealed_formal_authority_state(
+    b_input: Mapping[str, object],
+) -> Phase4GraphState:
+    """Create the shared F1-F4 authority shape for a sealed formal caller.
+
+    The new source kind prevents Phase 5 formal data from being represented as
+    a deterministic synthetic fixture while preserving the existing validators,
+    registry, mapping, composition, and assembler contracts.
+    """
+
+    state = _create_initial_state(b_input, verify_installed_files=False)
+    state["source_kind"] = "sealed_formal_holdout"
+    _phase4_validate_authority_state(
+        state,
+        (),
+        expected_source_kind="sealed_formal_holdout",
+    )
+    return state
 
 
 def phase4_validate_node_output(
@@ -3015,15 +3037,21 @@ def phase4_validate_f4_normalization_receipt(
     return data
 
 
-def phase4_register_node_output(
+def _phase4_register_node_output_for_source(
     state: Mapping[str, object],
     node_id: str,
     output: Mapping[str, object],
+    *,
+    expected_source_kind: str,
 ) -> Phase4GraphState:
-    """Reuse the existing stable-ID registry for a P4-03 in-memory state."""
-
     expected_prior = tuple(NODE_ORDER[: NODE_ORDER.index(node_id)]) if node_id in NODE_ORDER else ()
-    current = copy.deepcopy(_phase4_validate_authority_state(state, expected_prior))
+    current = copy.deepcopy(
+        _phase4_validate_authority_state(
+            state,
+            expected_prior,
+            expected_source_kind=expected_source_kind,
+        )
+    )
     if current.get("pending_node_id") is not None or current.get("pending_output") is not None:
         raise Phase4ContractError("P4-03 authority state has a pending output")
     if node_id in current.get("node_results", {}):
@@ -3032,18 +3060,53 @@ def phase4_register_node_output(
     current["pending_output"] = copy.deepcopy(dict(output))
     _node_validator(node_id, current["pending_output"], current)
     _register(current, node_id)
-    _phase4_validate_authority_state(current, (*expected_prior, node_id))
+    _phase4_validate_authority_state(
+        current,
+        (*expected_prior, node_id),
+        expected_source_kind=expected_source_kind,
+    )
     return current  # type: ignore[return-value]
 
 
-def phase4_create_mapping(
+def phase4_register_node_output(
     state: Mapping[str, object],
-) -> dict[str, object]:
-    """Reuse the existing deterministic use-case mapping authority."""
+    node_id: str,
+    output: Mapping[str, object],
+) -> Phase4GraphState:
+    """Reuse the existing stable-ID registry for a P4-03 in-memory state."""
 
+    return _phase4_register_node_output_for_source(
+        state,
+        node_id,
+        output,
+        expected_source_kind="deterministic_synthetic_fixture",
+    )
+
+
+def phase4_register_sealed_formal_node_output(
+    state: Mapping[str, object],
+    node_id: str,
+    output: Mapping[str, object],
+) -> Phase4GraphState:
+    """Register one sealed formal output without relabeling it synthetic."""
+
+    return _phase4_register_node_output_for_source(
+        state,
+        node_id,
+        output,
+        expected_source_kind="sealed_formal_holdout",
+    )
+
+
+def _phase4_create_mapping_for_source(
+    state: Mapping[str, object],
+    *,
+    expected_source_kind: str,
+) -> dict[str, object]:
     checked = _phase4_validate_authority_state(
         state,
         tuple(state.get("node_results", {})),
+        expected_source_kind=expected_source_kind,
     )
     if tuple(checked["node_results"]) not in {NODE_ORDER[:3], NODE_ORDER}:
         raise Phase4ContractError("P4-03 mapping authority is incomplete")
@@ -3051,20 +3114,42 @@ def phase4_create_mapping(
     return _validate_mapping(mapping, checked)
 
 
-def phase4_project_node_input_authority(
+def phase4_create_mapping(
+    state: Mapping[str, object],
+) -> dict[str, object]:
+    """Reuse the existing deterministic use-case mapping authority."""
+
+    return _phase4_create_mapping_for_source(
+        state,
+        expected_source_kind="deterministic_synthetic_fixture",
+    )
+
+
+def phase4_create_sealed_formal_mapping(
+    state: Mapping[str, object],
+) -> dict[str, object]:
+    """Create the same mapping for a sealed formal authority state."""
+
+    return _phase4_create_mapping_for_source(
+        state,
+        expected_source_kind="sealed_formal_holdout",
+    )
+
+
+def _phase4_project_node_input_authority_for_source(
     state: Mapping[str, object],
     node_id: str,
+    *,
+    expected_source_kind: str,
 ) -> dict[str, object]:
-    """Project live deterministic registry/mapping facts for one P4-03 input.
-
-    The registry remains an identity/mapping authority only.  This projection
-    exposes its already-derived facts and never rewrites node semantics.
-    """
-
     if node_id not in NODE_ORDER:
         raise Phase4ContractError("P4-03 authority projection node is invalid")
     required = list(NODE_ORDER[: NODE_ORDER.index(node_id)])
-    state = _phase4_validate_authority_state(state, tuple(required))
+    state = _phase4_validate_authority_state(
+        state,
+        tuple(required),
+        expected_source_kind=expected_source_kind,
+    )
     for prior_node in required:
         _node_validator(
             prior_node,
@@ -3125,17 +3210,75 @@ def phase4_project_node_input_authority(
     }
 
 
-def phase4_compose_candidate(
+def phase4_project_node_input_authority(
     state: Mapping[str, object],
+    node_id: str,
 ) -> dict[str, object]:
-    """Reuse the existing candidate projection and live canonical reparse."""
+    """Project live deterministic registry/mapping facts for one P4-03 input.
 
-    checked = copy.deepcopy(_phase4_validate_authority_state(state, NODE_ORDER))
+    The registry remains an identity/mapping authority only.  This projection
+    exposes its already-derived facts and never rewrites node semantics.
+    """
+
+    return _phase4_project_node_input_authority_for_source(
+        state,
+        node_id,
+        expected_source_kind="deterministic_synthetic_fixture",
+    )
+
+
+def phase4_project_sealed_formal_node_input_authority(
+    state: Mapping[str, object],
+    node_id: str,
+) -> dict[str, object]:
+    """Project registry and mapping facts for a sealed formal runtime."""
+
+    return _phase4_project_node_input_authority_for_source(
+        state,
+        node_id,
+        expected_source_kind="sealed_formal_holdout",
+    )
+
+
+def _phase4_compose_candidate_for_source(
+    state: Mapping[str, object],
+    *,
+    expected_source_kind: str,
+) -> dict[str, object]:
+    checked = copy.deepcopy(
+        _phase4_validate_authority_state(
+            state,
+            NODE_ORDER,
+            expected_source_kind=expected_source_kind,
+        )
+    )
     checked["mapping_record"] = _validate_mapping(
         _mapping_record(checked), checked
     )
     candidate = _candidate_composition(checked)
     return _validate_candidate_composition(candidate, checked)
+
+
+def phase4_compose_candidate(
+    state: Mapping[str, object],
+) -> dict[str, object]:
+    """Reuse the existing candidate projection and live canonical reparse."""
+
+    return _phase4_compose_candidate_for_source(
+        state,
+        expected_source_kind="deterministic_synthetic_fixture",
+    )
+
+
+def phase4_compose_sealed_formal_candidate(
+    state: Mapping[str, object],
+) -> dict[str, object]:
+    """Compose one sealed formal candidate with the accepted authority."""
+
+    return _phase4_compose_candidate_for_source(
+        state,
+        expected_source_kind="sealed_formal_holdout",
+    )
 
 
 def phase4_assemble_candidate(
@@ -3492,10 +3635,15 @@ __all__ = [
     "create_initial_state",
     "phase4_assemble_candidate",
     "phase4_compose_candidate",
+    "phase4_compose_sealed_formal_candidate",
     "phase4_create_authority_state",
     "phase4_create_mapping",
+    "phase4_create_sealed_formal_authority_state",
+    "phase4_create_sealed_formal_mapping",
     "phase4_project_node_input_authority",
+    "phase4_project_sealed_formal_node_input_authority",
     "phase4_register_node_output",
+    "phase4_register_sealed_formal_node_output",
     "phase4_synthetic_assembler_bindings",
     "phase4_synthetic_fixture_output",
     "phase4_validate_node_output",
