@@ -19,7 +19,7 @@ import re
 import sys
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Mapping, TypedDict
+from typing import Any, Callable, Mapping, TypedDict
 
 from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.graph import END, START, StateGraph
@@ -109,6 +109,19 @@ _ACTION_STATE = {
     "training": False,
     "remote_action": False,
 }
+REAL_MODEL_SOURCE_KIND = "real_model_raw_response"
+REAL_MODEL_GRAPH_SCHEMA_VERSION = "req2web.phase4.real_model_graph_state.v1"
+REAL_MODEL_GRAPH_REVISION = "req2web.phase4.real_model_langgraph.v1"
+REAL_MODEL_GRAPH_NODE_ORDER = (*GRAPH_NODE_ORDER, "deliver_result")
+_REAL_MODEL_ACTION_STATE = {
+    "action_state_version": "req2web.phase4.action_state.p4_02a.v1",
+    "runtime_kind": "remote_real_model_langgraph",
+    "model_action": True,
+    "graph_runtime_execution": True,
+    "dependency_installation": False,
+    "training": False,
+    "remote_action": True,
+}
 _ACQUISITION_ACTION_STATE = {
     "action_state_version": "req2web.phase4.action_state.p4_02a.v1",
     "runtime_kind": "dependency_acquisition",
@@ -188,6 +201,29 @@ class Phase4GraphState(TypedDict):
     assembly_record: dict[str, object] | None
     events: list[dict[str, object]]
     execution_counts: dict[str, int]
+    completed_graph_nodes: list[str]
+    status: str
+    failure: dict[str, object] | None
+    action_state: dict[str, object]
+
+
+class Phase4RealModelGraphState(TypedDict):
+    schema_version: str
+    graph_revision: str
+    run_id: str
+    case_id: str
+    request_id: str
+    upstream_binding: dict[str, object]
+    authority_state: Phase4GraphState
+    node_input_authorities: dict[str, dict[str, object]]
+    node_execution_records: dict[str, dict[str, object]]
+    pending_execution: dict[str, object] | None
+    mapping_record: dict[str, object] | None
+    candidate_composition_record: dict[str, object] | None
+    assembled_page_spec: dict[str, object] | None
+    assembly_report: dict[str, object] | None
+    delivery_result: dict[str, object] | None
+    events: list[dict[str, object]]
     completed_graph_nodes: list[str]
     status: str
     failure: dict[str, object] | None
@@ -841,12 +877,41 @@ def _raw_capture() -> dict[str, object]:
     }
 
 
-def _validate_raw_capture(value: object) -> dict[str, object]:
+def make_real_model_raw_capture(raw_bytes: bytes) -> dict[str, object]:
+    """Bind immutable real-model bytes without carrying the bytes in graph state."""
+
+    if type(raw_bytes) is not bytes or not raw_bytes:
+        raise Phase4ContractError("real-model raw capture requires non-empty bytes")
+    return {
+        "state": "captured",
+        "byte_length": len(raw_bytes),
+        "sha256": _sha256(raw_bytes),
+        "source_kind": REAL_MODEL_SOURCE_KIND,
+    }
+
+
+def _validate_raw_capture(
+    value: object,
+    *,
+    expected_source_kind: str = "deterministic_synthetic_fixture",
+) -> dict[str, object]:
     data = _object(
         value,
         ("state", "byte_length", "sha256", "source_kind"),
         "raw_capture",
     )
+    if expected_source_kind == REAL_MODEL_SOURCE_KIND:
+        byte_length = _integer(data["byte_length"], "raw_capture.byte_length")
+        if (
+            data["state"] != "captured"
+            or byte_length < 1
+            or not isinstance(data["sha256"], str)
+            or not data["sha256"].startswith("sha256:")
+            or _HEX.fullmatch(data["sha256"][7:]) is None
+            or data["source_kind"] != REAL_MODEL_SOURCE_KIND
+        ):
+            raise Phase4ContractError("real-model raw-capture binding is invalid")
+        return data
     if (
         data["state"] != "not_captured"
         or _integer(data["byte_length"], "raw_capture.byte_length") != 0
@@ -1164,7 +1229,14 @@ def _stable_id(state: Mapping[str, object], node_id: str, row: Mapping[str, obje
     return stable_id, "sha256:" + digest
 
 
-def _register(state: Phase4GraphState, node_id: str) -> None:
+def _register(
+    state: Phase4GraphState,
+    node_id: str,
+    *,
+    raw_capture: Mapping[str, object] | None = None,
+    call_count: int = 0,
+    execution_binding: Mapping[str, object] | None = None,
+) -> None:
     if state["pending_node_id"] != node_id or state["pending_output"] is None:
         raise Phase4ContractError("registry pending output binding is invalid")
     prior = list(state["registry_inventory"])
@@ -1191,25 +1263,36 @@ def _register(state: Phase4GraphState, node_id: str) -> None:
         identity_kind="canonical_row_list",
     )
     state["registry_identities"][node_id] = identity
+    payload: dict[str, object] = {
+        "node_id": node_id,
+        "call_count": call_count,
+        "local_output_identity": make_identity(
+            state["pending_output"], revision=f"{node_id}.output.p4.v1"
+        ),
+        "local_refs": sorted(
+            [
+                {
+                    "ref_type": "registry_stable",
+                    "ref_id": row["stable_id"],
+                    "ref_revision": REGISTRY_REVISION,
+                }
+                for row in new_rows
+            ],
+            key=lambda row: tuple(str(row[key]) for key in _REF_KEYS),
+        ),
+        "failure": None,
+        "node_output": state["pending_output"],
+    }
+    if execution_binding is not None:
+        payload["execution_binding"] = copy.deepcopy(dict(execution_binding))
     state["node_results"][node_id] = {
         "status": "validated",
-        "raw_capture": _raw_capture(),
-        "payload": {
-            "node_id": node_id,
-            "call_count": 0,
-            "local_output_identity": make_identity(
-                state["pending_output"], revision=f"{node_id}.output.p4.v1"
-            ),
-            "local_refs": sorted(
-                [
-                    {"ref_type": "registry_stable", "ref_id": row["stable_id"], "ref_revision": REGISTRY_REVISION}
-                    for row in new_rows
-                ],
-                key=lambda row: tuple(str(row[key]) for key in _REF_KEYS),
-            ),
-            "failure": None,
-            "node_output": state["pending_output"],
-        },
+        "raw_capture": (
+            _raw_capture()
+            if raw_capture is None
+            else copy.deepcopy(dict(raw_capture))
+        ),
+        "payload": payload,
     }
     state["pending_node_id"] = None
     state["pending_output"] = None
@@ -1658,10 +1741,64 @@ def _validate_assembly_record(
 
 def _validate_node_result(node_id: str, value: object, state: Mapping[str, object]) -> dict[str, object]:
     data = _object(value, ("status", "raw_capture", "payload"), "node_result")
-    _validate_raw_capture(data["raw_capture"])
-    payload = _object(data["payload"], ("node_id", "call_count", "local_output_identity", "local_refs", "failure", "node_output"), "node_result.payload")
-    if payload["node_id"] != node_id or _integer(payload["call_count"], "node_result.call_count") != 0:
+    real_model = state.get("source_kind") == REAL_MODEL_SOURCE_KIND
+    _validate_raw_capture(
+        data["raw_capture"],
+        expected_source_kind=(
+            REAL_MODEL_SOURCE_KIND
+            if real_model
+            else "deterministic_synthetic_fixture"
+        ),
+    )
+    payload_keys = (
+        "node_id",
+        "call_count",
+        "local_output_identity",
+        "local_refs",
+        "failure",
+        "node_output",
+        "execution_binding",
+    ) if real_model else (
+        "node_id",
+        "call_count",
+        "local_output_identity",
+        "local_refs",
+        "failure",
+        "node_output",
+    )
+    payload = _object(data["payload"], payload_keys, "node_result.payload")
+    expected_call_count = 1 if real_model else 0
+    if (
+        payload["node_id"] != node_id
+        or _integer(payload["call_count"], "node_result.call_count")
+        != expected_call_count
+    ):
         raise Phase4ContractError("node result binding is invalid")
+    if real_model:
+        execution_binding = _object(
+            payload["execution_binding"],
+            (
+                "source_kind",
+                "node_id",
+                "generate_call_count",
+                "attempt_identity",
+            ),
+            "node_result.execution_binding",
+        )
+        if (
+            execution_binding["source_kind"] != REAL_MODEL_SOURCE_KIND
+            or execution_binding["node_id"] != node_id
+            or _integer(
+                execution_binding["generate_call_count"],
+                "node_result.execution_binding.generate_call_count",
+            )
+            != 1
+        ):
+            raise Phase4ContractError("real-model execution binding is invalid")
+        _identity(
+            execution_binding["attempt_identity"],
+            "node_result.execution_binding.attempt_identity",
+        )
     if data["status"] == "validated":
         if payload["failure"] is not None or not _identity_matches(payload["local_output_identity"], payload["node_output"], revision=f"{node_id}.output.p4.v1"):
             raise Phase4ContractError("validated node result identity is invalid")
@@ -1874,6 +2011,22 @@ def phase4_create_portable_authority_state(
     return state
 
 
+def phase4_create_real_model_authority_state(
+    b_input: Mapping[str, object],
+) -> Phase4GraphState:
+    """Create the authority state used by the real-model LangGraph runtime."""
+
+    state = _create_initial_state(b_input, verify_installed_files=False)
+    state["source_kind"] = REAL_MODEL_SOURCE_KIND
+    state["action_state"] = dict(_REAL_MODEL_ACTION_STATE)
+    _phase4_validate_authority_state(
+        state,
+        (),
+        expected_source_kind=REAL_MODEL_SOURCE_KIND,
+    )
+    return state
+
+
 def _phase4_validate_authority_state(
     state: Mapping[str, object],
     required_nodes: tuple[str, ...],
@@ -1905,7 +2058,14 @@ def _phase4_validate_authority_state(
     ):
         raise Phase4ContractError("P4-03 authority B binding drifted")
     _validate_dispositions(data["advisory_dispositions"])
-    _validate_action_state(data["action_state"])
+    if expected_source_kind == REAL_MODEL_SOURCE_KIND:
+        _validate_exact_action_state(
+            data["action_state"],
+            _REAL_MODEL_ACTION_STATE,
+            "action_state",
+        )
+    else:
+        _validate_action_state(data["action_state"])
     if (
         tuple(data["node_results"]) != required_nodes
         or data["pending_node_id"] is not None
@@ -2113,6 +2273,7 @@ def _phase4_normalize_and_validate_f4_p4_01a(
     authority = _phase4_validate_authority_state(
         state,
         ("F1", "F2", "F3"),
+        expected_source_kind=str(state.get("source_kind")),
     )
     parsed_raw = _parse_json_without_duplicate_keys(raw_bytes)
     if parsed_raw != output:
@@ -2202,6 +2363,7 @@ def _p4_01b_authority_bindings(
     authority = _phase4_validate_authority_state(
         state,
         ("F1", "F2", "F3"),
+        expected_source_kind=str(state.get("source_kind")),
     )
     mapping = _validate_mapping(_mapping_record(authority), authority)
     identities: dict[str, object] = {
@@ -2696,6 +2858,7 @@ def phase4_normalize_and_validate_f4_output(
     authority = _phase4_validate_authority_state(
         state,
         ("F1", "F2", "F3"),
+        expected_source_kind=str(state.get("source_kind")),
     )
     parsed_raw = _parse_json_without_duplicate_keys(raw_bytes)
     if parsed_raw != output:
@@ -2962,6 +3125,7 @@ def phase4_validate_f4_normalization_receipt(
     authority = _phase4_validate_authority_state(
         state,
         ("F1", "F2", "F3"),
+        expected_source_kind=str(state.get("source_kind")),
     )
     if (
         data["schema_version"]
@@ -3043,6 +3207,9 @@ def _phase4_register_node_output_for_source(
     output: Mapping[str, object],
     *,
     expected_source_kind: str,
+    raw_capture: Mapping[str, object] | None = None,
+    call_count: int = 0,
+    execution_binding: Mapping[str, object] | None = None,
 ) -> Phase4GraphState:
     expected_prior = tuple(NODE_ORDER[: NODE_ORDER.index(node_id)]) if node_id in NODE_ORDER else ()
     current = copy.deepcopy(
@@ -3059,7 +3226,13 @@ def _phase4_register_node_output_for_source(
     current["pending_node_id"] = node_id
     current["pending_output"] = copy.deepcopy(dict(output))
     _node_validator(node_id, current["pending_output"], current)
-    _register(current, node_id)
+    _register(
+        current,
+        node_id,
+        raw_capture=raw_capture,
+        call_count=call_count,
+        execution_binding=execution_binding,
+    )
     _phase4_validate_authority_state(
         current,
         (*expected_prior, node_id),
@@ -3098,6 +3271,27 @@ def phase4_register_sealed_formal_node_output(
     )
 
 
+def phase4_register_real_model_node_output(
+    state: Mapping[str, object],
+    node_id: str,
+    output: Mapping[str, object],
+    *,
+    raw_capture: Mapping[str, object],
+    execution_binding: Mapping[str, object],
+) -> Phase4GraphState:
+    """Register one real-model output and its immutable call/raw identities."""
+
+    return _phase4_register_node_output_for_source(
+        state,
+        node_id,
+        output,
+        expected_source_kind=REAL_MODEL_SOURCE_KIND,
+        raw_capture=raw_capture,
+        call_count=1,
+        execution_binding=execution_binding,
+    )
+
+
 def _phase4_create_mapping_for_source(
     state: Mapping[str, object],
     *,
@@ -3133,6 +3327,17 @@ def phase4_create_sealed_formal_mapping(
     return _phase4_create_mapping_for_source(
         state,
         expected_source_kind="sealed_formal_holdout",
+    )
+
+
+def phase4_create_real_model_mapping(
+    state: Mapping[str, object],
+) -> dict[str, object]:
+    """Create deterministic use-case mappings inside the real-model graph."""
+
+    return _phase4_create_mapping_for_source(
+        state,
+        expected_source_kind=REAL_MODEL_SOURCE_KIND,
     )
 
 
@@ -3240,6 +3445,19 @@ def phase4_project_sealed_formal_node_input_authority(
     )
 
 
+def phase4_project_real_model_node_input_authority(
+    state: Mapping[str, object],
+    node_id: str,
+) -> dict[str, object]:
+    """Project registry/mapping authority for a real-model graph node."""
+
+    return _phase4_project_node_input_authority_for_source(
+        state,
+        node_id,
+        expected_source_kind=REAL_MODEL_SOURCE_KIND,
+    )
+
+
 def _phase4_compose_candidate_for_source(
     state: Mapping[str, object],
     *,
@@ -3278,6 +3496,17 @@ def phase4_compose_sealed_formal_candidate(
     return _phase4_compose_candidate_for_source(
         state,
         expected_source_kind="sealed_formal_holdout",
+    )
+
+
+def phase4_compose_real_model_candidate(
+    state: Mapping[str, object],
+) -> dict[str, object]:
+    """Compose the canonical candidate inside the real-model LangGraph."""
+
+    return _phase4_compose_candidate_for_source(
+        state,
+        expected_source_kind=REAL_MODEL_SOURCE_KIND,
     )
 
 
@@ -3600,6 +3829,601 @@ class Phase4GraphRuntime:
         return validate_graph_state(result, require_terminal=True)
 
 
+def _real_graph_state_identity(
+    state: Mapping[str, object],
+) -> dict[str, object]:
+    projection = {
+        key: value
+        for key, value in state.items()
+        if key != "events"
+    }
+    return make_identity(
+        projection,
+        revision=f"{REAL_MODEL_GRAPH_REVISION}.state",
+    )
+
+
+def _append_real_graph_event(
+    state: Phase4RealModelGraphState,
+    *,
+    graph_node: str,
+    event_type: str,
+    evidence_identity: Mapping[str, object] | None = None,
+) -> None:
+    body = {
+        "event_seq": len(state["events"]) + 1,
+        "graph_node": graph_node,
+        "event_type": event_type,
+        "status": state["status"],
+        "evidence_identity": (
+            None
+            if evidence_identity is None
+            else copy.deepcopy(dict(evidence_identity))
+        ),
+        "state_identity": _real_graph_state_identity(state),
+        "previous_event_identity": (
+            None
+            if not state["events"]
+            else state["events"][-1]["event_identity"]
+        ),
+    }
+    state["events"].append(
+        {
+            **body,
+            "event_identity": make_identity(
+                body,
+                revision=f"{REAL_MODEL_GRAPH_REVISION}.event",
+            ),
+        }
+    )
+
+
+def _validate_real_model_execution_record(
+    value: object,
+    *,
+    node_id: str,
+    authority_state: Mapping[str, object],
+) -> dict[str, object]:
+    data = _object(
+        value,
+        (
+            "schema_version",
+            "node_id",
+            "status",
+            "source_kind",
+            "generate_call_count",
+            "raw_capture",
+            "attempt_identity",
+            "output",
+            "raw_model_contract_success",
+            "normalized_node_contract_success",
+            "failure",
+        ),
+        "real_model_execution",
+    )
+    generate_call_count = _integer(
+        data["generate_call_count"],
+        "real_model_execution.generate_call_count",
+    )
+    if (
+        data["schema_version"]
+        != "req2web.phase4.real_model_node_execution.v1"
+        or data["node_id"] != node_id
+        or data["source_kind"] != REAL_MODEL_SOURCE_KIND
+    ):
+        raise Phase4ContractError("real-model execution root drifted")
+    _identity(data["attempt_identity"], "real_model_execution.attempt_identity")
+    if data["status"] == "validated":
+        if generate_call_count != 1:
+            raise Phase4ContractError(
+                "validated real-model call count is invalid"
+            )
+        _validate_raw_capture(
+            data["raw_capture"],
+            expected_source_kind=REAL_MODEL_SOURCE_KIND,
+        )
+        if not isinstance(data["output"], Mapping) or data["failure"] is not None:
+            raise Phase4ContractError("validated real-model execution is invalid")
+        phase4_validate_node_output(node_id, data["output"], authority_state)
+        if (
+            type(data["raw_model_contract_success"]) is not bool
+            or data["normalized_node_contract_success"] is not True
+        ):
+            raise Phase4ContractError(
+                "validated real-model contract status is invalid"
+            )
+    elif data["status"] == "failed_closed":
+        if generate_call_count not in {0, 1}:
+            raise Phase4ContractError(
+                "failed real-model call count is invalid"
+            )
+        raw_capture = _object(
+            data["raw_capture"],
+            ("state", "byte_length", "sha256", "source_kind"),
+            "real_model_execution.raw_capture",
+        )
+        if raw_capture["source_kind"] != REAL_MODEL_SOURCE_KIND:
+            raise Phase4ContractError("failed real-model raw source drifted")
+        if raw_capture["state"] == "captured":
+            _validate_raw_capture(
+                raw_capture,
+                expected_source_kind=REAL_MODEL_SOURCE_KIND,
+            )
+        elif (
+            raw_capture["state"] != "not_formed"
+            or _integer(
+                raw_capture["byte_length"],
+                "real_model_execution.raw_capture.byte_length",
+            )
+            != 0
+            or raw_capture["sha256"] != NO_CAPTURE_SHA256
+        ):
+            raise Phase4ContractError("failed real-model raw status is invalid")
+        if (
+            data["output"] is not None
+            or data["raw_model_contract_success"] is not False
+            or data["normalized_node_contract_success"] is not False
+            or not isinstance(data["failure"], Mapping)
+        ):
+            raise Phase4ContractError("failed real-model execution is invalid")
+    else:
+        raise Phase4ContractError("real-model execution status is invalid")
+    return data
+
+
+def create_real_model_graph_state(
+    *,
+    run_id: str,
+    b_input: Mapping[str, object],
+    upstream_binding: Mapping[str, object],
+) -> Phase4RealModelGraphState:
+    authority_state = phase4_create_real_model_authority_state(b_input)
+    state = Phase4RealModelGraphState(
+        schema_version=REAL_MODEL_GRAPH_SCHEMA_VERSION,
+        graph_revision=REAL_MODEL_GRAPH_REVISION,
+        run_id=_text(run_id, "real_model_graph.run_id"),
+        case_id=str(authority_state["case_id"]),
+        request_id=str(authority_state["request_id"]),
+        upstream_binding=copy.deepcopy(dict(upstream_binding)),
+        authority_state=authority_state,
+        node_input_authorities={},
+        node_execution_records={},
+        pending_execution=None,
+        mapping_record=None,
+        candidate_composition_record=None,
+        assembled_page_spec=None,
+        assembly_report=None,
+        delivery_result=None,
+        events=[],
+        completed_graph_nodes=[],
+        status="ready",
+        failure=None,
+        action_state=dict(_REAL_MODEL_ACTION_STATE),
+    )
+    return state
+
+
+class Phase4RealModelGraphRuntime:
+    """The sole active LangGraph path for real F1-F4 model execution.
+
+    LangGraph owns node scheduling and fail-closed routing. The injected node
+    executor owns one raw-first model call, while Req2Web keeps validation,
+    registry, mapping, composition, assembler, and delivery authority.
+    """
+
+    def __init__(
+        self,
+        *,
+        node_executor: Callable[
+            [str, Mapping[str, object], Mapping[str, object]],
+            Mapping[str, object],
+        ],
+        context: AgentContextBundle,
+        guidance: object,
+        delivery_executor: Callable[
+            [
+                Mapping[str, object],
+                Mapping[str, object],
+                Mapping[str, object],
+            ],
+            Mapping[str, object],
+        ],
+    ) -> None:
+        validate_runtime_environment()
+        context.validate()
+        self._node_executor = node_executor
+        self._context = context
+        self._guidance = guidance
+        self._delivery_executor = delivery_executor
+        self._checkpointer = InMemorySaver()
+        builder = StateGraph(Phase4RealModelGraphState)
+        for node_id in NODE_ORDER:
+            builder.add_node(node_id, self._semantic_node(node_id))
+            builder.add_node(
+                f"register_{node_id}",
+                self._registry_node(node_id),
+            )
+        builder.add_node("map_use_cases", self._mapping_node)
+        builder.add_node(
+            "project_candidate",
+            self._candidate_composition_node,
+        )
+        builder.add_node("assemble_page_spec", self._assembly_node)
+        builder.add_node("deliver_result", self._delivery_node)
+        builder.add_edge(START, "F1")
+        edges = (
+            ("F1", "register_F1"),
+            ("register_F1", "F2"),
+            ("F2", "register_F2"),
+            ("register_F2", "F3"),
+            ("F3", "register_F3"),
+            ("register_F3", "map_use_cases"),
+            ("map_use_cases", "F4"),
+            ("F4", "register_F4"),
+            ("register_F4", "project_candidate"),
+            ("project_candidate", "assemble_page_spec"),
+            ("assemble_page_spec", "deliver_result"),
+        )
+        for source, target in edges:
+            builder.add_conditional_edges(
+                source,
+                self._route,
+                {"continue": target, "stop": END},
+            )
+        builder.add_edge("deliver_result", END)
+        self._graph = builder.compile(checkpointer=self._checkpointer)
+
+    @staticmethod
+    def _route(state: Phase4RealModelGraphState) -> str:
+        return "stop" if state["status"] == "failed_closed" else "continue"
+
+    @staticmethod
+    def _failure(
+        current: Phase4RealModelGraphState,
+        *,
+        graph_node: str,
+        failure_code: str,
+        message_code: str,
+    ) -> Phase4RealModelGraphState:
+        current["status"] = "failed_closed"
+        current["failure"] = {
+            "failure_code": failure_code,
+            "failure_stage": graph_node,
+            "retry_allowed": False,
+            "fallback_allowed": False,
+            "message_code": message_code,
+        }
+        _append_real_graph_event(
+            current,
+            graph_node=graph_node,
+            event_type="failed_closed",
+        )
+        return current
+
+    def _semantic_node(
+        self,
+        node_id: str,
+    ) -> Callable[[Phase4RealModelGraphState], Phase4RealModelGraphState]:
+        def run(
+            state: Phase4RealModelGraphState,
+        ) -> Phase4RealModelGraphState:
+            current = copy.deepcopy(state)
+            try:
+                if (
+                    current["status"] not in {"ready", "running"}
+                    or current["pending_execution"] is not None
+                    or node_id in current["node_execution_records"]
+                ):
+                    raise Phase4ContractError(
+                        "real-model semantic node state is invalid"
+                    )
+                authority = phase4_project_real_model_node_input_authority(
+                    current["authority_state"],
+                    node_id,
+                )
+                execution = _validate_real_model_execution_record(
+                    self._node_executor(
+                        node_id,
+                        copy.deepcopy(current["authority_state"]),
+                        copy.deepcopy(authority),
+                    ),
+                    node_id=node_id,
+                    authority_state=current["authority_state"],
+                )
+                current["node_input_authorities"][node_id] = copy.deepcopy(
+                    authority
+                )
+                current["pending_execution"] = copy.deepcopy(execution)
+                current["completed_graph_nodes"].append(node_id)
+                if execution["status"] == "failed_closed":
+                    current["node_execution_records"][node_id] = copy.deepcopy(
+                        execution
+                    )
+                    current["pending_execution"] = None
+                    current["status"] = "failed_closed"
+                    current["failure"] = copy.deepcopy(
+                        dict(execution["failure"])
+                    )
+                    _append_real_graph_event(
+                        current,
+                        graph_node=node_id,
+                        event_type="real_model_call_failed_closed",
+                        evidence_identity=execution["attempt_identity"],
+                    )
+                    return current
+                current["status"] = "running"
+                _append_real_graph_event(
+                    current,
+                    graph_node=node_id,
+                    event_type="real_model_raw_output_validated",
+                    evidence_identity=execution["attempt_identity"],
+                )
+                return current
+            except Exception as exc:
+                return self._failure(
+                    current,
+                    graph_node=node_id,
+                    failure_code="real_model_node_execution_invalid",
+                    message_code=type(exc).__name__,
+                )
+
+        return run
+
+    def _registry_node(
+        self,
+        node_id: str,
+    ) -> Callable[[Phase4RealModelGraphState], Phase4RealModelGraphState]:
+        graph_node = f"register_{node_id}"
+
+        def run(
+            state: Phase4RealModelGraphState,
+        ) -> Phase4RealModelGraphState:
+            current = copy.deepcopy(state)
+            try:
+                execution = _validate_real_model_execution_record(
+                    current["pending_execution"],
+                    node_id=node_id,
+                    authority_state=current["authority_state"],
+                )
+                if execution["status"] != "validated":
+                    raise Phase4ContractError(
+                        "registry received a failed execution"
+                    )
+                binding = {
+                    "source_kind": REAL_MODEL_SOURCE_KIND,
+                    "node_id": node_id,
+                    "generate_call_count": 1,
+                    "attempt_identity": copy.deepcopy(
+                        execution["attempt_identity"]
+                    ),
+                }
+                current["authority_state"] = (
+                    phase4_register_real_model_node_output(
+                        current["authority_state"],
+                        node_id,
+                        execution["output"],
+                        raw_capture=execution["raw_capture"],
+                        execution_binding=binding,
+                    )
+                )
+                current["node_execution_records"][node_id] = copy.deepcopy(
+                    execution
+                )
+                current["pending_execution"] = None
+                current["completed_graph_nodes"].append(graph_node)
+                _append_real_graph_event(
+                    current,
+                    graph_node=graph_node,
+                    event_type="real_model_registry_validated",
+                    evidence_identity=execution["attempt_identity"],
+                )
+                return current
+            except Exception as exc:
+                return self._failure(
+                    current,
+                    graph_node=graph_node,
+                    failure_code="real_model_registry_invalid",
+                    message_code=type(exc).__name__,
+                )
+
+        return run
+
+    @staticmethod
+    def _mapping_node(
+        state: Phase4RealModelGraphState,
+    ) -> Phase4RealModelGraphState:
+        current = copy.deepcopy(state)
+        try:
+            current["mapping_record"] = phase4_create_real_model_mapping(
+                current["authority_state"]
+            )
+            current["completed_graph_nodes"].append("map_use_cases")
+            _append_real_graph_event(
+                current,
+                graph_node="map_use_cases",
+                event_type="real_model_mapping_validated",
+                evidence_identity=make_identity(
+                    current["mapping_record"],
+                    revision=MAPPING_REVISION,
+                ),
+            )
+            return current
+        except Exception as exc:
+            return Phase4RealModelGraphRuntime._failure(
+                current,
+                graph_node="map_use_cases",
+                failure_code="real_model_mapping_invalid",
+                message_code=type(exc).__name__,
+            )
+
+    @staticmethod
+    def _candidate_composition_node(
+        state: Phase4RealModelGraphState,
+    ) -> Phase4RealModelGraphState:
+        current = copy.deepcopy(state)
+        try:
+            current["candidate_composition_record"] = (
+                phase4_compose_real_model_candidate(
+                    current["authority_state"]
+                )
+            )
+            current["completed_graph_nodes"].append("project_candidate")
+            _append_real_graph_event(
+                current,
+                graph_node="project_candidate",
+                event_type="real_model_candidate_composition_validated",
+                evidence_identity=make_identity(
+                    current["candidate_composition_record"],
+                    revision=COMPOSITION_PROFILE,
+                ),
+            )
+            return current
+        except Exception as exc:
+            return Phase4RealModelGraphRuntime._failure(
+                current,
+                graph_node="project_candidate",
+                failure_code="real_model_candidate_projection_invalid",
+                message_code=type(exc).__name__,
+            )
+
+    def _assembly_node(
+        self,
+        state: Phase4RealModelGraphState,
+    ) -> Phase4RealModelGraphState:
+        current = copy.deepcopy(state)
+        try:
+            composition = current["candidate_composition_record"]
+            if not isinstance(composition, Mapping):
+                raise Phase4ContractError(
+                    "real-model candidate composition is absent"
+                )
+            candidate_bytes = base64.b64decode(
+                str(composition["model_semantic_candidate_canonical_b64"]),
+                validate=True,
+            )
+            assembled = phase4_assemble_candidate(
+                candidate_bytes,
+                self._context,
+                self._guidance,
+            )
+            assembled.validate()
+            current["assembled_page_spec"] = assembled.page_spec.to_dict()
+            current["assembly_report"] = assembled.report.to_dict()
+            current["completed_graph_nodes"].append("assemble_page_spec")
+            _append_real_graph_event(
+                current,
+                graph_node="assemble_page_spec",
+                event_type="real_model_page_spec_assembled",
+                evidence_identity=make_identity(
+                    {
+                        "page_spec": current["assembled_page_spec"],
+                        "assembly_report": current["assembly_report"],
+                    },
+                    revision=f"{REAL_MODEL_GRAPH_REVISION}.assembly",
+                ),
+            )
+            return current
+        except Exception as exc:
+            return self._failure(
+                current,
+                graph_node="assemble_page_spec",
+                failure_code="real_model_parser_assembler_invalid",
+                message_code=type(exc).__name__,
+            )
+
+    def _delivery_node(
+        self,
+        state: Phase4RealModelGraphState,
+    ) -> Phase4RealModelGraphState:
+        current = copy.deepcopy(state)
+        try:
+            page_spec = current["assembled_page_spec"]
+            assembly_report = current["assembly_report"]
+            if not isinstance(page_spec, Mapping) or not isinstance(
+                assembly_report,
+                Mapping,
+            ):
+                raise Phase4ContractError(
+                    "real-model assembly output is absent"
+                )
+            delivery = self._delivery_executor(
+                copy.deepcopy(current),
+                copy.deepcopy(page_spec),
+                copy.deepcopy(assembly_report),
+            )
+            if not isinstance(delivery, Mapping):
+                raise Phase4ContractError(
+                    "real-model delivery result is invalid"
+                )
+            current["delivery_result"] = copy.deepcopy(dict(delivery))
+            if delivery.get("graph_delivery_success") is not True:
+                raise Phase4ContractError(
+                    "real-model delivery did not reach first-pass success"
+                )
+            current["completed_graph_nodes"].append("deliver_result")
+            current["status"] = "completed"
+            _append_real_graph_event(
+                current,
+                graph_node="deliver_result",
+                event_type="real_model_delivery_terminal",
+                evidence_identity=make_identity(
+                    current["delivery_result"],
+                    revision=f"{REAL_MODEL_GRAPH_REVISION}.delivery",
+                ),
+            )
+            return current
+        except Exception as exc:
+            return self._failure(
+                current,
+                graph_node="deliver_result",
+                failure_code="real_model_delivery_invalid",
+                message_code=type(exc).__name__,
+            )
+
+    @staticmethod
+    def _config(thread_id: str) -> dict[str, object]:
+        return {
+            "configurable": {
+                "thread_id": _text(
+                    thread_id,
+                    "real_model_graph.thread_id",
+                )
+            }
+        }
+
+    def invoke(
+        self,
+        state: Mapping[str, object],
+        *,
+        thread_id: str,
+    ) -> Phase4RealModelGraphState:
+        if (
+            state.get("schema_version") != REAL_MODEL_GRAPH_SCHEMA_VERSION
+            or state.get("graph_revision") != REAL_MODEL_GRAPH_REVISION
+            or state.get("status") != "ready"
+            or state.get("action_state") != _REAL_MODEL_ACTION_STATE
+        ):
+            raise Phase4ContractError("real-model graph initial state is invalid")
+        authority = state.get("authority_state")
+        if not isinstance(authority, Mapping):
+            raise Phase4ContractError("real-model authority state is absent")
+        _phase4_validate_authority_state(
+            authority,
+            (),
+            expected_source_kind=REAL_MODEL_SOURCE_KIND,
+        )
+        result = self._graph.invoke(
+            copy.deepcopy(dict(state)),
+            config=self._config(thread_id),
+        )
+        if (
+            result.get("status") not in {"completed", "failed_closed"}
+            or result.get("pending_execution") is not None
+        ):
+            raise Phase4ContractError("real-model graph is not terminal")
+        return result
+
+
 def synthetic_commerce_b_input(
     *,
     case_id: str = "path3-commerce-checkout",
@@ -3632,17 +4456,29 @@ __all__ = [
     "PauseHandle",
     "Phase4ContractError",
     "Phase4GraphRuntime",
+    "Phase4RealModelGraphRuntime",
+    "REAL_MODEL_GRAPH_NODE_ORDER",
+    "REAL_MODEL_GRAPH_REVISION",
+    "REAL_MODEL_GRAPH_SCHEMA_VERSION",
+    "REAL_MODEL_SOURCE_KIND",
+    "create_real_model_graph_state",
     "create_initial_state",
+    "make_real_model_raw_capture",
     "phase4_assemble_candidate",
     "phase4_compose_candidate",
+    "phase4_compose_real_model_candidate",
     "phase4_compose_sealed_formal_candidate",
     "phase4_create_authority_state",
     "phase4_create_mapping",
+    "phase4_create_real_model_authority_state",
+    "phase4_create_real_model_mapping",
     "phase4_create_sealed_formal_authority_state",
     "phase4_create_sealed_formal_mapping",
     "phase4_project_node_input_authority",
+    "phase4_project_real_model_node_input_authority",
     "phase4_project_sealed_formal_node_input_authority",
     "phase4_register_node_output",
+    "phase4_register_real_model_node_output",
     "phase4_register_sealed_formal_node_output",
     "phase4_synthetic_assembler_bindings",
     "phase4_synthetic_fixture_output",

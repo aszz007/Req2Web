@@ -26,6 +26,14 @@ import uuid
 from dataclasses import dataclass
 from typing import Callable, Mapping
 
+from req2web_agent import (
+    AgentContextBundle,
+    PROMPT_AUTHORITY_IDENTITY,
+    PROMPT_AUTHORITY_REVISION,
+    PROMPT_SCHEMA_VERSION as SHARED_PROMPT_SCHEMA_VERSION,
+    build_canonical_f1_f4_prompt,
+)
+from req2web_generation import RetrievalGuidance
 from req2web_orchestration.phase4_graph import (
     NODE_ORDER,
     REGISTRY_REVISION,
@@ -48,17 +56,23 @@ from req2web_runtime.phase4_fresh_delivery import (
     PHASE4_FRESH_DELIVERY_POLICY_A07A_DIRECT_V1,
     PHASE4_FRESH_DELIVERY_POLICY_FIELD_GATE_V1,
     Phase4GraphBoundDeliveryMaterials,
+    build_phase4_actual_context_delivery_materials,
     build_phase4_graph_bound_delivery_materials,
     run_phase4_fresh_delivery,
 )
 
 
 P4_05_SCHEMA_PREFIX = "req2web.phase4.p4_05.remote_fresh_integrated"
+FLOW_AUTHORITY_ROLE = (
+    "shared_qwen_runtime_component_library_with_historical_manual_entrypoint"
+)
+ACTIVE_DEFAULT_ENTRY = False
+HISTORICAL_MANUAL_ENTRYPOINT = True
 P4_05_PROFILE_SCHEMA_VERSION = f"{P4_05_SCHEMA_PREFIX}.profile.v1"
 P4_05_POLICY_SCHEMA_VERSION = f"{P4_05_SCHEMA_PREFIX}.policy.v1"
 P4_05_RESULT_SCHEMA_VERSION = f"{P4_05_SCHEMA_PREFIX}.result.v1"
 P4_05_INPUT_SCHEMA_VERSION = f"{P4_05_SCHEMA_PREFIX}.input.v1"
-P4_05_PROMPT_SCHEMA_VERSION = f"{P4_05_SCHEMA_PREFIX}.prompt.v6"
+P4_05_PROMPT_SCHEMA_VERSION = SHARED_PROMPT_SCHEMA_VERSION
 P4_05_PRE_CALL_SCHEMA_VERSION = f"{P4_05_SCHEMA_PREFIX}.pre_call.v1"
 P4_05_ATTEMPT_SCHEMA_VERSION = f"{P4_05_SCHEMA_PREFIX}.attempt.v2"
 P4_05_LEDGER_SCHEMA_VERSION = f"{P4_05_SCHEMA_PREFIX}.ledger.v1"
@@ -91,12 +105,10 @@ P4_05_F3_F4_PROMPT_REVISION = "f3_f4_unique_reachable_acceptance_v1"
 P4_05_F4_DIRECT_ACCEPTANCE_PROMPT_REVISION = (
     "f4_actual_interaction_target_a07a_direct_v2"
 )
-P4_05_FULL_DIRECT_PROMPT_REVISION = (
-    "f3_f4_explicit_actual_state_plan_a07a_direct_v3"
-)
+P4_05_FULL_DIRECT_PROMPT_REVISION = PROMPT_AUTHORITY_REVISION
 P4_05_REVISION_PROMPT_NODES = ("F3", "F4")
 P4_05_F4_DIRECT_ACCEPTANCE_PROMPT_NODES = ("F4",)
-P4_05_FULL_DIRECT_PROMPT_NODES = ("F3", "F4")
+P4_05_FULL_DIRECT_PROMPT_NODES = NODE_ORDER
 P4_05_F4_DIRECT_ACCEPTANCE_POLICY_RECEIPT_SCHEMA_VERSION = (
     f"{P4_05_SCHEMA_PREFIX}.f4_direct_acceptance_policy_receipt.v1"
 )
@@ -878,19 +890,36 @@ def _prepare_graph_bound_delivery_materials(
     *,
     result_root: Path,
     graph_state: Mapping[str, object],
+    upstream_context: AgentContextBundle | None = None,
+    upstream_guidance: RetrievalGuidance | None = None,
 ) -> dict[str, object]:
-    materials = build_phase4_graph_bound_delivery_materials(
-        graph_state=graph_state,
-        material_root=result_root / "graph-bound-delivery-materials",
-    )
+    if upstream_context is None and upstream_guidance is None:
+        materials = build_phase4_graph_bound_delivery_materials(
+            graph_state=graph_state,
+            material_root=result_root / "graph-bound-delivery-materials",
+        )
+        graph_context, graph_guidance = phase4_synthetic_assembler_bindings(
+            graph_state
+        )
+    elif isinstance(upstream_context, AgentContextBundle) and isinstance(
+        upstream_guidance, RetrievalGuidance
+    ):
+        materials = build_phase4_actual_context_delivery_materials(
+            graph_state=graph_state,
+            context=upstream_context,
+            guidance=upstream_guidance,
+            material_root=result_root / "graph-bound-delivery-materials",
+        )
+        graph_context, graph_guidance = upstream_context, upstream_guidance
+    else:
+        raise Phase4RemoteFreshIntegratedError(
+            "upstream context and guidance must be supplied together"
+        )
     if type(materials) is not Phase4GraphBoundDeliveryMaterials:
         raise Phase4RemoteFreshIntegratedError(
             "graph-bound delivery materials have the wrong type"
         )
     materials.validate()
-    graph_context, graph_guidance = phase4_synthetic_assembler_bindings(
-        graph_state
-    )
     if (
         _canonical_bytes(materials.context.to_dict())
         != _canonical_bytes(graph_context.to_dict())
@@ -1218,7 +1247,7 @@ def create_p4_05_policy(
     profile: RemoteFreshIntegratedProfile,
     case_id: str = P4_05_CASE_ID,
     request_id: str = P4_05_REQUEST_ID,
-    prompt_revision: str | None = None,
+    prompt_revision: str | None = P4_05_FULL_DIRECT_PROMPT_REVISION,
     parent_experiment_binding: Mapping[str, object] | None = None,
 ) -> dict[str, object]:
     prompt_nodes = _prompt_nodes_for_revision(prompt_revision)
@@ -1258,6 +1287,7 @@ def create_p4_05_policy(
             for node_id in NODE_ORDER
         },
         "prohibited_input_classes": list(P4_05_PROHIBITED_INPUT_CLASSES),
+        "prompt_authority_identity": copy.deepcopy(PROMPT_AUTHORITY_IDENTITY),
         "pre_call_record_schema_version": P4_05_PRE_CALL_SCHEMA_VERSION,
         "attempt_record_schema_version": P4_05_ATTEMPT_SCHEMA_VERSION,
         "call_ledger_schema_version": P4_05_LEDGER_SCHEMA_VERSION,
@@ -1910,7 +1940,7 @@ def _node_input(
     return _canonical_bytes(payload)
 
 
-def _node_prompt(
+def _historical_phase4_node_prompt(
     *,
     node_id: str,
     input_bytes: bytes,
@@ -2260,6 +2290,39 @@ def _node_prompt(
             ),
         ]
     return _canonical_bytes(payload)
+
+
+def _node_prompt(
+    *,
+    node_id: str,
+    input_bytes: bytes,
+    prompt_revision: str | None = P4_05_FULL_DIRECT_PROMPT_REVISION,
+) -> bytes:
+    """Build an active node prompt through the project-wide shared authority."""
+
+    if prompt_revision not in {None, P4_05_FULL_DIRECT_PROMPT_REVISION}:
+        raise Phase4RemoteFreshIntegratedError(
+            "historical Phase 4 prompt revisions are replay-only"
+        )
+    interaction_plan = (
+        _f3_required_interaction_plan(input_bytes) if node_id == "F3" else None
+    )
+    acceptance_plan = (
+        _f4_required_acceptance_target_plan(input_bytes)
+        if node_id == "F4"
+        else None
+    )
+    try:
+        return build_canonical_f1_f4_prompt(
+            node_id=node_id,
+            input_bytes=input_bytes,
+            required_interaction_plan=interaction_plan,
+            required_acceptance_target_plan=acceptance_plan,
+        )
+    except ValueError as exc:
+        raise Phase4RemoteFreshIntegratedError(
+            "shared F1-F4 prompt authority rejected the Phase 4 projection"
+        ) from exc
 
 
 def _f4_direct_acceptance_policy_receipt(
@@ -3241,11 +3304,26 @@ def prepare_phase4_remote_qwen_fresh_integrated(
     result_root: Path,
     run_id: str | None = None,
     b_input: Mapping[str, object] | None = None,
-    prompt_revision: str | None = None,
+    prompt_revision: str | None = P4_05_FULL_DIRECT_PROMPT_REVISION,
     parent_experiment_binding: Mapping[str, object] | None = None,
+    upstream_context: AgentContextBundle | None = None,
+    upstream_guidance: RetrievalGuidance | None = None,
+    require_actual_upstream: bool = False,
 ) -> dict[str, object]:
     """Create the no-generation P4-05 preflight and profile artifacts."""
 
+    if type(require_actual_upstream) is not bool:
+        raise Phase4RemoteFreshIntegratedError(
+            "require_actual_upstream must be boolean"
+        )
+    if require_actual_upstream and (
+        b_input is None
+        or not isinstance(upstream_context, AgentContextBundle)
+        or not isinstance(upstream_guidance, RetrievalGuidance)
+    ):
+        raise Phase4RemoteFreshIntegratedError(
+            "active preparation requires canonical B and actual upstream context"
+        )
     _offline_process()
     model_root = _safe_path(model_root, "model root", directory=True)
     integrity_evidence = _safe_path(
@@ -3274,6 +3352,17 @@ def prepare_phase4_remote_qwen_fresh_integrated(
     graph_bound_delivery = _prepare_graph_bound_delivery_materials(
         result_root=result_root,
         graph_state=state,
+        upstream_context=upstream_context,
+        upstream_guidance=upstream_guidance,
+    )
+    upstream_binding_mode = (
+        "actual_agent_context_required"
+        if require_actual_upstream
+        else (
+            "actual_agent_context_supplied"
+            if upstream_context is not None
+            else "historical_synthetic_binding"
+        )
     )
     inventory = _remote.validate_remote_model_inventory(
         model_root=model_root,
@@ -3325,9 +3414,11 @@ def prepare_phase4_remote_qwen_fresh_integrated(
         "request_id": selected_b_input["request_id"],
         "parent_experiment_binding": parent_binding,
         "node_order": list(NODE_ORDER),
+        "prompt_authority_identity": copy.deepcopy(PROMPT_AUTHORITY_IDENTITY),
         "graph_bound_delivery_materials_binding": graph_bound_delivery[
             "binding"
         ],
+        "upstream_binding_mode": upstream_binding_mode,
         "action_state": _action_state(model_action=False, remote_action=False),
         "model_loaded": False,
         "run_occurred": False,
@@ -3361,6 +3452,7 @@ def prepare_phase4_remote_qwen_fresh_integrated(
         "parent_experiment_binding": parent_binding,
         "state": state,
         "graph_bound_delivery": graph_bound_delivery,
+        "upstream_binding_mode": upstream_binding_mode,
     }
 
 
@@ -3376,10 +3468,12 @@ def run_phase4_remote_qwen_fresh_integrated(
     resume_from_result_root: Path | None = None,
     resume_prefix: str | None = None,
     b_input: Mapping[str, object] | None = None,
-    prompt_revision: str | None = None,
+    prompt_revision: str | None = P4_05_FULL_DIRECT_PROMPT_REVISION,
     expected_profile_identity: Mapping[str, object] | None = None,
     expected_model_inventory_identity: Mapping[str, object] | None = None,
     parent_experiment_binding: Mapping[str, object] | None = None,
+    upstream_context: AgentContextBundle | None = None,
+    upstream_guidance: RetrievalGuidance | None = None,
 ) -> dict[str, object]:
     """Run one fresh F1-F4 BF16 experiment through terminal local delivery."""
 
@@ -3397,6 +3491,8 @@ def run_phase4_remote_qwen_fresh_integrated(
         b_input=b_input,
         prompt_revision=prompt_revision,
         parent_experiment_binding=parent_experiment_binding,
+        upstream_context=upstream_context,
+        upstream_guidance=upstream_guidance,
     )
     result_root = prepared["result_root"]
     profile: RemoteFreshIntegratedProfile = prepared["profile"]
@@ -4071,6 +4167,9 @@ def main_worker(argv: list[str]) -> int:
 
 
 __all__ = [
+    "ACTIVE_DEFAULT_ENTRY",
+    "FLOW_AUTHORITY_ROLE",
+    "HISTORICAL_MANUAL_ENTRYPOINT",
     "P4_05_CASE_ID",
     "P4_05_GENERATE_CALL_CAP",
     "P4_05_INPUT_CLASSES",

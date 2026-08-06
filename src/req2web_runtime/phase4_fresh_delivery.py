@@ -10,7 +10,7 @@ one-repair, and same-case G0 decisions.
 from __future__ import annotations
 
 import base64
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 import hashlib
 import json
 from pathlib import Path
@@ -33,6 +33,7 @@ from req2web_generation import (
     PageSpecBuilder,
     RetrievalEnhancedResultPackage,
     RetrievalGuidance,
+    RetrievalGuidanceBuilder,
     RetrievalGuidedPageSpecBuilder,
     RetrievalInfluenceChecker,
 )
@@ -1248,7 +1249,11 @@ class Phase4GraphBoundDeliveryMaterials:
         if (
             self.binding["schema_version"]
             != PHASE4_GRAPH_BOUND_DELIVERY_MATERIALS_SCHEMA_VERSION
-            or self.binding["source_kind"] != "phase4_graph_assembler_binding"
+            or self.binding["source_kind"]
+            not in {
+                "phase4_graph_assembler_binding",
+                "phase4_actual_agent_context_binding",
+            }
             or self.binding["case_id"] != self.case_id
             or self.binding["context_identity"]
             != _json_identity(
@@ -1353,8 +1358,10 @@ def build_phase4_graph_bound_delivery_materials(
     *,
     graph_state: Mapping[str, object],
     material_root: Path,
+    context: AgentContextBundle | None = None,
+    guidance: RetrievalGuidance | None = None,
 ) -> Phase4GraphBoundDeliveryMaterials:
-    """Build the sole Phase 4 delivery authority from graph assembler bindings."""
+    """Build Phase 4 delivery authority from synthetic or supplied live bindings."""
 
     if not isinstance(graph_state, Mapping):
         raise Phase4FreshDeliveryError("graph state is invalid")
@@ -1370,11 +1377,40 @@ def build_phase4_graph_bound_delivery_materials(
         raise Phase4FreshDeliveryError("material root must be new")
     material_root.mkdir(parents=True, exist_ok=False)
 
-    from req2web_orchestration.phase4_graph import (
-        phase4_synthetic_assembler_bindings,
-    )
+    if context is None and guidance is None:
+        from req2web_orchestration.phase4_graph import (
+            phase4_synthetic_assembler_bindings,
+        )
 
-    context, guidance = phase4_synthetic_assembler_bindings(graph_state)
+        context, guidance = phase4_synthetic_assembler_bindings(graph_state)
+        source_kind = "phase4_graph_assembler_binding"
+    elif isinstance(context, AgentContextBundle) and isinstance(
+        guidance, RetrievalGuidance
+    ):
+        source_kind = "phase4_actual_agent_context_binding"
+        expected_guidance = RetrievalGuidanceBuilder().build(context)
+        if _canonical_bytes(expected_guidance.to_dict()) != _canonical_bytes(
+            guidance.to_dict()
+        ):
+            raise Phase4FreshDeliveryError(
+                "supplied guidance does not derive from supplied AgentContext"
+            )
+        if (
+            context.original_requirement != b_input.get("requirement")
+            or context.requirement_summary != b_input.get("requirement_summary")
+            or context.target_device != b_input.get("target_device")
+            or context.task_type != b_input.get("task_type")
+            or context.constraints != b_input.get("constraints")
+            or [asdict(item) for item in context.use_cases]
+            != b_input.get("use_cases")
+        ):
+            raise Phase4FreshDeliveryError(
+                "supplied AgentContext differs from graph canonical B"
+            )
+    else:
+        raise Phase4FreshDeliveryError(
+            "context and guidance must be supplied together"
+        )
     context.validate()
     guidance.validate()
 
@@ -1453,7 +1489,7 @@ def build_phase4_graph_bound_delivery_materials(
     }
     binding_root = {
         "schema_version": PHASE4_GRAPH_BOUND_DELIVERY_MATERIALS_SCHEMA_VERSION,
-        "source_kind": "phase4_graph_assembler_binding",
+        "source_kind": source_kind,
         "case_id": case_id,
         "context_identity": _json_identity(
             context.to_dict(),
@@ -1525,6 +1561,23 @@ def build_phase4_graph_bound_delivery_materials(
         _canonical_bytes(binding),
     )
     return materials
+
+
+def build_phase4_actual_context_delivery_materials(
+    *,
+    graph_state: Mapping[str, object],
+    context: AgentContextBundle,
+    guidance: RetrievalGuidance,
+    material_root: Path,
+) -> Phase4GraphBoundDeliveryMaterials:
+    """Bind delivery to the exact live upstream AgentContext and guidance."""
+
+    return build_phase4_graph_bound_delivery_materials(
+        graph_state=graph_state,
+        material_root=material_root,
+        context=context,
+        guidance=guidance,
+    )
 
 
 def run_phase4_fresh_delivery(
@@ -1720,6 +1773,7 @@ __all__ = [
     "Phase4FreshDeliveryReceipt",
     "Phase4FreshRouteOutcome",
     "Phase4GraphBoundDeliveryMaterials",
+    "build_phase4_actual_context_delivery_materials",
     "build_phase4_graph_bound_delivery_materials",
     "run_phase4_fresh_delivery",
 ]

@@ -66,6 +66,7 @@ except ModuleNotFoundError as exc:
 
 import req2web_runtime.phase4_remote_qwen as remote_base
 import req2web_runtime.phase4_remote_qwen_fresh_integrated as remote
+from req2web_agent import prompt_authority_manifest
 from req2web_orchestration.phase4_graph import (
     phase4_create_mapping,
     phase4_create_portable_authority_state,
@@ -135,30 +136,17 @@ class Phase4RemoteFreshIntegratedProfileTests(unittest.TestCase):
         )
 
         f1 = json.loads(remote._node_prompt(node_id="F1", input_bytes=input_bytes))
-        f4 = json.loads(remote._node_prompt(node_id="F4", input_bytes=input_bytes))
-        f3_revision = json.loads(
+        shared_manifest = prompt_authority_manifest()
+        f4_contract = shared_manifest["output_contracts"]["F4"]
+        with self.assertRaisesRegex(
+            remote.Phase4RemoteFreshIntegratedError,
+            "replay-only",
+        ):
             remote._node_prompt(
                 node_id="F3",
                 input_bytes=input_bytes,
                 prompt_revision=remote.P4_05_F3_F4_PROMPT_REVISION,
             )
-        )
-        f4_revision = json.loads(
-            remote._node_prompt(
-                node_id="F4",
-                input_bytes=input_bytes,
-                prompt_revision=remote.P4_05_F3_F4_PROMPT_REVISION,
-            )
-        )
-        f4_direct = json.loads(
-            remote._node_prompt(
-                node_id="F4",
-                input_bytes=input_bytes,
-                prompt_revision=(
-                    remote.P4_05_F4_DIRECT_ACCEPTANCE_PROMPT_REVISION
-                ),
-            )
-        )
         b_input = synthetic_commerce_b_input()
         state = phase4_create_portable_authority_state(b_input)
         for upstream_node_id in ("F1", "F2"):
@@ -219,50 +207,27 @@ class Phase4RemoteFreshIntegratedProfileTests(unittest.TestCase):
             f1["exact_output_contract"]["invariants"],
         )
         self.assertEqual(
-            f4["exact_output_contract"]["acceptance_check_constants"],
+            f4_contract["acceptance_check_constants"],
             {"entity_type": "candidate_acceptance_check", "refs": []},
         )
         self.assertIn(
             "reference_exact_keys",
-            f4["exact_output_contract"],
+            f4_contract,
         )
         self.assertEqual(
-            f4["exact_output_contract"]["field_sources"]["use_case_refs"],
+            f4_contract["field_sources"]["use_case_refs"],
             {
-                "source_path": (
-                    "projection.canonical_b_use_case_view."
-                    "use_cases[].use_case_id"
-                ),
+                "source": "supplied canonical B use-case view",
                 "required_ref_type": "canonical_b_use_case",
                 "required_ref_revision": "canonical_b.use_case.v1",
                 "forbidden_ref_type": "registry_stable",
             },
         )
         self.assertEqual(
-            f4["exact_output_contract"]["field_sources"]["state_ref"][
+            f4_contract["field_sources"]["state_ref"][
                 "required_ref_revision"
             ],
             "req2web.phase4.registry.p4_02a.v1",
-        )
-        self.assertEqual(
-            f3_revision["prompt_revision"],
-            remote.P4_05_F3_F4_PROMPT_REVISION,
-        )
-        self.assertIn(
-            "treat the first row in the supplied F2 states array as the initial workflow state; do not require its name to be the literal word initial",
-            f3_revision["exact_output_contract"]["invariants"],
-        )
-        self.assertIn(
-            "assign use cases monotonically across the supplied F2 state order: use the state at the same zero-based position when available, otherwise reuse only the final supplied state",
-            f4_revision["exact_output_contract"]["invariants"],
-        )
-        self.assertEqual(
-            f4_direct["prompt_revision"],
-            remote.P4_05_F4_DIRECT_ACCEPTANCE_PROMPT_REVISION,
-        )
-        self.assertIn(
-            "derive every state_ref from the actual supplied f3_registered_interaction_view; the selected stable state ID must appear as target_state_stable_id on at least one mapped interaction for that use case",
-            f4_direct["exact_output_contract"]["invariants"],
         )
         self.assertEqual(
             f3_full_direct["prompt_revision"],
@@ -316,7 +281,7 @@ class Phase4RemoteFreshIntegratedProfileTests(unittest.TestCase):
             remote.P4_05_FULL_DIRECT_PROMPT_REVISION,
         )
         self.assertIn(
-            "derive every state_ref from the actual supplied f3_registered_interaction_view; the selected stable state ID must appear as target_state_stable_id on at least one mapped interaction for that use case",
+            "derive every state_ref from the actual supplied F3 interaction plan; the selected stable state ID must be an actual validated target for that use case",
             f4_full_direct["exact_output_contract"]["invariants"],
         )
         f4_input = json.loads(f4_full_input_bytes)
@@ -627,6 +592,20 @@ class Phase4RemoteFreshIntegratedArtifactTests(unittest.TestCase):
         self.assertIn("p4_05_policy.json", written_names)
         self.assertIn("b_input.json", written_names)
         self.assertNotIn("load_receipt.json", written_names)
+
+    def test_active_preparation_rejects_missing_actual_upstream_before_io(
+        self,
+    ) -> None:
+        with self.assertRaisesRegex(
+            remote.Phase4RemoteFreshIntegratedError,
+            "actual upstream",
+        ):
+            remote.prepare_phase4_remote_qwen_fresh_integrated(
+                model_root=Path("missing-model"),
+                integrity_evidence=Path("missing-integrity"),
+                result_root=Path("missing-result"),
+                require_actual_upstream=True,
+            )
 
     def test_model_json_accepts_complete_pretty_json_but_not_trailing_data(self) -> None:
         raw = b'{\n  "states": []\n}\n'

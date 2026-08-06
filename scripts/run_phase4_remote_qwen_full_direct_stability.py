@@ -1,4 +1,4 @@
-"""Run the fresh ten-case P4-05 F1-F4 direct-acceptance experiment."""
+"""Historical prebuilt-B ten-case runner; not the active full-flow entry."""
 
 from __future__ import annotations
 
@@ -18,8 +18,8 @@ from req2web_runtime import phase4_remote_qwen_full_direct_stability as runtime
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description=(
-            "Run ten fresh BF16 cases from F1 through F4 with no checkpoint "
-            "reuse, one call per node, and direct A-07a first-pass delivery."
+            "HISTORICAL/REPLAY-ONLY: run the old prebuilt-canonical-B ten-case "
+            "experiment. This is not the active raw-requirement full flow."
         )
     )
     parser.add_argument("--model-root", required=True, type=Path)

@@ -1,4 +1,4 @@
-"""Run the bounded P4-05 fresh F1-F4 BF16 integrated AutoDL pilot."""
+"""Historical manual F1-F4 runner retained for component replay only."""
 
 from __future__ import annotations
 
@@ -21,9 +21,9 @@ from req2web_runtime.phase4_remote_qwen_fresh_integrated import (
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description=(
-            "Run one P4-05 fresh F1-F4 Qwen3.5-9B integrated pilot on "
-            "AutoDL RTX 5090 GPU0 using BF16, no quantization, one persistent "
-            "worker, one call per node, no retry, and no truncation."
+            "HISTORICAL/COMPONENT-ONLY: run the old manual F1-F4 AutoDL "
+            "pilot. Use run_phase4_canonical_full_flow for the active raw-"
+            "requirement LangGraph flow."
         )
     )
     parser.add_argument("--model-root", required=True, type=Path)

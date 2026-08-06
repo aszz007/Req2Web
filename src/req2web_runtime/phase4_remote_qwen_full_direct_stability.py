@@ -27,6 +27,8 @@ from req2web_runtime.phase4_stability_cases import (
 FULL_DIRECT_SCHEMA_PREFIX = (
     "req2web.phase4.p4_05.remote_qwen_stability.full_direct_acceptance"
 )
+FLOW_AUTHORITY_ROLE = "historical_prebuilt_b_stability_runner"
+ACTIVE_DEFAULT_ENTRY = False
 FULL_DIRECT_POLICY_SCHEMA_VERSION = f"{FULL_DIRECT_SCHEMA_PREFIX}.policy.v1"
 FULL_DIRECT_PREFLIGHT_SCHEMA_VERSION = (
     f"{FULL_DIRECT_SCHEMA_PREFIX}.preflight.v1"
