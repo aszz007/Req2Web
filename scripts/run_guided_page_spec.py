@@ -20,12 +20,51 @@ from req2web_generation import (  # noqa: E402
 )
 
 
+ENTRYPOINT_ISOLATION_SCHEMA = "req2web.entrypoint.isolation.v1"
+ENTRYPOINT_CLASSIFICATION = "replay_only"
+ACTIVE_DEFAULT_ENTRY = False
+ENTRYPOINT_SCOPE_NOTICE = (
+    "Replay-only utility over saved context and guidance artifacts; it does not "
+    "rerun the current complete flow from a raw requirement or act as the "
+    "default entry."
+)
+ENTRYPOINT_HELP = (
+    "Isolation: entrypoint_classification=replay_only; "
+    "active_default_entry=false. "
+    f"{ENTRYPOINT_SCOPE_NOTICE}"
+)
+
+
+def entrypoint_isolation_metadata() -> dict[str, object]:
+    return {
+        "schema": ENTRYPOINT_ISOLATION_SCHEMA,
+        "event": "entrypoint_isolation",
+        "entrypoint": "scripts/run_guided_page_spec.py",
+        "entrypoint_classification": ENTRYPOINT_CLASSIFICATION,
+        "active_default_entry": ACTIVE_DEFAULT_ENTRY,
+        "scope_notice": ENTRYPOINT_SCOPE_NOTICE,
+    }
+
+
+def emit_entrypoint_isolation() -> None:
+    sys.stderr.write(
+        json.dumps(
+            entrypoint_isolation_metadata(),
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        + "\n"
+    )
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
             "Build a deterministic guided PageSpec v1 from existing Agent context "
             "and req2web.retrieval.guidance.v1 JSON."
-        )
+        ),
+        epilog=ENTRYPOINT_HELP,
     )
     parser.add_argument("--context", required=True, type=Path)
     parser.add_argument("--guidance", required=True, type=Path)
@@ -95,6 +134,7 @@ def _load_guidance(path: Path) -> RetrievalGuidance:
 
 def main() -> int:
     args = parse_args()
+    emit_entrypoint_isolation()
     result = RetrievalGuidedPageSpecBuilder().build(
         _load_context(args.context),
         _load_guidance(args.guidance),

@@ -21,9 +21,47 @@ from req2web_generation import (  # noqa: E402
 from req2web_rag import RetrieverConfig, create_retriever  # noqa: E402
 
 
+ENTRYPOINT_ISOLATION_SCHEMA = "req2web.entrypoint.isolation.v1"
+ENTRYPOINT_CLASSIFICATION = "component_only"
+ACTIVE_DEFAULT_ENTRY = False
+ENTRYPOINT_SCOPE_NOTICE = (
+    "Component-only deterministic package utility; it is not the current "
+    "complete formal flow or the active default entry."
+)
+ENTRYPOINT_HELP = (
+    "Isolation: entrypoint_classification=component_only; "
+    "active_default_entry=false. "
+    f"{ENTRYPOINT_SCOPE_NOTICE}"
+)
+
+
+def entrypoint_isolation_metadata() -> dict[str, object]:
+    return {
+        "schema": ENTRYPOINT_ISOLATION_SCHEMA,
+        "event": "entrypoint_isolation",
+        "entrypoint": "scripts/build_result_package.py",
+        "entrypoint_classification": ENTRYPOINT_CLASSIFICATION,
+        "active_default_entry": ACTIVE_DEFAULT_ENTRY,
+        "scope_notice": ENTRYPOINT_SCOPE_NOTICE,
+    }
+
+
+def emit_entrypoint_isolation() -> None:
+    sys.stderr.write(
+        json.dumps(
+            entrypoint_isolation_metadata(),
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        + "\n"
+    )
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Build a deterministic req2web.result.package.v1 directory."
+        description="Build a deterministic req2web.result.package.v1 directory.",
+        epilog=ENTRYPOINT_HELP,
     )
     parser.add_argument("requirement", help="One vague software or webpage requirement")
     parser.add_argument(
@@ -50,6 +88,7 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> int:
     args = parse_args()
+    emit_entrypoint_isolation()
     try:
         retriever = create_retriever(
             RetrieverConfig(
