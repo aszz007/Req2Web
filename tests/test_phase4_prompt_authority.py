@@ -110,6 +110,10 @@ class Phase4PromptAuthorityTest(unittest.TestCase):
             "Never regroup components by section",
             instructions,
         )
+        self.assertIn(
+            "emit at least one separate error/recovery state",
+            instructions,
+        )
         phase5_input_bytes = _canonical(
             {
                 "schema_version": "test.phase5.input.v1",
