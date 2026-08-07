@@ -260,6 +260,55 @@ class Phase4GraphTest(unittest.TestCase):
             with self.assertRaisesRegex(Phase4ContractError, "installed dependency file drift"):
                 validate_graph_state(state)
 
+    def test_platform_specific_record_metadata_is_not_runtime_authority(self) -> None:
+        import req2web_orchestration.phase4_graph as graph
+
+        receipt = graph._validate_dependency_acquisition_receipt(
+            verify_installed_files=False
+        )
+        installed = copy.deepcopy(receipt["resolved_closure"])
+        for index, row in enumerate(installed):
+            row["distribution"] = row["distribution"].replace("-", "_")
+            row["record_sha256"] = "sha256:" + f"{index + 1:064x}"
+        with mock.patch.object(
+            graph,
+            "_installed_langgraph_state",
+            return_value=(
+                installed,
+                [
+                    {
+                        "distribution": "langgraph",
+                        "relative_path": "linux/site-packages/langgraph/__init__.py",
+                        "byte_length": 1,
+                        "sha256": "sha256:" + ("f" * 64),
+                    }
+                ],
+            ),
+        ):
+            self.assertEqual(
+                validate_dependency_acquisition_receipt(),
+                receipt,
+            )
+
+    def test_installed_dependency_version_drift_is_rejected(self) -> None:
+        import req2web_orchestration.phase4_graph as graph
+
+        receipt = graph._validate_dependency_acquisition_receipt(
+            verify_installed_files=False
+        )
+        installed = copy.deepcopy(receipt["resolved_closure"])
+        installed[0]["version"] = "0.0.0"
+        with mock.patch.object(
+            graph,
+            "_installed_langgraph_state",
+            return_value=(installed, []),
+        ):
+            with self.assertRaisesRegex(
+                Phase4ContractError,
+                "installed LangGraph dependency closure drift",
+            ):
+                validate_dependency_acquisition_receipt()
+
     def test_foundation_status_requires_complete_topology_without_terminal_flag(self) -> None:
         state = self.state("incomplete-foundation")
         state["status"] = "foundation_completed"

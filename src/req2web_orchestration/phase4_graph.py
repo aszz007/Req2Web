@@ -497,6 +497,43 @@ def _installed_langgraph_state() -> tuple[list[dict[str, str]], list[dict[str, o
     )
 
 
+def _dependency_name_version_rows(
+    rows: object,
+    *,
+    name: str,
+) -> list[dict[str, str]]:
+    if not isinstance(rows, list) or not rows:
+        raise Phase4ContractError(f"{name} is invalid")
+    normalized_rows: list[dict[str, str]] = []
+    seen: set[str] = set()
+    for row in rows:
+        item = _object(
+            row,
+            ("distribution", "version", "record_sha256"),
+            f"{name}.row",
+        )
+        distribution = canonicalize_name(
+            _text(item["distribution"], f"{name}.distribution")
+        )
+        version = _text(item["version"], f"{name}.version")
+        digest = _text(item["record_sha256"], f"{name}.record_sha256")
+        if not digest.startswith("sha256:") or _HEX.fullmatch(digest[7:]) is None:
+            raise Phase4ContractError("dependency RECORD digest is invalid")
+        if distribution in seen:
+            raise Phase4ContractError(f"{name} contains duplicate distributions")
+        seen.add(distribution)
+        normalized_rows.append(
+            {
+                "distribution": distribution,
+                "version": version,
+            }
+        )
+    return sorted(
+        normalized_rows,
+        key=lambda row: (row["distribution"], row["version"]),
+    )
+
+
 def _validate_dependency_acquisition_receipt(
     *,
     verify_installed_files: bool,
@@ -547,30 +584,22 @@ def _validate_dependency_acquisition_receipt(
         _ACQUISITION_ACTION_STATE,
         "dependency acquisition action_state",
     )
-    if not isinstance(data["resolved_closure"], list):
-        raise Phase4ContractError("dependency acquisition closure is invalid")
-    for row in data["resolved_closure"]:
-        item = _object(
-            row,
-            ("distribution", "version", "record_sha256"),
-            "dependency_acquisition_receipt.resolved_closure.row",
-        )
-        _text(item["distribution"], "dependency.distribution")
-        _text(item["version"], "dependency.version")
-        digest = _text(item["record_sha256"], "dependency.record_sha256")
-        if not digest.startswith("sha256:") or _HEX.fullmatch(digest[7:]) is None:
-            raise Phase4ContractError("dependency RECORD digest is invalid")
+    expected_name_versions = _dependency_name_version_rows(
+        data["resolved_closure"],
+        name="dependency acquisition closure",
+    )
+    _identity(
+        data["installed_file_inventory_identity"],
+        "dependency_acquisition_receipt.installed_file_inventory_identity",
+    )
     if verify_installed_files:
-        installed_closure, installed_file_inventory = _installed_langgraph_state()
-        if data["resolved_closure"] != installed_closure:
+        installed_closure, _installed_file_inventory = _installed_langgraph_state()
+        installed_name_versions = _dependency_name_version_rows(
+            installed_closure,
+            name="installed LangGraph dependency closure",
+        )
+        if expected_name_versions != installed_name_versions:
             raise Phase4ContractError("installed LangGraph dependency closure drift")
-        if not _identity_matches(
-            data["installed_file_inventory_identity"],
-            installed_file_inventory,
-            revision="req2web.phase4.langgraph_installed_files.p4_02a.v1",
-            identity_kind="canonical_row_list",
-        ):
-            raise Phase4ContractError("installed dependency file inventory drift")
     return data
 
 
