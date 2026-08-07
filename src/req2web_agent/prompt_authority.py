@@ -16,7 +16,7 @@ from typing import Mapping
 PROMPT_AUTHORITY_SCHEMA_VERSION = "req2web.agent.f1_f4_prompt_authority.v1"
 PROMPT_SCHEMA_VERSION = "req2web.agent.f1_f4_prompt.v1"
 PROMPT_AUTHORITY_REVISION = (
-    "f3_f4_explicit_actual_state_plan_a07a_direct_english_v9"
+    "f3_f4_explicit_actual_state_plan_a07a_direct_english_v10"
 )
 REGISTRY_REVISION = "req2web.phase4.registry.p4_02a.v1"
 NODE_ORDER = ("F1", "F2", "F3", "F4")
@@ -441,8 +441,12 @@ def build_canonical_f1_f4_prompt(
             (
                 "Emit exactly one acceptance check for every row in "
                 "required_acceptance_target_plan and in the same order. Copy "
-                "each use_case_ref and state_ref object exactly; do not select "
-                "a different state, omit a row, or add a row."
+                "the reference values exactly, but reconstruct every "
+                "use_case_refs item and state_ref object in the contract key "
+                "order ref_type, ref_id, ref_revision. The canonical prompt "
+                "serialization may display those source-object keys in "
+                "lexical order; never copy that display order into the output. "
+                "Do not select a different state, omit a row, or add a row."
             ),
         ]
     return _canonical(payload)

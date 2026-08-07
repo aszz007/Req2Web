@@ -191,6 +191,54 @@ class Phase4PromptAuthorityTest(unittest.TestCase):
             instructions,
         )
 
+    def test_f4_prompt_reconstructs_reference_contract_key_order(self) -> None:
+        input_bytes = _canonical(
+            {
+                "schema_version": "test.input.v1",
+                "node_id": "F4",
+                "projection": {"test": True},
+            }
+        )
+        plan = [
+            {
+                "position": 0,
+                "use_case_ref": {
+                    "ref_type": "canonical_b_use_case",
+                    "ref_id": "UC-01",
+                    "ref_revision": "canonical_b.use_case.v1",
+                },
+                "state_ref": {
+                    "ref_type": "registry_stable",
+                    "ref_id": "p4-f2-state-example",
+                    "ref_revision": "req2web.phase4.registry.p4_02a.v1",
+                },
+            }
+        ]
+        raw = build_canonical_f1_f4_prompt(
+            node_id="F4",
+            input_bytes=input_bytes,
+            required_acceptance_target_plan=plan,
+        )
+        value = validate_canonical_prompt(
+            raw,
+            node_id="F4",
+            input_bytes=input_bytes,
+            required_acceptance_target_plan=plan,
+        )
+        self.assertEqual(
+            list(value["required_acceptance_target_plan"][0]["use_case_ref"]),
+            ["ref_id", "ref_revision", "ref_type"],
+        )
+        instructions = "\n".join(value["instructions"])
+        self.assertIn(
+            "contract key order ref_type, ref_id, ref_revision",
+            instructions,
+        )
+        self.assertIn(
+            "never copy that display order into the output",
+            instructions,
+        )
+
     def test_prompt_replays_from_exact_input_and_plan(self) -> None:
         input_bytes = _canonical(
             {
