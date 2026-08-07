@@ -223,6 +223,23 @@ def _identity_matches(
         raise Phase4FreshDeliveryError(f"{name} identity drifted")
 
 
+def _validate_source_pipeline_statuses(
+    source_result: Mapping[str, object],
+) -> None:
+    if source_result.get("composition_status") not in {
+        None,
+        "composed",
+        "composed_in_langgraph",
+    }:
+        raise Phase4FreshDeliveryError("source composition is not composed")
+    if source_result.get("assembler_status") not in {
+        None,
+        "assembled",
+        "assembled_in_langgraph",
+    }:
+        raise Phase4FreshDeliveryError("source assembler is not assembled")
+
+
 def _optional_identity_matches(
     declared: object,
     actual: Mapping[str, object],
@@ -409,10 +426,7 @@ class Phase4FreshDeliveryInput:
             raise Phase4FreshDeliveryError(
                 "source result does not establish system output usability"
             )
-        if result_value.get("composition_status") not in {None, "composed"}:
-            raise Phase4FreshDeliveryError("source composition is not composed")
-        if result_value.get("assembler_status") not in {None, "assembled"}:
-            raise Phase4FreshDeliveryError("source assembler is not assembled")
+        _validate_source_pipeline_statuses(result_value)
         case_id = result_value.get("case_id")
         request_id = result_value.get("request_id")
         if not isinstance(case_id, str) or not case_id:

@@ -508,8 +508,8 @@ def run_phase4_remote_qwen_langgraph_integrated(
                 "normalized_node_contract_success"
             ],
             "agent_chain_system_output_usable": True,
-            "composition_status": "composed_in_langgraph",
-            "assembler_status": "assembled_in_langgraph",
+            "composition_status": "composed",
+            "assembler_status": "assembled",
             "downstream": "not_executed",
             "downstream_policy": (
                 _fresh.PHASE4_FRESH_DELIVERY_POLICY_A07A_DIRECT_V1

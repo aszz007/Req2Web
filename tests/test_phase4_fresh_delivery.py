@@ -104,6 +104,8 @@ from req2web_runtime.phase4_fresh_delivery import (  # noqa: E402
     PHASE4_FRESH_ROUTE_OUTCOME_SCHEMA_VERSION,
     PHASE4_GRAPH_BOUND_DELIVERY_MATERIALS_SCHEMA_VERSION,
     Phase4FreshDeliveryInput,
+    Phase4FreshDeliveryError,
+    _validate_source_pipeline_statuses,
     _write_once,
     build_phase4_graph_bound_delivery_materials,
     run_phase4_fresh_delivery,
@@ -210,6 +212,28 @@ def _field_gate_pass_candidate(raw: bytes) -> bytes:
 
 class Phase4FreshDeliveryTests(unittest.TestCase):
     SOURCE_ROOT = ROOT / "phase4_fresh_integrated_revalidation_savepoint_20260804"
+
+    def test_langgraph_source_statuses_use_the_canonical_delivery_contract(self) -> None:
+        for composition, assembler in (
+            ("composed", "assembled"),
+            ("composed_in_langgraph", "assembled_in_langgraph"),
+        ):
+            _validate_source_pipeline_statuses(
+                {
+                    "composition_status": composition,
+                    "assembler_status": assembler,
+                }
+            )
+        with self.assertRaisesRegex(
+            Phase4FreshDeliveryError,
+            "source composition is not composed",
+        ):
+            _validate_source_pipeline_statuses(
+                {
+                    "composition_status": "phase_specific_status",
+                    "assembler_status": "assembled",
+                }
+            )
 
     def setUp(self) -> None:
         if not self.SOURCE_ROOT.is_dir():
