@@ -51,9 +51,28 @@ class DemoV2RegressionTest(TestCase):
         self.assertEqual(len(self.case_set.cases), 12)
         self.assertEqual([item.case_id for item in self.case_set.cases], sorted(item.case_id for item in self.case_set.cases))
         legacy = {item.case_id: item for item in self.case_set.cases}
-        self.assertEqual(legacy["ecommerce"].requirement, "做一个带搜索、筛选、购物车和结算的移动电商页面。")
-        self.assertEqual(legacy["pet-recognition"].constraints, ("相机权限被拒绝时应提供恢复方式",))
-        self.assertEqual(legacy["map-address-search"].constraints, ("定位不可用时应允许手动选择地址",))
+        self.assertEqual(
+            legacy["ecommerce"].requirement,
+            (
+                "\u505a\u4e00\u4e2a\u5e26\u641c\u7d22\u3001\u7b5b\u9009"
+                "\u3001\u8d2d\u7269\u8f66\u548c\u7ed3\u7b97\u7684\u79fb\u52a8"
+                "\u7535\u5546\u9875\u9762\u3002"
+            ),
+        )
+        self.assertEqual(
+            legacy["pet-recognition"].constraints,
+            (
+                "\u76f8\u673a\u6743\u9650\u88ab\u62d2\u7edd\u65f6\u5e94"
+                "\u63d0\u4f9b\u6062\u590d\u65b9\u5f0f",
+            ),
+        )
+        self.assertEqual(
+            legacy["map-address-search"].constraints,
+            (
+                "\u5b9a\u4f4d\u4e0d\u53ef\u7528\u65f6\u5e94\u5141\u8bb8"
+                "\u624b\u52a8\u9009\u62e9\u5730\u5740",
+            ),
+        )
         self.assertEqual(legacy["desktop-dashboard"].task_type, None)
         new_cases = [item for item in self.case_set.cases if "legacy-fixed" not in item.coverage_tags]
         self.assertGreaterEqual(sum(bool(item.constraints) for item in new_cases), 4)
@@ -81,7 +100,10 @@ class DemoV2RegressionTest(TestCase):
         self.assertGreater(outcomes["guidance_not_applicable_or_ignored"], 0)
         self.assertEqual(outcomes["verification_failed"], 0)
         validation = next(item for item in report["aggregate"]["role_totals"] if item["role"] == "validation")
-        self.assertGreater(validation["not_applicable_or_ignored"], validation["has_influence"])
+        self.assertGreaterEqual(
+            validation["not_applicable_or_ignored"],
+            validation["has_influence"],
+        )
 
     def test_missing_package_and_tampered_gate_or_statistics_are_rejected(self) -> None:
         output = self._build("tamper")

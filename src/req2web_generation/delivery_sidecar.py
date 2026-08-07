@@ -100,7 +100,14 @@ def _state_scenario(name: str) -> str:
 def _interaction_scenario(interaction: dict[str, Any], states: dict[str, dict[str, Any]]) -> str:
     action = str(interaction["action"]).lower()
     target = states[interaction["target_state_id"]]["name"].lower()
-    if "recover" in action or "retry" in action or "return" in action or "恢复" in action or "重试" in action or "返回" in action:
+    if (
+        "recover" in action
+        or "retry" in action
+        or "return" in action
+        or "\u6062\u590d" in action
+        or "\u91cd\u8bd5" in action
+        or "\u8fd4\u56de" in action
+    ):
         return "recovery"
     if "error" in target or "failure" in action or "simulate" in action and "error" in action:
         return "error_entry"
@@ -168,7 +175,11 @@ class DeliverySidecarResult:
             raise DeliverySidecarError("delivery JSON schema is invalid")
         if any(value.get("sidecar_id") != self.sidecar_id or value.get("package_id") != self.package_id or value.get("page_id") != self.page_id for value in (references, storyboard)):
             raise DeliverySidecarError("delivery JSON identity is inconsistent")
-        if references["source_statement"] != "参考图来自检索数据，只作设计参考，不代表生成页面截图或视觉理解。":
+        if references["source_statement"] != (
+            "Reference images come from retrieval data and are design "
+            "references only; they are not generated-page screenshots or "
+            "visual understanding evidence."
+        ):
             raise DeliverySidecarError("reference source statement is invalid")
         if storyboard["semantics"].get("scenario_boards_not_single_global_journey") is not True:
             raise DeliverySidecarError("storyboard semantics declaration is missing")
@@ -212,7 +223,11 @@ class DeterministicDeliverySidecarBuilder:
             "sidecar_id": sidecar_id,
             "package_id": package_id,
             "page_id": page_id,
-            "source_statement": "参考图来自检索数据，只作设计参考，不代表生成页面截图或视觉理解。",
+            "source_statement": (
+                "Reference images come from retrieval data and are design "
+                "references only; they are not generated-page screenshots or "
+                "visual understanding evidence."
+            ),
             "references": references,
         }
         storyboard_payload = {"schema_version": DELIVERY_STORYBOARD_SCHEMA_VERSION, "sidecar_id": sidecar_id, "package_id": package_id, "page_id": page_id, **storyboard}
@@ -328,7 +343,11 @@ class DeterministicDeliverySidecarBuilder:
                     "original_uri": uri,
                     "reference_kind": kind,
                     "delivery_mode": "reference_only",
-                    "source_note": "来自已验证 v2 包的 agent_context.json；未读取或解释 hierarchy/annotation 内容。",
+                        "source_note": (
+                            "Read from agent_context.json in the validated v2 "
+                            "package; hierarchy and annotation content was not "
+                            "read or interpreted."
+                        ),
                     "local_file": None,
                 }
                 if kind in {"screenshot", "semantic_image"} and PurePosixPath(uri).suffix.lower() in _IMAGE_EXTENSIONS and reference_root is not None:
@@ -348,7 +367,12 @@ class DeterministicDeliverySidecarBuilder:
                         assets[local_path] = first
                     record["delivery_mode"] = "packaged_image"
                     record["local_file"] = local_path
-                    record["source_note"] = "来自已验证 v2 包中声明的检索数据引用；仅作设计参考，不代表生成页面截图或视觉理解。"
+                    record["source_note"] = (
+                        "Read from a retrieval reference declared by the "
+                        "validated v2 package; it is a design reference only "
+                        "and is not generated-page screenshot or visual "
+                        "understanding evidence."
+                    )
                 records.append(record)
         if not records:
             raise DeliverySidecarError("delivery sidecar requires at least one declared UI reference")
@@ -471,19 +495,22 @@ class DeterministicDeliverySidecarBuilder:
         esc = lambda value: html.escape(str(value), quote=True)
         ref_cards = []
         for item in references["references"]:
-            image = f'<img src="{esc(item["local_file"])}" alt="{esc(item["title"])}" loading="lazy">' if item["delivery_mode"] == "packaged_image" else '<p class="reference-only">reference_only：未打包图片；保留原始引用信息。</p>'
-            ref_cards.append(f'<article class="card reference"><h3>{esc(item["title"])}</h3><p><span class="badge">{esc(item["delivery_mode"])}</span> <span class="badge">{esc(item["reference_kind"])}</span></p><p>doc_id：{esc(item["doc_id"])}</p><p>原始 URI：{esc(item["original_uri"])}</p><p>{esc(item["source_note"])}</p>{image}</article>')
+            image = f'<img src="{esc(item["local_file"])}" alt="{esc(item["title"])}" loading="lazy">' if item["delivery_mode"] == "packaged_image" else '<p class="reference-only">reference_only: image not packaged; original reference metadata is retained.</p>'
+            ref_cards.append(f'<article class="card reference"><h3>{esc(item["title"])}</h3><p><span class="badge">{esc(item["delivery_mode"])}</span> <span class="badge">{esc(item["reference_kind"])}</span></p><p>doc_id: {esc(item["doc_id"])}</p><p>Original URI: {esc(item["original_uri"])}</p><p>{esc(item["source_note"])}</p>{image}</article>')
         use_case_cards = []
         for board in storyboard["use_cases"]:
             scenario_blocks = []
             for scenario in board["scenarios"]:
                 panels = []
-                for label, entries in (("连接序列", scenario["sequence"]), ("independent branch", scenario["independent_branches"])):
+                for label, entries in (
+                    ("Connected sequence", scenario["sequence"]),
+                    ("Independent branch", scenario["independent_branches"]),
+                ):
                     for item in entries:
-                        panels.append(f'<div class="panel"><p><span class="badge">{esc(scenario["scenario"])}</span> <span class="badge">{esc(label)}</span></p><p><strong>{esc(item["interaction_id"])}</strong></p><p class="state">{esc(item["source_state"]["state_id"])} → {esc(item["target_state"]["state_id"])}</p><p>触发组件：{esc(item["trigger_component"]["label"])} ({esc(item["trigger_component"]["component_id"])})</p><p>动作：{esc(item["action"])}</p><p>反馈：{esc(item["feedback"])}</p><p>关联用例：{esc(", ".join(item["use_case_ids"]))}</p></div>')
-                scenario_blocks.append(f'<section><h3>{esc(scenario["scenario"])}</h3>{"".join(panels) or "<p>无交互面板。</p>"}</section>')
-            use_case_cards.append(f'<article class="card"><h2>{esc(board["title"])}</h2><p>用例：{esc(board["use_case_id"])}；目标：{esc(board["goal"])}</p>{"".join(scenario_blocks)}</article>')
-        return f'<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Req2Web 交付侧车</title><link rel="stylesheet" href="styles.css"></head><body><main><header><h1>UI 参考与交互 storyboard</h1><p>{esc(references["source_statement"])}</p><p>Storyboard 按用例与场景分组；不是单一、完整的全局用户旅程。</p></header><section><h2>UI 参考</h2><div class="grid">{"".join(ref_cards)}</div></section><section><h2>Storyboard</h2>{"".join(use_case_cards)}</section></main></body></html>'
+                        panels.append(f'<div class="panel"><p><span class="badge">{esc(scenario["scenario"])}</span> <span class="badge">{esc(label)}</span></p><p><strong>{esc(item["interaction_id"])}</strong></p><p class="state">{esc(item["source_state"]["state_id"])} -&gt; {esc(item["target_state"]["state_id"])}</p><p>Trigger component: {esc(item["trigger_component"]["label"])} ({esc(item["trigger_component"]["component_id"])})</p><p>Action: {esc(item["action"])}</p><p>Feedback: {esc(item["feedback"])}</p><p>Related use cases: {esc(", ".join(item["use_case_ids"]))}</p></div>')
+                scenario_blocks.append(f'<section><h3>{esc(scenario["scenario"])}</h3>{"".join(panels) or "<p>No interaction panels.</p>"}</section>')
+            use_case_cards.append(f'<article class="card"><h2>{esc(board["title"])}</h2><p>Use case: {esc(board["use_case_id"])}; Goal: {esc(board["goal"])}</p>{"".join(scenario_blocks)}</article>')
+        return f'<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Req2Web delivery sidecar</title><link rel="stylesheet" href="styles.css"></head><body><main><header><h1>UI references and interaction storyboard</h1><p>{esc(references["source_statement"])}</p><p>The storyboard is grouped by use case and scenario; it is not one complete global user journey.</p></header><section><h2>UI references</h2><div class="grid">{"".join(ref_cards)}</div></section><section><h2>Storyboard</h2>{"".join(use_case_cards)}</section></main></body></html>'
 
 
 def build_delivery_sidecar_batch(packages_dir: Path, output_root: Path, reference_root: Path | None = None, expected_count: int | None = 12) -> dict[str, Any]:

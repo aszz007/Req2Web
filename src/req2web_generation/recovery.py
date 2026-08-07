@@ -20,34 +20,34 @@ class ErrorRecoveryScenario:
 
 
 _RECOVERY_MARKERS = (
-    "恢复",
-    "重试",
-    "重新",
-    "可操作",
+    "\u6062\u590d",
+    "\u91cd\u8bd5",
+    "\u91cd\u65b0",
+    "\u53ef\u64cd\u4f5c",
     "recover",
     "retry",
     "try again",
 )
 _PERMISSION_ERROR_MARKERS = (
-    "权限被拒绝",
-    "拒绝权限",
-    "相机权限",
+    "\u6743\u9650\u88ab\u62d2\u7edd",
+    "\u62d2\u7edd\u6743\u9650",
+    "\u76f8\u673a\u6743\u9650",
     "permission denied",
     "camera permission",
 )
 _INPUT_ERROR_MARKERS = (
-    "输入错误",
-    "输入无效",
-    "无效输入",
-    "校验失败",
+    "\u8f93\u5165\u9519\u8bef",
+    "\u8f93\u5165\u65e0\u6548",
+    "\u65e0\u6548\u8f93\u5165",
+    "\u6821\u9a8c\u5931\u8d25",
     "invalid input",
     "validation error",
 )
 _GENERIC_ERROR_MARKERS = (
-    "错误",
-    "异常",
-    "失败",
-    "拒绝",
+    "\u9519\u8bef",
+    "\u5f02\u5e38",
+    "\u5931\u8d25",
+    "\u62d2\u7edd",
     "error",
     "failure",
     "failed",
@@ -72,28 +72,50 @@ def match_error_recovery_constraint(
         return ErrorRecoveryScenario(
             kind="permission",
             preferred_component_types=("media_input",),
-            trigger_label="模拟相机权限拒绝",
-            trigger_purpose="离线模拟相机权限被拒绝，不调用真实浏览器权限。",
-            trigger_action="模拟相机权限拒绝",
-            error_feedback="相机权限已被拒绝。请返回后改用示例输入，或允许相机访问后重试。",
-            recovery_label="返回并改用示例输入",
-            recovery_purpose="返回可操作状态，继续使用离线示例输入完成识别。",
-            recovery_action="恢复：返回并改用示例输入",
-            recovery_feedback="已返回可操作状态，可使用示例输入继续识别。",
+            trigger_label="Simulate camera permission denial",
+            trigger_purpose=(
+                "Simulate denied camera permission offline without requesting "
+                "real browser permission."
+            ),
+            trigger_action="Simulate camera permission denial",
+            error_feedback=(
+                "Camera permission was denied. Return to use sample input, or "
+                "allow camera access and try again."
+            ),
+            recovery_label="Return and use sample input",
+            recovery_purpose=(
+                "Return to an actionable state and continue with offline "
+                "sample input."
+            ),
+            recovery_action="Recover by returning to sample input",
+            recovery_feedback=(
+                "The page is actionable again. Continue with sample input."
+            ),
         )
 
     if _contains_any(normalized, _INPUT_ERROR_MARKERS):
         return ErrorRecoveryScenario(
             kind="input",
             preferred_component_types=("search_input", "form"),
-            trigger_label="模拟输入错误",
-            trigger_purpose="离线模拟无效输入，验证错误原因和恢复入口。",
-            trigger_action="模拟输入错误",
-            error_feedback="输入内容无效。请返回修改关键词后重新搜索。",
-            recovery_label="修改输入并重试",
-            recovery_purpose="返回可操作状态，修正输入后重新执行正常流程。",
-            recovery_action="恢复：修改输入并重试",
-            recovery_feedback="已返回输入状态，请修改关键词后重新搜索。",
+            trigger_label="Simulate invalid input",
+            trigger_purpose=(
+                "Simulate invalid input offline to verify the error reason "
+                "and recovery action."
+            ),
+            trigger_action="Simulate invalid input",
+            error_feedback=(
+                "The input is invalid. Return, update the value, and try again."
+            ),
+            recovery_label="Update the input and try again",
+            recovery_purpose=(
+                "Return to an actionable state, correct the input, and rerun "
+                "the normal flow."
+            ),
+            recovery_action="Recover by updating the input",
+            recovery_feedback=(
+                "The input state is available again. Update the value and "
+                "try again."
+            ),
         )
 
     if _contains_any(normalized, _GENERIC_ERROR_MARKERS):
@@ -107,14 +129,25 @@ def match_error_recovery_constraint(
                 "data_view",
                 "location_picker",
             ),
-            trigger_label="模拟任务失败",
-            trigger_purpose="离线模拟任务失败，验证明确原因和恢复入口。",
-            trigger_action="模拟任务失败",
-            error_feedback="任务未能完成。请返回检查输入后重试。",
-            recovery_label="返回并重试",
-            recovery_purpose="返回可操作状态，修正问题后重新执行正常流程。",
-            recovery_action="恢复：返回并重试",
-            recovery_feedback="已返回可操作状态，可以重新执行任务。",
+            trigger_label="Simulate task failure",
+            trigger_purpose=(
+                "Simulate task failure offline to verify a clear reason and "
+                "recovery action."
+            ),
+            trigger_action="Simulate task failure",
+            error_feedback=(
+                "The task could not be completed. Return, check the input, "
+                "and try again."
+            ),
+            recovery_label="Return and try again",
+            recovery_purpose=(
+                "Return to an actionable state and rerun the normal flow "
+                "after correcting the issue."
+            ),
+            recovery_action="Recover by returning and trying again",
+            recovery_feedback=(
+                "The page is actionable again. You can retry the task."
+            ),
         )
 
     return None

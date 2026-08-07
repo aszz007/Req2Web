@@ -10,28 +10,28 @@ from .understanding import RequirementUnderstandingProvider
 
 
 ROLE_QUERY_FOCUS = {
-    "requirement": "相似产品需求 用户场景 核心功能 功能边界 页面约束",
-    "ui_reference": "UI 界面参考 视觉布局 控件结构 页面类型 可见文字",
-    "interaction_flow": "交互流程 操作步骤 页面状态 点击 滑动 状态变化",
-    "implementation": "前端实现 响应式 HTML 页面布局 组件结构 原型实现",
-    "validation": "验收标准 测试点 异常流程 输入错误 权限 状态一致性",
+    "requirement": "similar product requirements user stories core features scope page constraints",
+    "ui_reference": "UI references visual layout control structure page type visible copy",
+    "interaction_flow": "interaction flow operation steps page states tap swipe state changes",
+    "implementation": "frontend implementation responsive HTML page layout component structure prototype",
+    "validation": "acceptance criteria test points error flows invalid input permissions state consistency",
 }
 
 
 def build_retrieval_queries(
     understanding: RequirementUnderstanding,
 ) -> dict[str, str]:
-    use_case_text = "；".join(
-        f"{item.title}：{item.expected_outcome}" for item in understanding.use_cases
+    use_case_text = "; ".join(
+        f"{item.title}: {item.expected_outcome}" for item in understanding.use_cases
     )
-    constraint_text = "；".join(understanding.constraints) or "无额外显式约束"
+    constraint_text = "; ".join(understanding.constraints) or "no additional explicit constraints"
     shared = (
         f"{understanding.requirement_summary} "
-        f"目标设备 {understanding.target_device}；任务类型 {understanding.task_type}；"
-        f"核心用例 {use_case_text}；约束 {constraint_text}"
+        f"target device {understanding.target_device}; task type {understanding.task_type}; "
+        f"core use cases {use_case_text}; constraints {constraint_text}"
     )
     return {
-        role: f"{shared}。检索重点：{ROLE_QUERY_FOCUS[role]}"
+        role: f"{shared}. Retrieval focus: {ROLE_QUERY_FOCUS[role]}"
         for role in ROLE_ORDER
     }
 

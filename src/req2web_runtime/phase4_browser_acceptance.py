@@ -43,6 +43,8 @@ from req2web_generation import (
     SectionSpec,
     TraceabilitySpec,
     UseCaseTrace,
+    PublicationLanguageError,
+    validate_english_publication_tree,
 )
 from req2web_rag import ROLE_ORDER
 
@@ -754,6 +756,15 @@ def run_real_browser_case_audit(
         raise Phase4BrowserAcceptanceError("case_index must be positive")
     selected_run_id = _text(run_id, "run_id")
     selected_case_id = _text(case_id, "case_id")
+    package = _package_binding(package_root)
+    root = Path(package_root).resolve(strict=True)
+    if evidence_scope != "historical_synthetic_canary":
+        try:
+            validate_english_publication_tree(root)
+        except (OSError, PublicationLanguageError) as exc:
+            raise Phase4BrowserAcceptanceError(
+                "canonical browser evidence requires an English-only package"
+            ) from exc
     destination = Path(output_root).resolve(strict=False)
     if destination.exists():
         if destination.is_symlink() or not destination.is_dir() or any(
@@ -764,8 +775,6 @@ def run_real_browser_case_audit(
             )
     else:
         destination.mkdir(parents=True, exist_ok=False)
-    package = _package_binding(package_root)
-    root = Path(package_root).resolve(strict=True)
     context_value = _load_json(
         root / "internal/agent_context.json",
         "result package AgentContext",

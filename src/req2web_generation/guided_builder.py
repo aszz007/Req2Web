@@ -10,6 +10,7 @@ from req2web_agent import AGENT_BUNDLE_SCHEMA_VERSION, AgentContextBundle
 from req2web_rag.corpus import ROLE_ORDER
 
 from .builder import PageSpecBuilder, _stable_token
+from .publication_language import contains_cjk_text
 from .reference_safety import validate_reference_uri
 from .retrieval_guidance import (
     RETRIEVAL_GUIDANCE_SCHEMA_VERSION,
@@ -32,20 +33,20 @@ GUIDED_PAGE_SPEC_BUILD_RESULT_SCHEMA_VERSION = (
 )
 
 _CONCEPT_KEYWORDS: dict[str, tuple[str, ...]] = {
-    "search_input": ("搜索", "查询", "search"),
-    "filter_control": ("筛选", "过滤", "filter"),
-    "result_list": ("列表", "list"),
-    "cart_summary": ("购物车", "cart", "basket"),
-    "checkout_action": ("结算", "支付", "checkout", "payment"),
-    "media_input": ("拍摄", "拍照", "上传", "照片", "图片", "camera", "upload"),
-    "analysis_result": ("识别", "分析", "recognition", "analysis"),
-    "location_picker": ("地图", "地点", "位置", "地址", "定位", "map", "location"),
-    "metric_summary": ("看板", "指标", "统计", "数据", "dashboard", "metric"),
-    "detail_view": ("详情", "detail"),
-    "empty_state": ("空状态", "无匹配", "没有匹配", "无数据", "没有数据", "empty", "no data"),
-    "permission_recovery": ("权限", "拒绝", "permission"),
-    "retry_recovery": ("输入错误", "错误", "失败", "重试", "retry", "error"),
-    "form_structure": ("填写", "表单", "登录", "注册", "login", "register", "sign in"),
+    "search_input": ("\u641c\u7d22", "\u67e5\u8be2", "search"),
+    "filter_control": ("\u7b5b\u9009", "\u8fc7\u6ee4", "filter"),
+    "result_list": ("\u5217\u8868", "list"),
+    "cart_summary": ("\u8d2d\u7269\u8f66", "cart", "basket"),
+    "checkout_action": ("\u7ed3\u7b97", "\u652f\u4ed8", "checkout", "payment"),
+    "media_input": ("\u62cd\u6444", "\u62cd\u7167", "\u4e0a\u4f20", "\u7167\u7247", "\u56fe\u7247", "camera", "upload"),
+    "analysis_result": ("\u8bc6\u522b", "\u5206\u6790", "recognition", "analysis"),
+    "location_picker": ("\u5730\u56fe", "\u5730\u70b9", "\u4f4d\u7f6e", "\u5730\u5740", "\u5b9a\u4f4d", "map", "location"),
+    "metric_summary": ("\u770b\u677f", "\u6307\u6807", "\u7edf\u8ba1", "\u6570\u636e", "dashboard", "metric"),
+    "detail_view": ("\u8be6\u60c5", "detail"),
+    "empty_state": ("\u7a7a\u72b6\u6001", "\u65e0\u5339\u914d", "\u6ca1\u6709\u5339\u914d", "\u65e0\u6570\u636e", "\u6ca1\u6709\u6570\u636e", "empty", "no data"),
+    "permission_recovery": ("\u6743\u9650", "\u62d2\u7edd", "permission"),
+    "retry_recovery": ("\u8f93\u5165\u9519\u8bef", "\u9519\u8bef", "\u5931\u8d25", "\u91cd\u8bd5", "retry", "error"),
+    "form_structure": ("\u586b\u5199", "\u8868\u5355", "\u767b\u5f55", "\u6ce8\u518c", "login", "register", "sign in"),
 }
 
 _CONTEXT_COMPONENTS: tuple[str, ...] = (
@@ -61,23 +62,83 @@ _CONTEXT_COMPONENTS: tuple[str, ...] = (
 )
 
 _COMPONENT_PRESENTATION: dict[str, tuple[str, str, str]] = {
-    "search_input": ("search_input", "搜索输入", "输入关键词并发起搜索"),
-    "filter_control": ("search_input", "筛选条件", "调整筛选条件并更新结果"),
-    "result_list": ("data_view", "结果列表", "展示与当前查询匹配的结果列表"),
-    "cart_summary": ("primary_action", "购物车摘要", "查看待购买项目和数量"),
-    "checkout_action": ("primary_action", "结算", "确认订单并完成结算"),
-    "media_input": ("media_input", "拍照或上传", "提交用户明确要求的本地素材"),
-    "analysis_result": ("data_view", "分析结果", "展示用户明确要求的分析结果"),
-    "location_picker": ("location_picker", "位置选择", "搜索、手动选择并确认地址"),
-    "metric_summary": ("data_view", "关键指标", "展示用户明确要求的指标摘要"),
-    "detail_view": ("data_view", "详情视图", "展示所选项目的关键信息"),
-    "empty_state": ("status_panel", "空结果提示", "说明当前没有匹配内容并给出恢复入口"),
-    "form_structure": ("form", "表单", "提供当前需求明确的填写或认证表单结构"),
+    "search_input": ("search_input", "Search input", "Enter keywords and start a search"),
+    "filter_control": ("search_input", "Filter controls", "Adjust filters and update results"),
+    "result_list": ("data_view", "Result list", "Show results that match the current query"),
+    "cart_summary": ("primary_action", "Cart summary", "Review selected items and quantities"),
+    "checkout_action": ("primary_action", "Checkout", "Confirm the order and complete checkout"),
+    "media_input": ("media_input", "Capture or upload", "Provide the local media requested by the user"),
+    "analysis_result": ("data_view", "Analysis result", "Show the analysis result requested by the user"),
+    "location_picker": ("location_picker", "Location picker", "Search, select, and confirm a location"),
+    "metric_summary": ("data_view", "Key metrics", "Show the requested metric summary"),
+    "detail_view": ("data_view", "Detail view", "Show key information about the selected item"),
+    "empty_state": ("status_panel", "Empty result", "Explain that no content matches and provide a recovery action"),
+    "form_structure": ("form", "Form", "Provide the requested data-entry or authentication form"),
 }
 
-_TAP_WORDS = ("点击", "选择", "确认", "查看", "搜索", "筛选", "上传", "拍摄", "结算", "提交")
-_SWIPE_WORDS = ("滑动", "滚动", "浏览", "列表", "搜索", "筛选")
-_ACTION_WORDS = tuple(dict.fromkeys((*_TAP_WORDS, *_SWIPE_WORDS, "分析", "识别")))
+_COMPONENT_PRESENTATION_EN: dict[str, tuple[str, str, str]] = {
+    "search_input": ("search_input", "Search input", "Enter keywords and start a search"),
+    "filter_control": ("search_input", "Filter controls", "Adjust filters and update results"),
+    "result_list": ("data_view", "Result list", "Show results that match the current query"),
+    "cart_summary": ("primary_action", "Cart summary", "Review selected items and quantities"),
+    "checkout_action": ("primary_action", "Checkout", "Confirm the order and complete checkout"),
+    "media_input": ("media_input", "Capture or upload", "Provide the local media requested by the user"),
+    "analysis_result": ("data_view", "Analysis result", "Show the analysis result requested by the user"),
+    "location_picker": ("location_picker", "Location picker", "Search, select, and confirm a location"),
+    "metric_summary": ("data_view", "Key metrics", "Show the requested metric summary"),
+    "detail_view": ("data_view", "Detail view", "Show key information about the selected item"),
+    "empty_state": ("status_panel", "Empty result", "Explain that no content matches and provide a recovery action"),
+    "form_structure": ("form", "Form", "Provide the requested data-entry or authentication form"),
+}
+
+_TAP_WORDS = (
+    "\u70b9\u51fb",
+    "\u9009\u62e9",
+    "\u786e\u8ba4",
+    "\u67e5\u770b",
+    "\u641c\u7d22",
+    "\u7b5b\u9009",
+    "\u4e0a\u4f20",
+    "\u62cd\u6444",
+    "\u7ed3\u7b97",
+    "\u63d0\u4ea4",
+    "tap",
+    "select",
+    "confirm",
+    "view",
+    "search",
+    "filter",
+    "upload",
+    "capture",
+    "checkout",
+    "submit",
+)
+_SWIPE_WORDS = (
+    "\u6ed1\u52a8",
+    "\u6eda\u52a8",
+    "\u6d4f\u89c8",
+    "\u5217\u8868",
+    "\u641c\u7d22",
+    "\u7b5b\u9009",
+    "swipe",
+    "scroll",
+    "browse",
+    "list",
+    "search",
+    "filter",
+)
+_ACTION_WORDS = tuple(
+    dict.fromkeys(
+        (
+            *_TAP_WORDS,
+            *_SWIPE_WORDS,
+            "\u5206\u6790",
+            "\u8bc6\u522b",
+            "analyze",
+            "recognize",
+        )
+    )
+)
 
 
 @dataclass(frozen=True)
@@ -286,6 +347,36 @@ def _context_has(context: AgentContextBundle, concept: str) -> bool:
     return _contains_any(_explicit_context_text(context), _CONCEPT_KEYWORDS.get(concept, ()))
 
 
+def _is_english_page_spec(page_spec: PageSpec) -> bool:
+    values = [
+        page_spec.title,
+        page_spec.summary,
+        *(
+            value
+            for item in page_spec.use_cases
+            for value in (
+                item.title,
+                item.actor,
+                item.goal,
+                item.expected_outcome,
+            )
+        ),
+    ]
+    return not any(contains_cjk_text(value) for value in values)
+
+
+def _component_presentation(
+    page_spec: PageSpec,
+    concept: str,
+) -> tuple[str, str, str]:
+    source = (
+        _COMPONENT_PRESENTATION_EN
+        if _is_english_page_spec(page_spec)
+        else _COMPONENT_PRESENTATION
+    )
+    return source[concept]
+
+
 def _use_case_text(use_case: object) -> str:
     return " ".join(
         str(getattr(use_case, name))
@@ -299,7 +390,17 @@ def _best_use_case(context: AgentContextBundle, concept: str) -> str:
     for index, use_case in enumerate(context.use_cases):
         text = _use_case_text(use_case)
         score = sum(text.count(keyword.casefold()) for keyword in keywords)
-        if concept == "metric_summary" and _contains_any(text, ("核心", "状态", "浏览")):
+        if concept == "metric_summary" and _contains_any(
+            text,
+            (
+                "\u6838\u5fc3",
+                "\u72b6\u6001",
+                "\u6d4f\u89c8",
+                "core",
+                "status",
+                "browse",
+            ),
+        ):
             score += 1
         scored.append((score, -index, use_case.use_case_id))
     return max(scored)[2]
@@ -321,7 +422,10 @@ def _add_component(
 ) -> ComponentSpec:
     use_case_id = _best_use_case(context, concept)
     section = _section_for_use_case(page_spec, use_case_id)
-    component_type, label, purpose = _COMPONENT_PRESENTATION[concept]
+    component_type, label, purpose = _component_presentation(
+        page_spec,
+        concept,
+    )
     token = _stable_token(use_case_id, "use-case")
     component_id = f"component-{token}-{namespace}-{concept.replace('_', '-')}"
     component = ComponentSpec(component_id, section.section_id, component_type, label, purpose)
@@ -346,7 +450,10 @@ def _ensure_component(
 ) -> ComponentSpec:
     use_case_id = _best_use_case(context, concept)
     section = _section_for_use_case(page_spec, use_case_id)
-    component_type, label, _ = _COMPONENT_PRESENTATION[concept]
+    component_type, label, _ = _component_presentation(
+        page_spec,
+        concept,
+    )
     candidates = [
         item
         for item in page_spec.components
@@ -366,7 +473,15 @@ def _ensure_empty_state(page_spec: PageSpec) -> PageState:
     state = PageState(
         state_id="state-empty",
         name="empty",
-        description="暂无匹配内容时说明当前结果为空并提供下一步操作。",
+        description=(
+            "No matching content is available. The page explains the empty "
+            "result and provides a next action."
+            if _is_english_page_spec(page_spec)
+            else (
+                "No matching content is available. The page explains the "
+                "empty result and provides a next action."
+            )
+        ),
         visible_component_ids=[],
     )
     success_index = next(
@@ -487,7 +602,10 @@ class RetrievalGuidedPageSpecBuilder:
                             role=item.source.role,
                             item=item,
                             rule=f"ablation_disabled_role:v1:{item.source.role}",
-                            reason="受控消融移除了该角色的检索指导；不声明任何 PageSpec 结构影响。",
+                reason=(
+                    "The controlled ablation removed retrieval guidance for "
+                    "this role; no PageSpec structural effect is claimed."
+                ),
                         )
                     )
             effective_guidance = RetrievalGuidance(
@@ -543,7 +661,9 @@ class RetrievalGuidedPageSpecBuilder:
                     role="context",
                     rule=f"context_explicit_component:v1:{concept}",
                     reason=(
-                        "组件由原始需求或显式 constraint 保留；检索未被声明为该业务能力的来源。"
+                    "The component is retained by the original requirement or "
+                    "an explicit constraint; retrieval is not claimed as the "
+                    "source of this capability."
                     ),
                     affected_fields=(
                         AffectedPageSpecField(component.component_id, "component_type"),
@@ -559,7 +679,10 @@ class RetrievalGuidedPageSpecBuilder:
                     source_kind="agent_context",
                     role="context",
                     rule="context_explicit_layout:v1:metric_dashboard",
-                    reason="桌面指标看板布局由原始需求保证，不等待弱 UI 召回证明。",
+                    reason=(
+                        "The dashboard layout is guaranteed by the original "
+                        "requirement; weak UI retrieval is not required as proof."
+                    ),
                     affected_fields=(
                         AffectedPageSpecField(page_spec.page_id, "layout.pattern"),
                     ),
@@ -573,34 +696,88 @@ class RetrievalGuidedPageSpecBuilder:
         fallback: list[GuidanceDecision],
     ) -> None:
         constraints_text = " ".join(context.constraints).casefold()
+        english_publication = _is_english_page_spec(page_spec)
         cases: list[tuple[str, str, str, str, str, str, str]] = []
         if (
-            _contains_any(constraints_text, ("定位不可用", "位置不可用", "location unavailable"))
-            and _contains_any(constraints_text, ("手动", "地址", "manual"))
+            _contains_any(
+                constraints_text,
+                (
+                    "\u5b9a\u4f4d\u4e0d\u53ef\u7528",
+                    "\u4f4d\u7f6e\u4e0d\u53ef\u7528",
+                    "location unavailable",
+                    "location is unavailable",
+                    "location services are unavailable",
+                ),
+            )
+            and _contains_any(
+                constraints_text,
+                ("\u624b\u52a8", "\u5730\u5740", "manual"),
+            )
         ):
             cases.append(
                 (
                     "location-manual",
                     "location_picker",
                     "state-error",
-                    "模拟定位不可用",
-                    "手动选择地址",
-                    "定位不可用，请改用手动地址选择。",
-                    "已返回可操作状态，可手动选择并确认地址。",
+                    (
+                        "Simulate unavailable location"
+                        if english_publication
+                        else "Simulate unavailable location"
+                    ),
+                    (
+                        "Choose an address manually"
+                        if english_publication
+                        else "Choose an address manually"
+                    ),
+                    (
+                        "Location is unavailable. Choose an address manually."
+                        if english_publication
+                        else "Location is unavailable. Choose an address manually."
+                    ),
+                    (
+                        "The page is actionable again. Select and confirm an "
+                        "address manually."
+                        if english_publication
+                        else (
+                            "The page is actionable again. Select and confirm an "
+                            "address manually."
+                        )
+                    ),
                 )
             )
         if _context_has(context, "empty_state") and _contains_any(
-            constraints_text, ("清除筛选", "重置筛选", "clear filter")
+            constraints_text,
+            (
+                "\u6e05\u9664\u7b5b\u9009",
+                "\u91cd\u7f6e\u7b5b\u9009",
+                "clear filter",
+            ),
         ):
             cases.append(
                 (
                     "empty-clear-filter",
                     "filter_control",
                     "state-empty",
-                    "查看空结果示例",
-                    "清除筛选",
-                    "没有匹配数据，可清除筛选后重试。",
-                    "筛选已清除，可以重新查看数据。",
+                    (
+                        "Review an empty result"
+                        if english_publication
+                        else "Review an empty result"
+                    ),
+                    (
+                        "Clear filters"
+                        if english_publication
+                        else "Clear filters"
+                    ),
+                    (
+                        "No data matches. Clear the filters and try again."
+                        if english_publication
+                        else "No data matches. Clear the filters and try again."
+                    ),
+                    (
+                        "The filters are cleared. Review the data again."
+                        if english_publication
+                        else "The filters are cleared. Review the data again."
+                    ),
                 )
             )
 
@@ -629,14 +806,23 @@ class RetrievalGuidedPageSpecBuilder:
                 section.section_id,
                 "primary_action",
                 trigger_label,
-                "离线验证用户明确声明的恢复边界。",
+                (
+                    "Validate the explicitly requested recovery boundary "
+                    "offline."
+                    if english_publication
+                    else "Validate the explicitly requested recovery boundary offline."
+                ),
             )
             recovery = ComponentSpec(
                 recovery_id,
                 section.section_id,
                 "primary_action",
                 recovery_label,
-                "执行用户明确声明的保守恢复操作。",
+                (
+                    "Run the explicitly requested conservative recovery action."
+                    if english_publication
+                    else "Run the explicitly requested conservative recovery action."
+                ),
             )
             page_spec.components.extend((trigger, recovery))
             section.component_ids.insert(max(len(section.component_ids) - 1, 0), trigger_id)
@@ -671,14 +857,30 @@ class RetrievalGuidedPageSpecBuilder:
             enter_check = _append_acceptance(
                 page_spec,
                 f"context-{case_token}-enter",
-                f"显式 constraint 必须可进入 {target_state.name} 并显示原因和恢复入口。",
+                (
+                    f"An explicit constraint must enter {target_state.name} "
+                    "and show the reason plus a recovery action."
+                    if english_publication
+                    else (
+                        f"An explicit constraint must enter {target_state.name} "
+                        "and show the reason plus a recovery action."
+                    )
+                ),
                 use_case_id,
                 target_state.state_id,
             )
             recover_check = _append_acceptance(
                 page_spec,
                 f"context-{case_token}-recover",
-                "显式 constraint 的恢复操作必须返回 initial，并保留原有正常流程。",
+                (
+                    "The explicit recovery action must return to initial and "
+                    "preserve the normal flow."
+                    if english_publication
+                    else (
+                        "The explicit recovery action must return to initial and "
+                        "preserve the normal flow."
+                    )
+                ),
                 use_case_id,
                 "state-initial",
             )
@@ -688,7 +890,10 @@ class RetrievalGuidedPageSpecBuilder:
                     source_kind="agent_context",
                     role="context",
                     rule=f"context_explicit_recovery:v1:{case_token}",
-                    reason="恢复行为直接来自显式 constraint；检索未被声明为该业务行为的来源。",
+                    reason=(
+                        "The recovery behavior comes directly from an explicit "
+                        "constraint; retrieval is not claimed as the source."
+                    ),
                     affected_fields=(
                         AffectedPageSpecField(trigger_id, "label"),
                         AffectedPageSpecField(recovery_id, "label"),
@@ -711,12 +916,25 @@ class RetrievalGuidedPageSpecBuilder:
     ) -> None:
         adopted_boundary = False
         adopted_values: set[str] = set()
+        english_publication = _is_english_page_spec(page_spec)
         for item in guidance.requirement_guidance:
             if item.category == "business_boundary_hint" and not adopted_boundary:
                 constraint = _append_constraint(
                     page_spec,
                     "requirement-evidence-boundary",
-                    "检索需求案例只补充页面结构的证据边界，不覆盖原始需求、设备、用例或显式约束。",
+                    (
+                        "Retrieved requirement examples only provide a "
+                        "structural evidence boundary; they do not override "
+                        "the original requirement, device, use cases, or "
+                        "explicit constraints."
+                        if english_publication
+                        else (
+                            "Retrieved requirement examples only provide a "
+                            "structural evidence boundary; they do not override "
+                            "the original requirement, device, use cases, or "
+                            "explicit constraints."
+                        )
+                    ),
                 )
                 adopted.append(
                     _decision(
@@ -725,7 +943,10 @@ class RetrievalGuidedPageSpecBuilder:
                         role="requirement",
                         item=item,
                         rule="requirement_boundary:v1:reference_only",
-                        reason="来源是允许的需求参考类型，仅用于补充证据边界。",
+                        reason=(
+                            "The source is an allowed requirement reference and "
+                            "only supplements the evidence boundary."
+                        ),
                         affected_fields=(AffectedPageSpecField(constraint.constraint_id, "description"),),
                     )
                 )
@@ -734,7 +955,17 @@ class RetrievalGuidedPageSpecBuilder:
                 constraint = _append_constraint(
                     page_spec,
                     f"requirement-{item.value}",
-                    f"检索需求案例仅补充 {item.value} 的结构证据；该能力仍以当前 context 明确内容为准。",
+                    (
+                        f"Retrieved requirement examples only add structural "
+                        f"evidence for {item.value}; the current context "
+                        "remains authoritative."
+                        if english_publication
+                        else (
+                            f"Retrieved requirement examples only add structural "
+                            f"evidence for {item.value}; the current context "
+                            "remains authoritative."
+                        )
+                    ),
                 )
                 adopted.append(
                     _decision(
@@ -743,7 +974,11 @@ class RetrievalGuidedPageSpecBuilder:
                         role="requirement",
                         item=item,
                         rule=f"requirement_boundary:v1:context_confirmed:{item.value}",
-                        reason="受控值已由当前 context 明确支持，检索仅补充边界。",
+                        reason=(
+                            "The controlled value is explicitly supported by "
+                            "the current context; retrieval only supplements "
+                            "the boundary."
+                        ),
                         affected_fields=(AffectedPageSpecField(constraint.constraint_id, "description"),),
                     )
                 )
@@ -756,7 +991,11 @@ class RetrievalGuidedPageSpecBuilder:
                         role="requirement",
                         item=item,
                         rule="requirement_boundary:v1:context_required",
-                        reason="当前 context 未明确支持该受控能力，不能由相似需求案例补写。",
+                        reason=(
+                            "The current context does not explicitly support "
+                            "this controlled capability; similar requirements "
+                            "cannot add it."
+                        ),
                     )
                 )
             else:
@@ -767,7 +1006,11 @@ class RetrievalGuidedPageSpecBuilder:
                         role="requirement",
                         item=item,
                         rule="requirement_boundary:v1:weak_or_duplicate",
-                        reason="相似任务类型或重复参考不足以改变 PageSpec，保留 context/旧规则。",
+                        reason=(
+                            "A similar task type or duplicate reference is not "
+                            "enough to change the PageSpec; retain the context "
+                            "and existing rule."
+                        ),
                     )
                 )
 
@@ -792,6 +1035,7 @@ class RetrievalGuidedPageSpecBuilder:
     ) -> None:
         adopted_values: set[str] = set()
         supported = set(_COMPONENT_PRESENTATION)
+        english_publication = _is_english_page_spec(page_spec)
         for item in guidance.ui_guidance:
             if item.category == "ui_reference_uri":
                 fallback.append(
@@ -801,7 +1045,10 @@ class RetrievalGuidedPageSpecBuilder:
                         role="ui_reference",
                         item=item,
                         rule="ui_guidance:v1:reference_only",
-                        reason="UI URI 只保留为证据，不直接复制资产或改变业务。",
+                        reason=(
+                            "The UI URI is retained as evidence only; it does "
+                            "not copy an asset or change business behavior."
+                        ),
                     )
                 )
                 continue
@@ -813,7 +1060,10 @@ class RetrievalGuidedPageSpecBuilder:
                         role="ui_reference",
                         item=item,
                         rule="ui_guidance:v1:controlled_value_required",
-                        reason="通用或不受支持的 UI 提示不足以改变 PageSpec。",
+                        reason=(
+                            "A generic or unsupported UI hint is insufficient "
+                            "to change the PageSpec."
+                        ),
                     )
                 )
                 continue
@@ -825,7 +1075,11 @@ class RetrievalGuidedPageSpecBuilder:
                         role="ui_reference",
                         item=item,
                         rule=f"ui_guidance:v1:semantic_gate:{item.value}",
-                        reason="该 UI 受控值与原始需求、用例和显式 constraint 不相关。",
+                        reason=(
+                            "This controlled UI value is unrelated to the "
+                            "original requirement, use cases, and explicit "
+                            "constraints."
+                        ),
                     )
                 )
                 continue
@@ -837,13 +1091,21 @@ class RetrievalGuidedPageSpecBuilder:
                         role="ui_reference",
                         item=item,
                         rule=f"ui_guidance:v1:duplicate:{item.value}",
-                        reason="同一受控 UI 值已有更早、稳定的来源被采用。",
+                        reason=(
+                            "The same controlled UI value already has an earlier "
+                            "stable adopted source."
+                        ),
                     )
                 )
                 continue
 
             component = _ensure_component(page_spec, context, item.value, "guided-ui")
-            purpose_note = f"检索 UI 参考用于 {item.value} 的结构表达；"
+            purpose_note = (
+                f"Retrieved UI guidance informs the structure for "
+                f"{item.value}; "
+                if english_publication
+                else f"Retrieved UI guidance informs the structure for {item.value}; "
+            )
             if not component.purpose.startswith(purpose_note):
                 component.purpose = purpose_note + component.purpose
             affected = [AffectedPageSpecField(component.component_id, "purpose")]
@@ -852,7 +1114,17 @@ class RetrievalGuidedPageSpecBuilder:
                 affected.append(AffectedPageSpecField(page_spec.page_id, "layout.pattern"))
             if item.value == "empty_state":
                 empty_state = _ensure_empty_state(page_spec)
-                empty_state.description = "检索 UI 参考支持清楚的空结果表达；恢复行为仍由当前需求或 constraint 决定。"
+                empty_state.description = (
+                    "Retrieved UI guidance supports a clear empty-result "
+                    "presentation; the current requirement or constraint "
+                    "still determines recovery behavior."
+                    if english_publication
+                    else (
+                        "Retrieved UI guidance supports a clear empty-result "
+                        "presentation; the current requirement or constraint "
+                        "still determines recovery behavior."
+                    )
+                )
                 if component.component_id not in empty_state.visible_component_ids:
                     empty_state.visible_component_ids.append(component.component_id)
                 affected.extend(
@@ -868,7 +1140,11 @@ class RetrievalGuidedPageSpecBuilder:
                     role="ui_reference",
                     item=item,
                     rule=f"ui_guidance:v1:context_confirmed:{item.value}",
-                    reason="受控 UI 值与当前 context 明确语义一致，并改变组件或布局表达。",
+                    reason=(
+                        "The controlled UI value is semantically consistent "
+                        "with the current context and changes the component or "
+                        "layout expression."
+                    ),
                     affected_fields=affected,
                 )
             )
@@ -889,9 +1165,19 @@ class RetrievalGuidedPageSpecBuilder:
             elif value == "tap_and_swipe":
                 score = tap_score + swipe_score if tap_score and swipe_score else 0
             elif value == "multi_step_transition":
-                score = action_score if action_score >= 2 or re.search(r"[、与和]", text) else 0
+                score = (
+                    action_score
+                    if action_score >= 2
+                    or re.search(r"[\u3001\u4e0e\u548c]| and |, ", text)
+                    else 0
+                )
             elif value == "single_step_transition":
-                score = action_score if action_score == 1 and not re.search(r"[、与和]", text) else 0
+                score = (
+                    action_score
+                    if action_score == 1
+                    and not re.search(r"[\u3001\u4e0e\u548c]| and |, ", text)
+                    else 0
+                )
             else:
                 score = 0
             if score:
@@ -918,13 +1204,24 @@ class RetrievalGuidedPageSpecBuilder:
         fallback: list[GuidanceDecision],
     ) -> None:
         used: set[tuple[str, str]] = set()
-        labels = {
-            "tap": "点击操作",
-            "swipe": "滑动浏览",
-            "tap_and_swipe": "点击并滑动",
-            "single_step_transition": "单步状态转换",
-            "multi_step_transition": "多步骤状态转换",
-        }
+        english_publication = _is_english_page_spec(page_spec)
+        labels = (
+            {
+                "tap": "tap action",
+                "swipe": "swipe navigation",
+                "tap_and_swipe": "tap and swipe",
+                "single_step_transition": "single-step transition",
+                "multi_step_transition": "multi-step transition",
+            }
+            if english_publication
+            else {
+                "tap": "tap action",
+                "swipe": "swipe navigation",
+                "tap_and_swipe": "tap and swipe",
+                "single_step_transition": "single-step transition",
+                "multi_step_transition": "multi-step transition",
+            }
+        )
         for item in guidance.interaction_guidance:
             use_case_id = self._flow_use_case(context, item.value)
             if use_case_id is None:
@@ -935,7 +1232,11 @@ class RetrievalGuidedPageSpecBuilder:
                         role="interaction_flow",
                         item=item,
                         rule=f"interaction_guidance:v1:semantic_use_case_match:{item.value}",
-                        reason="轮转 use-case trace 单独不足；用例标题、目标和预期结果未支持该流程模式。",
+                        reason=(
+                            "The use-case trace alone is insufficient; the "
+                            "title, goal, and expected outcome do not support "
+                            "this flow pattern."
+                        ),
                     )
                 )
                 continue
@@ -948,12 +1249,19 @@ class RetrievalGuidedPageSpecBuilder:
                         role="interaction_flow",
                         item=item,
                         rule=f"interaction_guidance:v1:duplicate_for_use_case:{item.value}",
-                        reason="该用例已有同类、更早的流程指导，避免冲突叠加。",
+                        reason=(
+                            "This use case already has an earlier guidance item "
+                            "of the same kind; avoid stacking conflicting changes."
+                        ),
                     )
                 )
                 continue
             interaction = self._primary_interaction(page_spec, use_case_id)
-            phrase = f"；流程表达：{labels[item.value]}"
+            phrase = (
+                f"; interaction pattern: {labels[item.value]}"
+                if english_publication
+                else f"; interaction pattern: {labels[item.value]}"
+            )
             if phrase not in interaction.action:
                 interaction.action += phrase
             adopted.append(
@@ -963,7 +1271,11 @@ class RetrievalGuidedPageSpecBuilder:
                     role="interaction_flow",
                     item=item,
                     rule=f"interaction_guidance:v1:semantic_use_case_match:{item.value}",
-                    reason="流程受控值与用例语义确定性匹配，仅调整交互表达，不制造新业务。",
+                    reason=(
+                        "The controlled flow value deterministically matches the "
+                        "use-case semantics and only adjusts interaction wording; "
+                        "it does not create new business behavior."
+                    ),
                     affected_fields=(AffectedPageSpecField(interaction.interaction_id, "action"),),
                 )
             )
@@ -979,6 +1291,7 @@ class RetrievalGuidedPageSpecBuilder:
         fallback: list[GuidanceDecision],
     ) -> None:
         adopted_keys: set[tuple[str, str]] = set()
+        english_publication = _is_english_page_spec(page_spec)
         for item in guidance.implementation_guidance:
             relevant = (
                 item.category == "resource_constraint"
@@ -994,7 +1307,11 @@ class RetrievalGuidedPageSpecBuilder:
                         role="implementation",
                         item=item,
                         rule=f"implementation_guidance:v1:context_or_structure_gate:{item.value}",
-                        reason="实现受控值与当前 context 无关，不能改变 builder constraint。",
+                        reason=(
+                            "The implementation value is unrelated to the "
+                            "current context and cannot change a builder "
+                            "constraint."
+                        ),
                     )
                 )
                 continue
@@ -1006,15 +1323,37 @@ class RetrievalGuidedPageSpecBuilder:
                         role="implementation",
                         item=item,
                         rule=f"implementation_guidance:v1:duplicate:{item.value}",
-                        reason="相同实现结构或资源约束已采用，避免重复 constraint。",
+                        reason=(
+                            "The same implementation structure or resource "
+                            "constraint is already adopted; avoid duplication."
+                        ),
                     )
                 )
                 continue
-            description = (
-                "检索实现参考仅用于组织稳定的单页结构，不复制其业务内容。"
-                if item.value == "reference_structure"
-                else f"检索实现参考允许按 {item.value} 组织结构或资源；引用必须保持项目相对路径或 HTTPS。"
-            )
+            if item.value == "reference_structure":
+                description = (
+                    "Retrieved implementation guidance only organizes a "
+                    "stable single-page structure; it does not copy business "
+                    "content."
+                    if english_publication
+                    else (
+                        "Retrieved implementation guidance only organizes a "
+                        "stable single-page structure; it does not copy "
+                        "business content."
+                    )
+                )
+            else:
+                description = (
+                    f"Retrieved implementation guidance may organize "
+                    f"structure or resources using {item.value}; references "
+                    "must remain project-relative paths or HTTPS."
+                    if english_publication
+                    else (
+                        f"Retrieved implementation guidance may organize "
+                        f"structure or resources using {item.value}; references "
+                        "must remain project-relative paths or HTTPS."
+                    )
+                )
             constraint = _append_constraint(
                 page_spec,
                 f"implementation-{item.category}-{item.value}",
@@ -1027,7 +1366,10 @@ class RetrievalGuidedPageSpecBuilder:
                     role="implementation",
                     item=item,
                     rule=f"implementation_guidance:v1:sourced_constraint:{item.value}",
-                    reason="实现指导只形成有来源的 builder constraint，不扩展业务。",
+                    reason=(
+                        "Implementation guidance only creates a sourced "
+                        "builder constraint and does not expand business scope."
+                    ),
                     affected_fields=(AffectedPageSpecField(constraint.constraint_id, "description"),),
                 )
             )
@@ -1057,12 +1399,37 @@ class RetrievalGuidedPageSpecBuilder:
         fallback: list[GuidanceDecision],
     ) -> None:
         adopted_values: set[str] = set()
+        english_publication = _is_english_page_spec(page_spec)
         constraints_text = " ".join(context.constraints).casefold()
-        recovery_declared = _contains_any(constraints_text, ("恢复", "重试", "修改", "手动", "recover", "retry"))
+        recovery_declared = _contains_any(
+            constraints_text,
+            (
+                "\u6062\u590d",
+                "\u91cd\u8bd5",
+                "\u4fee\u6539",
+                "\u624b\u52a8",
+                "recover",
+                "retry",
+            ),
+        )
         gates = {
             "empty_state": _context_has(context, "empty_state"),
-            "retry_recovery": recovery_declared and _contains_any(constraints_text, ("错误", "失败", "输入", "retry", "error")),
-            "permission_recovery": recovery_declared and _contains_any(constraints_text, ("权限", "拒绝", "permission")),
+            "retry_recovery": recovery_declared
+            and _contains_any(
+                constraints_text,
+                (
+                    "\u9519\u8bef",
+                    "\u5931\u8d25",
+                    "\u8f93\u5165",
+                    "retry",
+                    "error",
+                ),
+            ),
+            "permission_recovery": recovery_declared
+            and _contains_any(
+                constraints_text,
+                ("\u6743\u9650", "\u62d2\u7edd", "permission"),
+            ),
         }
         for item in guidance.validation_guidance:
             if item.value == "regression_case" or item.category == "validation_reference_uri":
@@ -1073,7 +1440,11 @@ class RetrievalGuidedPageSpecBuilder:
                         role="validation",
                         item=item,
                         rule="validation_guidance:v1:evidence_only",
-                        reason="通用回归案例或外部 URI 只作为证据，不能单独新增验收行为。",
+                        reason=(
+                            "Generic regression cases and external URIs are "
+                            "evidence only; they cannot create acceptance "
+                            "behavior by themselves."
+                        ),
                     )
                 )
                 continue
@@ -1085,7 +1456,11 @@ class RetrievalGuidedPageSpecBuilder:
                         role="validation",
                         item=item,
                         rule=f"validation_guidance:v1:supported_gate:{item.value}",
-                        reason="只有 empty_state、retry_recovery、permission_recovery 可在本版本受门控采用。",
+                        reason=(
+                            "Only empty_state, retry_recovery, and "
+                            "permission_recovery are gated values supported in "
+                            "this version."
+                        ),
                     )
                 )
                 continue
@@ -1097,7 +1472,10 @@ class RetrievalGuidedPageSpecBuilder:
                         role="validation",
                         item=item,
                         rule=f"validation_guidance:v1:explicit_context_gate:{item.value}",
-                        reason="当前原始需求或显式 constraint 未建立该异常/恢复边界。",
+                        reason=(
+                            "The original requirement or an explicit constraint "
+                            "does not establish this error or recovery boundary."
+                        ),
                     )
                 )
                 continue
@@ -1109,7 +1487,10 @@ class RetrievalGuidedPageSpecBuilder:
                         role="validation",
                         item=item,
                         rule=f"validation_guidance:v1:duplicate:{item.value}",
-                        reason="同类 validation 已有更早来源被采用。",
+                        reason=(
+                            "An earlier validation source of the same kind is "
+                            "already adopted."
+                        ),
                     )
                 )
                 continue
@@ -1135,8 +1516,20 @@ class RetrievalGuidedPageSpecBuilder:
                         f"component-{token}-guided-validation-empty-trigger",
                         section.section_id,
                         "primary_action",
-                        "查看空结果示例",
-                        "离线验证需求明确的空结果边界。",
+                        (
+                            "Review an empty result"
+                            if english_publication
+                            else "Review an empty result"
+                        ),
+                        (
+                            "Validate the explicitly requested empty-result "
+                            "boundary offline."
+                            if english_publication
+                            else (
+                                "Validate the explicitly requested empty-result "
+                                "boundary offline."
+                            )
+                        ),
                     )
                     page_spec.components.append(action)
                     section.component_ids.insert(max(len(section.component_ids) - 1, 0), action.component_id)
@@ -1150,9 +1543,17 @@ class RetrievalGuidedPageSpecBuilder:
                         interaction_id,
                         action.component_id,
                         "state-initial",
-                        "展示当前筛选条件下的空结果反馈",
+                        (
+                            "Show the empty result for the current filters"
+                            if english_publication
+                            else "Show the empty result for the current filters"
+                        ),
                         empty_state.state_id,
-                        "没有匹配数据，可清除筛选后重试。",
+                        (
+                            "No data matches. Clear the filters and try again."
+                            if english_publication
+                            else "No data matches. Clear the filters and try again."
+                        ),
                         [use_case_id],
                     )
                     page_spec.interactions.append(interaction)
@@ -1166,7 +1567,17 @@ class RetrievalGuidedPageSpecBuilder:
                 check = _append_acceptance(
                     page_spec,
                     f"empty-{use_case_id}",
-                    "在需求明确的无匹配数据场景中，页面应显示空状态并保留恢复提示。",
+                    (
+                        "When the requirement declares a no-match scenario, "
+                        "the page must show an empty state and retain a "
+                        "recovery action."
+                        if english_publication
+                        else (
+                            "When the requirement declares a no-match scenario, "
+                            "the page must show an empty state and retain a "
+                            "recovery action."
+                        )
+                    ),
                     use_case_id,
                     empty_state.state_id,
                 )
@@ -1187,15 +1598,42 @@ class RetrievalGuidedPageSpecBuilder:
                             role="validation",
                             item=item,
                             rule=f"validation_guidance:v1:existing_recovery_path:{item.value}",
-                            reason="context 未生成可追溯恢复路径，validation 不能独立制造恢复行为。",
+                            reason=(
+                                "The context did not produce a traceable recovery "
+                                "path; validation cannot create one independently."
+                            ),
                         )
                     )
                     continue
-                label = "权限拒绝恢复" if item.value == "permission_recovery" else "输入错误重试"
+                label = (
+                    (
+                        "permission-denial recovery"
+                        if item.value == "permission_recovery"
+                        else "invalid-input retry"
+                    )
+                    if english_publication
+                    else (
+                        "permission-denial recovery"
+                        if item.value == "permission_recovery"
+                        else "invalid-input retry"
+                    )
+                )
                 check = _append_acceptance(
                     page_spec,
                     f"{item.value}-{use_case_id}",
-                    f"在用户明确的{label}边界下，恢复后应允许重新执行原有核心流程；检索案例只补充验收边界。",
+                    (
+                        f"At the explicitly requested {label} boundary, "
+                        "recovery must allow the original primary flow to run "
+                        "again; retrieved examples only supplement the "
+                        "acceptance boundary."
+                        if english_publication
+                        else (
+                            f"At the explicitly requested {label} boundary, "
+                            "recovery must allow the original primary flow to "
+                            "run again; retrieved examples only supplement "
+                            "the acceptance boundary."
+                        )
+                    ),
                     use_case_id,
                     "state-initial",
                 )
@@ -1208,7 +1646,11 @@ class RetrievalGuidedPageSpecBuilder:
                     role="validation",
                     item=item,
                     rule=f"validation_guidance:v1:explicit_context_gate:{item.value}",
-                    reason="validation 与原始需求或显式 constraint 一致，只补充状态/恢复验收。",
+                    reason=(
+                        "Validation is consistent with the original requirement "
+                        "or explicit constraint and only supplements state and "
+                        "recovery acceptance."
+                    ),
                     affected_fields=affected,
                 )
             )

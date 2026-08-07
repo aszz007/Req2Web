@@ -29,14 +29,17 @@ from req2web_rag.corpus import ROLE_ORDER  # noqa: E402
 
 
 ECOMMERCE_REQUIREMENT = (
-    "我想做一个移动端电商应用，支持搜索筛选商品、查看详情、加入购物车和结算，"
-    "需要清楚的异常反馈。"
+    "Create a mobile commerce page with product search and filters, product "
+    "details, a cart, checkout, and clear error feedback."
 )
 PET_REQUIREMENT = (
-    "做一个宠物情绪识别 App，用户拍照后系统分析宠物情绪并展示结果，"
-    "相机权限被拒绝时要给出恢复提示。"
+    "Create a mobile pet-emotion recognition app that analyzes a photo, "
+    "presents the result, and provides recovery guidance when camera "
+    "permission is denied."
 )
-ECOMMERCE_RECOVERY_CONSTRAINT = "输入错误时给出可恢复提示"
+ECOMMERCE_RECOVERY_CONSTRAINT = (
+    "Provide recoverable guidance after invalid input."
+)
 
 
 class FixtureRetriever:
@@ -424,8 +427,11 @@ class ResultPackageTest(unittest.TestCase):
             (item["action"], item["target_state_id"])
             for item in summary["interaction_flow"]
         }
-        self.assertIn(("模拟输入错误", "state-error"), transitions)
-        self.assertIn(("恢复：修改输入并重试", "state-initial"), transitions)
+        self.assertIn(("Simulate invalid input", "state-error"), transitions)
+        self.assertIn(
+            ("Recover by updating the input", "state-initial"),
+            transitions,
+        )
 
     def test_failed_consistency_report_is_rejected(self) -> None:
         with self.assertRaisesRegex(ResultPackageError, "did not pass"):

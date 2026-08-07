@@ -593,15 +593,16 @@ class DeterministicResultPackager:
         page_spec: PageSpec,
         consistency_report: ConsistencyReport,
     ) -> dict[str, Any]:
-        use_case_text = "；".join(
-            f"{item.title}：{item.expected_outcome}" for item in page_spec.use_cases
+        use_case_text = "; ".join(
+            f"{item.title}: {item.expected_outcome}"
+            for item in page_spec.use_cases
         )
-        constraint_text = "；".join(
+        constraint_text = "; ".join(
             item.description for item in page_spec.constraints
         )
         text_description = (
-            f"{page_spec.title}。{page_spec.summary}"
-            f"核心用例：{use_case_text}。约束：{constraint_text}。"
+            f"{page_spec.title}. {page_spec.summary}. "
+            f"Core use cases: {use_case_text}. Constraints: {constraint_text}."
         )
         ui_references = [
             {

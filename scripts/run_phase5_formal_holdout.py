@@ -1,4 +1,4 @@
-"""Run the owner-sealed Phase 5 formal holdout or its synthetic validation."""
+"""Run Phase 5 no-model validation under the inherited Phase 4 authority."""
 
 from __future__ import annotations
 
@@ -25,6 +25,7 @@ from req2web_runtime.phase5_formal_qwen_worker import (  # noqa: E402
     Phase5FormalQwenWorkerFactory,
 )
 from req2web_runtime.phase5_formal_runner import (  # noqa: E402
+    PHASE5_FORMAL_EXECUTION_STATUS,
     Phase5FormalRunnerError,
     run_phase5_formal_runner,
     synthetic_phase5_worker_factory,
@@ -39,9 +40,9 @@ from req2web_runtime.phase5_sealed_action_package import (  # noqa: E402
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description=(
-            "Run the sealed Phase 5 F1-F4 holdout with one isolated worker per "
-            "runtime row, one generate call per node, raw-first capture, no "
-            "retry, and no in-run owner evaluation."
+            "Phase 5 inherits the accepted Phase 4 canonical authorities. "
+            "Only the tracked synthetic/no-model validation mode is currently "
+            "available; formal model/H1 action remains independently disabled."
         )
     )
     parser.add_argument("--action-package", required=True, type=Path)
@@ -65,8 +66,8 @@ def build_parser() -> argparse.ArgumentParser:
         "--confirm-formal-holdout-action",
         action="store_true",
         help=(
-            "Confirm the already owner-authorized real model/GPU action. "
-            "This flag is required for a formal package."
+            "Reserved for a future separately authorized model/H1 action. It "
+            "cannot override the current no-model gate."
         ),
     )
     return parser
@@ -151,6 +152,11 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     _offline_process()
     try:
+        if args.synthetic_validation_only is not True:
+            raise Phase5FormalRunnerError(
+                f"{PHASE5_FORMAL_EXECUTION_STATUS}: real Phase 5 package "
+                "access and model/H1 action remain disabled"
+            )
         package = _load_package(
             args.action_package,
             synthetic=args.synthetic_validation_only,

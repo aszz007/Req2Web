@@ -15,7 +15,9 @@ from typing import Mapping
 
 PROMPT_AUTHORITY_SCHEMA_VERSION = "req2web.agent.f1_f4_prompt_authority.v1"
 PROMPT_SCHEMA_VERSION = "req2web.agent.f1_f4_prompt.v1"
-PROMPT_AUTHORITY_REVISION = "f3_f4_explicit_actual_state_plan_a07a_direct_v3"
+PROMPT_AUTHORITY_REVISION = (
+    "f3_f4_explicit_actual_state_plan_a07a_direct_english_v4"
+)
 REGISTRY_REVISION = "req2web.phase4.registry.p4_02a.v1"
 NODE_ORDER = ("F1", "F2", "F3", "F4")
 
@@ -200,6 +202,13 @@ def _base_instructions() -> list[str]:
         "Preserve the required node schema and semantic array order.",
         "Do not emit authoritative IDs, mappings, acceptance verdicts, or browser evidence.",
         "Do not abbreviate, truncate, omit, or split the object.",
+        (
+            "Write every user-visible natural-language value in English only. "
+            "This includes page titles, section and component copy, state "
+            "names and descriptions, interaction actions and feedback, and "
+            "acceptance descriptions. Do not emit Han characters or CJK "
+            "punctuation in those fields."
+        ),
         "F4 must emit candidate acceptance semantics only.",
         "The shared direct-v3 authority may not change the registry, mapping, composition, assembler, consistency, acceptance, repair, or fallback authorities.",
     ]

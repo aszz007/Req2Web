@@ -1,10 +1,12 @@
-"""Case-isolated Qwen worker for the sealed Phase 5 action runner.
+"""Paused case-isolated Qwen worker for the Phase 5 action runner.
 
 This module reuses the Phase 4 BF16/no-quantization loader and complete-JSON
 stopping behavior, but validates the distinct Phase 5 route-specific input
 schema.
 Importing the module performs no model, GPU, subprocess, network, or remote
-action.
+action.  Phase 5 now binds the accepted Phase 4 canonical authorities, but
+starting the worker remains fail-closed until the separate model/H1 action
+gate is explicitly opened.
 """
 
 from __future__ import annotations
@@ -35,10 +37,21 @@ from . import phase5_formal_runner as _formal
 
 WORKER_PROTOCOL = "req2web.phase5.formal_qwen_worker.v1"
 STREAM_SCHEMA_VERSION = "req2web.phase5.formal_qwen_stream.v1"
+PHASE5_FORMAL_MODEL_ACTION_ENABLED = (
+    _formal.PHASE5_FORMAL_MODEL_ACTION_ENABLED
+)
 
 
 class Phase5FormalQwenWorkerError(_formal.Phase5FormalRunnerError):
     """Raised when the real worker/supervisor must fail closed."""
+
+
+def _require_phase5_formal_model_action_enabled() -> None:
+    if PHASE5_FORMAL_MODEL_ACTION_ENABLED is not True:
+        raise Phase5FormalQwenWorkerError(
+            "Phase 5 canonical authority is inherited, but formal model/H1 "
+            "action remains disabled"
+        )
 
 
 def _b64(raw: bytes) -> str:
@@ -155,10 +168,13 @@ def validate_phase5_formal_generation_artifacts(
     expected_prompt_keys = {
         "schema_version",
         "prompt_revision",
+        "prompt_authority_identity",
         "node_id",
+        "input_schema_version",
         "input_identity",
         "output_format",
         "instructions",
+        "node_output_keys",
         "exact_output_contract",
     }
     if node_id == "F3":
@@ -169,14 +185,17 @@ def validate_phase5_formal_generation_artifacts(
         raise Phase5FormalQwenWorkerError("formal worker prompt keys drifted")
     if (
         prompt["schema_version"] != _formal.NODE_PROMPT_SCHEMA_VERSION
-        or prompt["prompt_revision"]
-        != (
-            _formal.PATH2_PROMPT_REVISION
-            if static_keys[0] == "path2_static_projection"
-            else _formal.PROMPT_REVISION
-        )
+        or prompt["prompt_revision"] != _formal.PROMPT_REVISION
+        or prompt["prompt_authority_identity"]
+        != _formal.PROMPT_AUTHORITY_IDENTITY
         or prompt["node_id"] != node_id
-        or prompt["input_identity"] != _formal._identity(input_bytes)
+        or prompt["input_schema_version"] != _formal.NODE_INPUT_SCHEMA_VERSION
+        or not isinstance(prompt["input_identity"], dict)
+        or prompt["input_identity"].get("sha256")
+        != "sha256:" + _formal._sha(input_bytes)
+        or prompt["input_identity"].get("byte_length") != len(input_bytes)
+        or prompt["input_identity"].get("revision")
+        != _formal.NODE_INPUT_SCHEMA_VERSION
     ):
         raise Phase5FormalQwenWorkerError("formal worker prompt binding drifted")
     if set(config) != {
@@ -379,6 +398,7 @@ class _Phase5FormalBackend(_remote._RemoteTransformersBackend):
 def run_worker_protocol(*, model_root: Path) -> int:
     """Child entrypoint; stdout is strict IPC and stderr is stream events."""
 
+    _require_phase5_formal_model_action_enabled()
     _offline_process()
     worker_id = f"phase5-formal-worker-{uuid.uuid4().hex}"
     generated_nodes: set[str] = set()
@@ -628,6 +648,7 @@ class Phase5FormalQwenWorker:
         profile: RemoteFreshIntegratedProfile,
         console: object | None = None,
     ) -> None:
+        _require_phase5_formal_model_action_enabled()
         if (
             not isinstance(model_root, Path)
             or not model_root.is_dir()
@@ -900,6 +921,7 @@ if __name__ == "__main__":
 
 
 __all__ = [
+    "PHASE5_FORMAL_MODEL_ACTION_ENABLED",
     "Phase5FormalQwenWorker",
     "Phase5FormalQwenWorkerError",
     "Phase5FormalQwenWorkerFactory",

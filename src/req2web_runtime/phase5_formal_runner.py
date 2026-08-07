@@ -1,13 +1,15 @@
-"""Sealed Phase 5 formal runner with a synthetic no-model validation backend.
+"""No-model Phase 5 preparation bound to the accepted Phase 4 authorities.
 
-The runner consumes an owner-sealed action package, builds the minimum Path 1
-Provider view for F1-F4, preserves every raw response before parsing, reuses
-the accepted Phase 4 validators/registry/composition through the formal
-facade, and stops at an assembled candidate pending owner-only evaluation.
+The synthetic backend is a component test only. It builds the minimum
+route-specific Provider view for F1-F4, preserves every synthetic raw response
+before parsing, and runs the shared Phase 4 prompt, LangGraph topology, domain
+validators, registry, mapping, composition, and assembler.
 
 Real hidden inputs and result roots are owner-custody material and must stay
 outside the repository.  The tracked synthetic fixture exercises structure
-only; it is not H1, model, GPU, remote, or formal-quality evidence.
+only; it is not the active workflow, H1, model, GPU, remote, or formal-quality
+evidence. Phase 4 is closed, but real package execution remains fail-closed at
+the separate model/H1 action gate and may not enable this historical loop.
 """
 
 from __future__ import annotations
@@ -23,24 +25,47 @@ from pathlib import Path
 import time
 from typing import Callable, Mapping, Protocol, Sequence
 
-from req2web_agent import AgentContextBundle, UseCase
+from req2web_agent import (
+    AgentContextBundle,
+    PROMPT_AUTHORITY_IDENTITY,
+    PROMPT_AUTHORITY_REVISION,
+    PROMPT_SCHEMA_VERSION as SHARED_PROMPT_SCHEMA_VERSION,
+    UseCase,
+    build_canonical_f1_f4_prompt,
+)
+from req2web_acceptance import (
+    SEMANTIC_ALIGNMENT_CONTRACT_REVISION,
+    SEMANTIC_ALIGNMENT_REQUEST_SCHEMA_VERSION,
+    SEMANTIC_ALIGNMENT_RESULT_SCHEMA_VERSION,
+)
 from req2web_generation import RetrievalGuidanceBuilder
+from req2web_orchestration.phase4_canonical_b_adapter import ADAPTER_REVISION
 from req2web_orchestration.phase4_graph import (
+    NO_CAPTURE_SHA256,
+    REAL_MODEL_SOURCE_KIND,
+    REAL_MODEL_GRAPH_REVISION,
     REGISTRY_REVISION,
-    phase4_assemble_candidate,
-    phase4_compose_sealed_formal_candidate,
-    phase4_create_sealed_formal_authority_state,
-    phase4_create_sealed_formal_mapping,
-    phase4_project_sealed_formal_node_input_authority,
-    phase4_register_sealed_formal_node_output,
+    Phase4RealModelGraphRuntime,
+    create_real_model_graph_state,
+    make_identity,
+    make_real_model_raw_capture,
     phase4_synthetic_fixture_output,
+    phase4_validate_node_output,
 )
 from req2web_rag.corpus import ROLE_ORDER
-
-from .phase5_action_authority import (
-    Phase5FinalActionAuthority,
-    validate_phase5_action_authority_against_package,
+from req2web_runtime.phase4_browser_acceptance import (
+    CANARY_RECEIPT_SCHEMA_VERSION as PHASE4_BROWSER_CANARY_SCHEMA_VERSION,
+    CASE_AUDIT_SCHEMA_VERSION as PHASE4_BROWSER_AUDIT_SCHEMA_VERSION,
+    FINAL_BROWSER_SUMMARY_SCHEMA_VERSION as PHASE4_BROWSER_SUMMARY_SCHEMA_VERSION,
 )
+from req2web_runtime.phase4_canonical_full_flow import (
+    ACTIVE_DEFAULT_ENTRY as PHASE4_CANONICAL_ACTIVE_DEFAULT_ENTRY,
+    FLOW_AUTHORITY_ROLE as PHASE4_CANONICAL_FLOW_AUTHORITY_ROLE,
+    FLOW_SCHEMA_VERSION as PHASE4_CANONICAL_FLOW_SCHEMA_VERSION,
+    run_phase4_canonical_full_flow,
+)
+
+from .phase5_action_authority import Phase5FinalActionAuthority
 from .phase5_sealed_action_package import (
     PATH2_ROUTE,
     Phase5SealedActionPackage,
@@ -52,7 +77,7 @@ RUNNER_SCHEMA_VERSION = "req2web.phase5.formal_runner.v1"
 RUN_MANIFEST_SCHEMA_VERSION = "req2web.phase5.formal_run_manifest.v1"
 RUN_CLOCK_SCHEMA_VERSION = "req2web.phase5.formal_run_clock.v1"
 NODE_INPUT_SCHEMA_VERSION = "req2web.phase5.formal_node_input.v1"
-NODE_PROMPT_SCHEMA_VERSION = "req2web.phase5.formal_node_prompt.v1"
+NODE_PROMPT_SCHEMA_VERSION = SHARED_PROMPT_SCHEMA_VERSION
 NODE_CONFIG_SCHEMA_VERSION = "req2web.phase5.formal_node_config.v1"
 NODE_REQUEST_SCHEMA_VERSION = "req2web.phase5.formal_node_request.v1"
 PRE_CALL_SCHEMA_VERSION = "req2web.phase5.formal_pre_call_record.v1"
@@ -64,8 +89,24 @@ CALL_EVENT_SCHEMA_VERSION = "req2web.phase5.formal_call_event.v1"
 CALL_LEDGER_SCHEMA_VERSION = "req2web.phase5.formal_call_ledger.v1"
 CASE_RESULT_SCHEMA_VERSION = "req2web.phase5.formal_case_result.v1"
 RUN_SUMMARY_SCHEMA_VERSION = "req2web.phase5.formal_run_summary.v1"
-PROMPT_REVISION = "phase5_path1_f3_f4_explicit_plan_v1"
-PATH2_PROMPT_REVISION = "phase5_path2_f3_f4_explicit_plan_v1"
+PHASE5_FORMAL_EXECUTION_STATUS = (
+    "canonical_phase4_authority_inherited_no_model_action"
+)
+PHASE5_FORMAL_MODEL_ACTION_ENABLED = False
+PHASE4_CLOSURE_AUTHORITY_COMMIT = (
+    "87795d0cb6e97f9568f7313bb2a26427652153b4"
+)
+ACCEPTED_PHASE4_CANONICAL_FULL_FLOW_RUNNER = (
+    "scripts/run_phase4_canonical_full_flow.py"
+    "@3612ad4d64c7a44d890c6c6f4e022b07e072d3bb"
+)
+SYNTHETIC_VALIDATION_FLOW_ROLE = (
+    "shared_phase4_langgraph_synthetic_no_model_validation_only"
+)
+HISTORICAL_PROMPT_REVISION = "phase5_path1_f3_f4_explicit_plan_v1"
+HISTORICAL_PATH2_PROMPT_REVISION = "phase5_path2_f3_f4_explicit_plan_v1"
+PROMPT_REVISION = PROMPT_AUTHORITY_REVISION
+PATH2_PROMPT_REVISION = PROMPT_AUTHORITY_REVISION
 NODE_ORDER = ("F1", "F2", "F3", "F4")
 MODEL_CONTEXT_TOKENS = 262_144
 PER_NODE_TIMEOUT_SECONDS = 1_200
@@ -102,6 +143,23 @@ _PROHIBITED_PROVIDER_KEYS = {
 
 class Phase5FormalRunnerError(ValueError):
     """Raised when a sealed formal run must fail closed."""
+
+
+def _validate_inherited_phase4_authority() -> None:
+    if (
+        PHASE4_CANONICAL_ACTIVE_DEFAULT_ENTRY is not True
+        or PHASE4_CANONICAL_FLOW_AUTHORITY_ROLE
+        != "active_canonical_full_flow"
+        or run_phase4_canonical_full_flow.__module__
+        != "req2web_runtime.phase4_canonical_full_flow"
+        or build_canonical_f1_f4_prompt.__module__
+        != "req2web_agent.prompt_authority"
+        or Phase4RealModelGraphRuntime.__module__
+        != "req2web_orchestration.phase4_graph"
+    ):
+        raise Phase5FormalRunnerError(
+            "accepted Phase 4 canonical authority symbols drifted"
+        )
 
 
 class Phase5CaseWorker(Protocol):
@@ -219,7 +277,11 @@ def _read_canonical(path: Path, name: str) -> dict[str, object]:
     return value
 
 
-def _formal_b_input(row: Mapping[str, object]) -> dict[str, object]:
+def _sealed_formal_canonical_b_projection(
+    row: Mapping[str, object],
+) -> dict[str, object]:
+    """Project owner-sealed canonical fields into the shared P4 validator."""
+
     source = row["b_input"]
     if not isinstance(source, Mapping):
         raise Phase5FormalRunnerError("sealed action B input is invalid")
@@ -685,7 +747,7 @@ def _output_contract(node_id: str) -> dict[str, object]:
     return copy.deepcopy(contracts[node_id])
 
 
-def _node_prompt(node_id: str, input_bytes: bytes) -> bytes:
+def _historical_phase5_node_prompt(node_id: str, input_bytes: bytes) -> bytes:
     input_value = _strict_json(input_bytes, f"{node_id} formal input")
     if not isinstance(input_value, Mapping):
         raise Phase5FormalRunnerError(f"{node_id} formal input is invalid")
@@ -744,6 +806,42 @@ def _node_prompt(node_id: str, input_bytes: bytes) -> bytes:
             ),
         ]
     return _canonical(value)
+
+
+def _node_prompt(node_id: str, input_bytes: bytes) -> bytes:
+    """Build Phase 5 prompts through the project-wide shared authority."""
+
+    input_value = _strict_json(input_bytes, f"{node_id} formal input")
+    if not isinstance(input_value, Mapping):
+        raise Phase5FormalRunnerError(f"{node_id} formal input is invalid")
+    dynamic = input_value["same_run_validated_upstream_projection"]
+    static_keys = [
+        key
+        for key in ("path1_static_projection", "path2_static_projection")
+        if key in input_value
+    ]
+    if len(static_keys) != 1:
+        raise Phase5FormalRunnerError(
+            f"{node_id} formal static projection route is invalid"
+        )
+    static = input_value[static_keys[0]]
+    if not isinstance(dynamic, Mapping) or not isinstance(static, Mapping):
+        raise Phase5FormalRunnerError(f"{node_id} formal projections are invalid")
+    try:
+        return build_canonical_f1_f4_prompt(
+            node_id=node_id,
+            input_bytes=input_bytes,
+            required_interaction_plan=(
+                _f3_plan(dynamic) if node_id == "F3" else None
+            ),
+            required_acceptance_target_plan=(
+                _f4_plan(static, dynamic) if node_id == "F4" else None
+            ),
+        )
+    except ValueError as exc:
+        raise Phase5FormalRunnerError(
+            "shared F1-F4 prompt authority rejected the Phase 5 projection"
+        ) from exc
 
 
 def _node_config(
@@ -1238,11 +1336,54 @@ def _run_manifest(package: Phase5SealedActionPackage) -> dict[str, object]:
         ],
         "node_order": list(NODE_ORDER),
         "runtime_row_count": len(payload["runtime_rows"]),
-        "prompt_revision": (
-            PATH2_PROMPT_REVISION
-            if payload["route"] == PATH2_ROUTE
-            else PROMPT_REVISION
+        "prompt_revision": PROMPT_AUTHORITY_REVISION,
+        "prompt_authority_identity": copy.deepcopy(PROMPT_AUTHORITY_IDENTITY),
+        "historical_phase_specific_prompt_revisions": [
+            HISTORICAL_PROMPT_REVISION,
+            HISTORICAL_PATH2_PROMPT_REVISION,
+        ],
+        "historical_phase_specific_prompts_are_runtime_sources": False,
+        "phase5_formal_execution_status": PHASE5_FORMAL_EXECUTION_STATUS,
+        "accepted_phase4_canonical_full_flow_runner": (
+            ACCEPTED_PHASE4_CANONICAL_FULL_FLOW_RUNNER
         ),
+        "phase4_closure_authority_commit": (
+            PHASE4_CLOSURE_AUTHORITY_COMMIT
+        ),
+        "phase4_canonical_flow_schema_version": (
+            PHASE4_CANONICAL_FLOW_SCHEMA_VERSION
+        ),
+        "phase4_canonical_b_adapter_revision": ADAPTER_REVISION,
+        "phase4_real_model_graph_revision": REAL_MODEL_GRAPH_REVISION,
+        "phase4_real_model_graph_runtime_class": (
+            Phase4RealModelGraphRuntime.__name__
+        ),
+        "phase4_browser_audit_schema_version": (
+            PHASE4_BROWSER_AUDIT_SCHEMA_VERSION
+        ),
+        "phase4_browser_canary_schema_version": (
+            PHASE4_BROWSER_CANARY_SCHEMA_VERSION
+        ),
+        "phase4_browser_summary_schema_version": (
+            PHASE4_BROWSER_SUMMARY_SCHEMA_VERSION
+        ),
+        "semantic_alignment_contract_revision": (
+            SEMANTIC_ALIGNMENT_CONTRACT_REVISION
+        ),
+        "semantic_alignment_request_schema_version": (
+            SEMANTIC_ALIGNMENT_REQUEST_SCHEMA_VERSION
+        ),
+        "semantic_alignment_result_schema_version": (
+            SEMANTIC_ALIGNMENT_RESULT_SCHEMA_VERSION
+        ),
+        "phase5_independent_b_allowed": False,
+        "phase5_independent_prompt_allowed": False,
+        "phase5_manual_formal_f1_f4_loop_allowed": False,
+        "phase5_manual_f1_f4_loop_used": False,
+        "phase5_independent_downstream_allowed": False,
+        "synthetic_validation_flow_role": SYNTHETIC_VALIDATION_FLOW_ROLE,
+        "shared_phase4_langgraph_used_for_synthetic_validation": True,
+        "synthetic_validation_is_active_full_flow": False,
         "case_boundary_recovery_only": True,
         "partial_case_generate_resume_allowed": False,
         "automatic_retry_allowed": False,
@@ -1449,8 +1590,9 @@ def run_phase5_formal_runner(
     hourly_rate_minor_units: int = 0,
     console: object | None = None,
 ) -> dict[str, object]:
-    """Execute sealed rows with one case-bound worker and no automatic retry."""
+    """Run the synthetic structure check or fail closed at the formal gate."""
 
+    _validate_inherited_phase4_authority()
     package.validate()
     payload = package.to_dict()
     if payload["package_kind"] == "synthetic_validation_only":
@@ -1462,27 +1604,16 @@ def run_phase5_formal_runner(
             raise Phase5FormalRunnerError(
                 "synthetic runner execution must not carry final action authority"
             )
-    elif payload["package_kind"] not in {
+    elif payload["package_kind"] in {
         "owner_sealed_formal_h1",
         "project_authored_path2_model_pilot",
     }:
-        raise Phase5FormalRunnerError("formal package kind is unsupported")
-    else:
-        if action_authority is None:
-            raise Phase5FormalRunnerError(
-                "formal runner requires final action authority"
-            )
-        validate_phase5_action_authority_against_package(
-            action_authority,
-            package,
+        raise Phase5FormalRunnerError(
+            "Phase 5 inherited the accepted Phase 4 canonical authority, "
+            "but formal model/H1 action remains disabled"
         )
-        authority_payload = action_authority.to_dict()
-        if hourly_rate_minor_units != authority_payload["limits"][
-            "hourly_rate_minor_units"
-        ]:
-            raise Phase5FormalRunnerError(
-                "formal hourly rate drifted from final action authority"
-            )
+    else:
+        raise Phase5FormalRunnerError("formal package kind is unsupported")
     if not isinstance(result_root, Path) or not result_root.is_absolute():
         raise Phase5FormalRunnerError("formal result root must be absolute")
     if result_root.is_symlink():
@@ -1655,13 +1786,25 @@ def run_phase5_formal_runner(
             case_root / "case_binding.json",
             _canonical(binding),
         )
-        b_input = _formal_b_input(row)
-        state = phase4_create_sealed_formal_authority_state(b_input)
+        context, guidance = build_phase5_local_assembly_bindings(
+            package,
+            matrix_row_id=str(row["matrix_row_id"]),
+        )
+        written_bytes += _write_once(
+            case_root / "local_agent_context.json",
+            _canonical(context.to_dict()),
+        )
+        written_bytes += _write_once(
+            case_root / "local_retrieval_guidance.json",
+            _canonical(guidance.to_dict()),
+        )
+        b_input = _sealed_formal_canonical_b_projection(row)
         worker: Phase5CaseWorker | None = None
         supervisor_receipt: Mapping[str, object] | None = None
         node_results: list[Mapping[str, object]] = []
         error_code: str | None = None
         status = "failed_closed"
+        graph_result: Mapping[str, object] | None = None
         try:
             _pre_call_limits(
                 package_payload=payload,
@@ -1671,22 +1814,18 @@ def run_phase5_formal_runner(
                 written_bytes=written_bytes,
             )
             worker = worker_factory(row)
-            for node_id in NODE_ORDER:
-                if node_id == "F4":
-                    mapping = phase4_create_sealed_formal_mapping(state)
-                    written_bytes += _write_once(
-                        case_root / "mapping.json",
-                        _canonical(mapping),
-                    )
-                authority = phase4_project_sealed_formal_node_input_authority(
-                    state,
-                    node_id,
-                )
+
+            def node_executor(
+                node_id: str,
+                authority_state: Mapping[str, object],
+                authority: Mapping[str, object],
+            ) -> Mapping[str, object]:
+                nonlocal error_code, started_count, written_bytes
                 input_bytes = _node_input(
                     package=package,
                     matrix_row_id=str(row["matrix_row_id"]),
                     node_id=node_id,
-                    state=state,
+                    state=authority_state,
                     authority=authority,
                 )
                 prompt_bytes = _node_prompt(node_id, input_bytes)
@@ -1781,7 +1920,7 @@ def run_phase5_formal_runner(
 
                 raw: bytes | None = None
                 try:
-                    worker.bind_graph_state(state)
+                    worker.bind_graph_state(authority_state)  # type: ignore[union-attr]
                     raw = worker.generate(
                         node_id=node_id,
                         input_bytes=input_bytes,
@@ -1807,14 +1946,10 @@ def run_phase5_formal_runner(
                         raise Phase5FormalRunnerError(
                             f"{node_id} raw response root is not an object"
                         )
-                    state = phase4_register_sealed_formal_node_output(
-                        state,
+                    phase4_validate_node_output(
                         node_id,
                         parsed,
-                    )
-                    written_bytes += _write_once(
-                        attempt_root / "registered_graph_state.json",
-                        _canonical(state),
+                        authority_state,
                     )
                     attempt = _attempt_result(
                         node_id=node_id,
@@ -1823,6 +1958,12 @@ def run_phase5_formal_runner(
                         raw=raw,
                         error_code=None,
                     )
+                    raw_capture = make_real_model_raw_capture(raw)
+                    execution_status = "validated"
+                    output: Mapping[str, object] | None = copy.deepcopy(
+                        dict(parsed)
+                    )
+                    failure = None
                 except Exception as exc:
                     error_code = (
                         f"{node_id.lower()}_"
@@ -1835,50 +1976,156 @@ def run_phase5_formal_runner(
                         raw=raw,
                         error_code=error_code,
                     )
+                    raw_capture = (
+                        make_real_model_raw_capture(raw)
+                        if type(raw) is bytes and raw
+                        else {
+                            "state": "not_formed",
+                            "byte_length": 0,
+                            "sha256": NO_CAPTURE_SHA256,
+                            "source_kind": REAL_MODEL_SOURCE_KIND,
+                        }
+                    )
+                    execution_status = "failed_closed"
+                    output = None
+                    failure = {
+                        "failure_code": "phase5_formal_node_failed_closed",
+                        "failure_stage": node_id,
+                        "retry_allowed": False,
+                        "fallback_allowed": False,
+                        "message_code": type(exc).__name__,
+                    }
                 node_results.append(attempt)
                 written_bytes += _write_once(
                     attempt_root / "attempt_result.json",
                     _canonical(attempt),
                 )
-                if attempt["status"] != "raw_contract_pass":
-                    break
-            if error_code is None and len(node_results) == len(NODE_ORDER):
-                composition = phase4_compose_sealed_formal_candidate(state)
+                attempt_binding = {
+                    "phase5_attempt_result": attempt,
+                    "raw_capture": raw_capture,
+                    "input_identity": _identity(input_bytes),
+                    "prompt_identity": _identity(prompt_bytes),
+                    "config_identity": _identity(config_bytes),
+                    "request_identity": _identity(request_bytes),
+                }
+                return {
+                    "schema_version": (
+                        "req2web.phase4.real_model_node_execution.v1"
+                    ),
+                    "node_id": node_id,
+                    "status": execution_status,
+                    "source_kind": REAL_MODEL_SOURCE_KIND,
+                    "generate_call_count": int(generation_started),
+                    "raw_capture": raw_capture,
+                    "attempt_identity": make_identity(
+                        attempt_binding,
+                        revision=(
+                            "req2web.phase5.formal_langgraph_attempt.v1"
+                        ),
+                    ),
+                    "output": output,
+                    "raw_model_contract_success": (
+                        execution_status == "validated"
+                    ),
+                    "normalized_node_contract_success": (
+                        execution_status == "validated"
+                    ),
+                    "failure": failure,
+                }
+
+            def delivery_executor(
+                final_state: Mapping[str, object],
+                page_spec: Mapping[str, object],
+                assembly_report: Mapping[str, object],
+            ) -> Mapping[str, object]:
+                nonlocal written_bytes
+                mapping = final_state.get("mapping_record")
+                composition = final_state.get(
+                    "candidate_composition_record"
+                )
+                if not isinstance(mapping, Mapping) or not isinstance(
+                    composition,
+                    Mapping,
+                ):
+                    raise Phase5FormalRunnerError(
+                        "shared LangGraph delivery inputs are unavailable"
+                    )
+                written_bytes += _write_once(
+                    case_root / "mapping.json",
+                    _canonical(mapping),
+                )
                 written_bytes += _write_once(
                     case_root / "candidate_composition_record.json",
                     _canonical(composition),
                 )
-                candidate_bytes = base64.b64decode(
-                    str(composition["model_semantic_candidate_canonical_b64"]),
-                    validate=True,
-                )
-                context, guidance = build_phase5_local_assembly_bindings(
-                    package,
-                    matrix_row_id=str(row["matrix_row_id"]),
-                )
-                written_bytes += _write_once(
-                    case_root / "local_agent_context.json",
-                    _canonical(context.to_dict()),
-                )
-                written_bytes += _write_once(
-                    case_root / "local_retrieval_guidance.json",
-                    _canonical(guidance.to_dict()),
-                )
-                assembled = phase4_assemble_candidate(
-                    candidate_bytes,
-                    context,
-                    guidance,
-                )
-                assembled.validate()
                 written_bytes += _write_once(
                     case_root / "assembled_page_spec.json",
-                    _canonical(assembled.page_spec.to_dict()),
+                    _canonical(page_spec),
                 )
                 written_bytes += _write_once(
                     case_root / "assembly_report.json",
-                    _canonical(assembled.report.to_dict()),
+                    _canonical(assembly_report),
                 )
+                return {
+                    "graph_delivery_success": True,
+                    "terminal_status": (
+                        "assembled_candidate_pending_owner_evaluation"
+                    ),
+                    "owner_evaluation_executed": False,
+                    "formal_quality_claimed": False,
+                }
+
+            runtime = Phase4RealModelGraphRuntime(
+                node_executor=node_executor,
+                context=context,
+                guidance=guidance,
+                delivery_executor=delivery_executor,
+            )
+            initial_state = create_real_model_graph_state(
+                run_id=(
+                    f"{payload['run_id']}:row-{int(row['row_order']):04d}"
+                ),
+                b_input=b_input,
+                upstream_binding={
+                    "schema_version": (
+                        "req2web.phase5.formal_langgraph_upstream.v1"
+                    ),
+                    "package_sha256": package.sha256(),
+                    "matrix_row_id": row["matrix_row_id"],
+                    "runtime_case_id": row["runtime_case_id"],
+                    "phase4_canonical_flow_runner": (
+                        ACCEPTED_PHASE4_CANONICAL_FULL_FLOW_RUNNER
+                    ),
+                    "phase4_graph_revision": REAL_MODEL_GRAPH_REVISION,
+                    "source_kind": "sealed_formal_holdout",
+                    "model_action_enabled": False,
+                    "h1_or_gold_opened": False,
+                },
+            )
+            graph_result = runtime.invoke(
+                initial_state,
+                thread_id=(
+                    f"{payload['run_id']}:row-{int(row['row_order']):04d}"
+                ),
+            )
+            written_bytes += _write_once(
+                case_root / "langgraph_final_state.json",
+                _canonical(graph_result),
+            )
+            written_bytes += _write_once(
+                case_root / "langgraph_events.json",
+                _canonical(graph_result["events"]),
+            )
+            if graph_result["status"] == "completed":
+                error_code = None
                 status = "assembled_candidate_pending_owner_evaluation"
+            else:
+                failure = graph_result.get("failure")
+                if isinstance(failure, Mapping):
+                    error_code = (
+                        f"langgraph_{failure.get('failure_stage')}_"
+                        f"{failure.get('failure_code')}"
+                    )
         except Exception as exc:
             error_code = (
                 "worker_start_or_global_"
@@ -1999,10 +2246,14 @@ def run_phase5_formal_runner(
 
 
 __all__ = [
+    "ACCEPTED_PHASE4_CANONICAL_FULL_FLOW_RUNNER",
     "NODE_ORDER",
+    "PHASE5_FORMAL_EXECUTION_STATUS",
+    "PHASE5_FORMAL_MODEL_ACTION_ENABLED",
     "PROMPT_REVISION",
     "Phase5CaseWorker",
     "Phase5FormalRunnerError",
+    "SYNTHETIC_VALIDATION_FLOW_ROLE",
     "SyntheticPhase5CaseWorker",
     "build_phase5_local_assembly_bindings",
     "run_phase5_formal_runner",

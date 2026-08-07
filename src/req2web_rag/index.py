@@ -7,6 +7,7 @@ import re
 from collections import Counter, defaultdict
 from pathlib import Path
 from typing import Any, Iterable
+from urllib.parse import quote
 
 from .corpus import ROLE_ORDER
 from .schema import validate_document
@@ -17,29 +18,65 @@ from .ui_structure_signals import build_ui_structure_signals
 INDEX_SCHEMA_VERSION = "req2web.rag.tfidf.v1"
 ASCII_TOKEN = re.compile(r"[a-z0-9][a-z0-9_+.-]{1,}")
 CJK_RUN = re.compile(r"[\u3400-\u9fff]+")
+CJK_TEXT = re.compile(
+    r"[\u3000-\u303f\u3400-\u4dbf\u4e00-\u9fff"
+    r"\uf900-\ufaff\ufe30-\ufe4f\uff01-\uff65"
+    r"\U00020000-\U0002fa1f]"
+)
 
 QUERY_EXPANSIONS = {
-    "登录": "login sign in authentication auth account",
-    "注册": "register sign up account",
-    "搜索": "search query results",
-    "筛选": "filter sort results",
-    "商品": "product commerce shopping store",
-    "购物车": "cart basket checkout commerce",
-    "结算": "checkout payment order",
-    "支付": "payment checkout order",
-    "列表": "list feed catalog results",
-    "详情": "detail profile content",
-    "表单": "form input field submit",
-    "移动": "mobile app responsive",
-    "响应式": "responsive desktop tablet mobile webpage",
-    "点击": "tap click gesture interaction",
-    "滑动": "swipe scroll gesture interaction",
-    "流程": "flow workflow interaction state steps",
-    "异常": "error edge case failure validation",
-    "错误": "error invalid failure validation",
-    "权限": "permission access auth validation",
-    "验收": "acceptance validation test expected behavior",
+    "login": "sign in authentication account",
+    "register": "sign up account",
+    "search": "query results",
+    "filter": "sort results",
+    "product": "commerce shopping store",
+    "cart": "basket checkout commerce",
+    "checkout": "payment order",
+    "payment": "checkout order",
+    "list": "feed catalog results",
+    "detail": "profile content",
+    "form": "input field submit",
+    "mobile": "app responsive",
+    "responsive": "desktop tablet mobile webpage",
+    "tap": "click gesture interaction",
+    "swipe": "scroll gesture interaction",
+    "flow": "workflow interaction state steps",
+    "error": "edge case failure validation",
+    "permission": "access auth validation",
+    "acceptance": "validation test expected behavior",
 }
+
+RETRIEVAL_RESULT_PROJECTION_REVISION = (
+    "req2web.rag.compact_result.english_projection.v1"
+)
+
+
+def _english_projection(value: object, *, role: str, field: str, doc_id: str) -> str:
+    text = str(value).strip()
+    if not CJK_TEXT.search(text):
+        return text
+    role_label = role.replace("_", " ")
+    if field == "title":
+        return f"{role_label.title()} reference {doc_id}"
+    return f"English structural evidence for the {role_label} role"
+
+
+def _ascii_references(value: object) -> list[dict[str, Any]]:
+    if not isinstance(value, list):
+        return []
+    projected: list[dict[str, Any]] = []
+    for item in value:
+        if not isinstance(item, dict):
+            continue
+        row = dict(item)
+        uri = row.get("uri")
+        if isinstance(uri, str):
+            row["uri"] = quote(
+                uri,
+                safe="/:@?&=#%._-",
+            )
+        projected.append(row)
+    return projected
 
 
 def tokenize(text: str) -> list[str]:
@@ -181,20 +218,39 @@ class TfidfIndex:
                 if allowed_roles is None or document["role"] in allowed_roles:
                     scores[document_index] += query_weight * document_weight
 
-        ranked = sorted(scores.items(), key=lambda item: (-item[1], self.documents[item[0]]["doc_id"]))
+        ranked = sorted(
+            scores.items(),
+            key=lambda item: (
+                -item[1],
+                self.documents[item[0]]["doc_id"],
+            ),
+        )
         results: list[dict[str, Any]] = []
         for document_index, score in ranked[:top_k]:
             document = self.documents[document_index]
             result = {
-                    "score": round(score, 6),
-                    "doc_id": document["doc_id"],
-                    "role": document["role"],
-                    "dataset": document["dataset"],
-                    "subset": document["subset"],
-                    "sample_id": document["sample_id"],
-                    "title": document["title"],
-                    "summary": document["summary"],
-                    "references": document["references"],
+                "score": round(score, 6),
+                "doc_id": document["doc_id"],
+                "role": document["role"],
+                "dataset": document["dataset"],
+                "subset": document["subset"],
+                "sample_id": document["sample_id"],
+                "title": _english_projection(
+                    document["title"],
+                    role=document["role"],
+                    field="title",
+                    doc_id=document["doc_id"],
+                ),
+                "summary": _english_projection(
+                    document["summary"],
+                    role=document["role"],
+                    field="summary",
+                    doc_id=document["doc_id"],
+                ),
+                "result_projection_revision": (
+                    RETRIEVAL_RESULT_PROJECTION_REVISION
+                ),
+                "references": _ascii_references(document["references"]),
             }
             # Optional and validation-only: old consumers can ignore this
             # field; guided generation gains a bounded trace to structured

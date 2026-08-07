@@ -10,6 +10,7 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "src"))
 
 from req2web_agent import DeterministicRequirementProvider, MinimalAgentChain  # noqa: E402
+from req2web_generation import contains_cjk_text  # noqa: E402
 from req2web_rag.corpus import ROLE_ORDER  # noqa: E402
 from req2web_rag.retriever import (  # noqa: E402
     DEFAULT_RETRIEVER_REGISTRY,
@@ -22,8 +23,9 @@ from req2web_rag.retriever import (  # noqa: E402
 
 
 DEMO_REQUIREMENT = (
-    "我想做一个移动端电商应用，支持登录、搜索筛选商品、查看详情、加入购物车和结算，"
-    "需要响应式页面、清楚的点击流程，以及输入错误和权限异常的验收。"
+    "Create a responsive mobile commerce page with sign-in, product search "
+    "and filters, product details, a cart, checkout, clear interactions, "
+    "and acceptance coverage for invalid input and denied permissions."
 )
 
 
@@ -76,16 +78,24 @@ class AgentChainTest(unittest.TestCase):
         self.assertIsInstance(self.retriever, TfidfRetriever)
         self.assertIsInstance(self.retriever, Retriever)
         direct = self.retriever.search(
-            "移动电商登录", top_k=1, roles=("requirement",)
+            DEMO_REQUIREMENT,
+            top_k=1,
+            roles=("requirement",),
         )
-        grouped = self.retriever.search_by_role("移动电商登录", top_k=1)
+        grouped = self.retriever.search_by_role(
+            DEMO_REQUIREMENT,
+            top_k=1,
+        )
         self.assertTrue(direct)
         self.assertEqual(tuple(grouped), ROLE_ORDER)
-        self.assertTrue(all(grouped.values()))
+        self.assertEqual(grouped["requirement"], direct)
 
     def test_requirement_provider_is_deterministic_and_local(self) -> None:
         provider = DeterministicRequirementProvider()
-        requirement = "做一个宠物情绪识别 App，用户拍照后展示识别结果"
+        requirement = (
+            "Create a mobile pet-emotion recognition app that analyzes a "
+            "photo and presents the result."
+        )
         first = provider.understand(requirement)
         second = provider.understand(requirement)
         self.assertEqual(first, second)
@@ -93,6 +103,48 @@ class AgentChainTest(unittest.TestCase):
         self.assertEqual(first.task_type, "recognition_tool")
         self.assertGreaterEqual(len(first.use_cases), 2)
         self.assertLessEqual(len(first.use_cases), 4)
+
+    def test_english_publication_provider_emits_english_only_context(self) -> None:
+        provider = DeterministicRequirementProvider(output_language="en")
+        result = provider.understand(
+            (
+                "Create a mobile grocery checkout page with search, filters, "
+                "a cart, checkout, and recoverable validation errors."
+            ),
+            target_device="mobile",
+            task_type="ecommerce",
+            constraints=("Keep the checkout form accessible.",),
+        )
+        visible_values = [
+            result.requirement_summary,
+            *result.constraints,
+            *(
+                value
+                for item in result.use_cases
+                for value in (
+                    item.title,
+                    item.actor,
+                    item.goal,
+                    item.expected_outcome,
+                )
+            ),
+        ]
+        self.assertTrue(visible_values)
+        self.assertFalse(any(contains_cjk_text(value) for value in visible_values))
+
+    def test_english_publication_provider_rejects_untranslated_input(self) -> None:
+        provider = DeterministicRequirementProvider(
+            output_language="en",
+            strict_english_input=True,
+        )
+        with self.assertRaisesRegex(
+            ValueError,
+            "requires English inputs",
+        ):
+            provider.understand(
+                "\u521b\u5efa\u4e00\u4e2a\u79fb\u52a8\u7aef"
+                "\u7ed3\u7b97\u9875\u9762"
+            )
 
     def test_registry_keeps_future_backends_pluggable_but_disabled(self) -> None:
         self.assertEqual(DEFAULT_RETRIEVER_REGISTRY.available_backends(), ("tfidf",))

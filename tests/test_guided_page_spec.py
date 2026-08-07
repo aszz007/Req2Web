@@ -43,14 +43,16 @@ def result(
 
 def build_context(
     *,
-    requirement: str = "做一个移动端搜索、筛选商品并查看结果的页面。",
-    summary: str = "移动端商品搜索与结果。",
+    requirement: str = (
+        "Create a mobile page for product search, filtering, and results."
+    ),
+    summary: str = "Mobile product search and results.",
     device: str = "mobile",
     task_type: str = "catalog",
     constraints: list[str] | None = None,
     use_cases: list[UseCase] | None = None,
-    ui_title: str = "搜索筛选结果",
-    ui_summary: str = "搜索筛选和结果列表",
+    ui_title: str = "Search and filtered results",
+    ui_summary: str = "Search controls, filters, and a result list",
     flow_title: str = "mixed flow",
     flow_summary: str = "tap and swipe multi step",
     validation_title: str = "Plain regression",
@@ -114,8 +116,20 @@ def build_context(
         constraints=constraints or [],
         use_cases=use_cases
         or [
-            UseCase("UC-01", "搜索与筛选", "用户", "搜索并筛选商品", "查看结果列表"),
-            UseCase("UC-02", "查看详情", "用户", "选择并查看详情", "理解详情信息"),
+            UseCase(
+                "UC-01",
+                "Search and filter",
+                "User",
+                "Search and filter products",
+                "Review the result list",
+            ),
+            UseCase(
+                "UC-02",
+                "Review details",
+                "User",
+                "Select and review product details",
+                "Understand the product details",
+            ),
         ],
         retrieval_queries={role: f"fixture {role}" for role in ROLE_ORDER},
         retrieval_results=retrieval_results,
@@ -174,12 +188,27 @@ class GuidedPageSpecTest(TestCase):
 
     def test_replacing_ui_guidance_changes_component_expression(self) -> None:
         context = build_context(
-            requirement="做一个移动端地点搜索页面，可搜索地址并选择位置。",
-            summary="地点搜索和位置选择。",
+            requirement=(
+                "Create a mobile location-search page where users search for "
+                "an address and select a location."
+            ),
+            summary="Location search and selection.",
             task_type="location_service",
             use_cases=[
-                UseCase("UC-01", "搜索地址", "用户", "搜索地址", "查看地点结果"),
-                UseCase("UC-02", "选择位置", "用户", "选择并确认位置", "得到确认位置"),
+                UseCase(
+                    "UC-01",
+                    "Search for an address",
+                    "User",
+                    "Search for an address",
+                    "Review location results",
+                ),
+                UseCase(
+                    "UC-02",
+                    "Select a location",
+                    "User",
+                    "Select and confirm a location",
+                    "Receive the confirmed location",
+                ),
             ],
         )
         search_result = self.builder.build(context, RetrievalGuidanceBuilder().build(context))
@@ -188,8 +217,8 @@ class GuidedPageSpecTest(TestCase):
             result(
                 "ui_reference",
                 "ui_reference:fixture:guided:map",
-                "地图地址位置",
-                "选择位置并确认地址",
+                "Map address location",
+                "Select a location and confirm the address",
                 [{"kind": "screenshot", "uri": "fixtures/map.png"}],
             )
         ]
@@ -228,15 +257,33 @@ class GuidedPageSpecTest(TestCase):
             mixed.page_spec.interactions[0].action,
             swipe.page_spec.interactions[0].action,
         )
-        self.assertIn("滑动浏览", swipe.page_spec.interactions[0].action)
+        self.assertIn(
+            "swipe navigation",
+            swipe.page_spec.interactions[0].action,
+        )
 
     def test_tap_and_single_step_guidance_change_interaction_expression(self) -> None:
         context = build_context(
-            requirement="做一个详情页，用户查看详情后保存配置。",
-            summary="详情与配置。",
+            requirement=(
+                "Create a details page where users review information and "
+                "save the configuration."
+            ),
+            summary="Details and configuration.",
             use_cases=[
-                UseCase("UC-01", "查看详情", "用户", "查看详情", "理解详情"),
-                UseCase("UC-02", "保存配置", "用户", "保存配置", "配置已保存"),
+                UseCase(
+                    "UC-01",
+                    "Review details",
+                    "User",
+                    "Review the details",
+                    "Understand the details",
+                ),
+                UseCase(
+                    "UC-02",
+                    "Save configuration",
+                    "User",
+                    "Save the configuration",
+                    "The configuration is saved",
+                ),
             ],
             flow_title="tap flow",
             flow_summary="tap transition",
@@ -248,21 +295,36 @@ class GuidedPageSpecTest(TestCase):
             context, RetrievalGuidanceBuilder().build(context)
         )
         actions = " ".join(item.action for item in result_value.page_spec.interactions)
-        self.assertIn("点击操作", actions)
-        self.assertIn("单步状态转换", actions)
+        self.assertIn("tap action", actions)
+        self.assertIn("single-step transition", actions)
 
     def test_metric_and_empty_ui_guidance_change_components_and_layout(self) -> None:
         context = build_context(
-            requirement="做一个桌面数据看板，展示关键指标；没有数据时显示空状态。",
-            summary="指标看板和空状态。",
+            requirement=(
+                "Create a desktop dashboard with key metrics and an empty "
+                "state when no data is available."
+            ),
+            summary="Metric dashboard and empty state.",
             device="desktop",
             task_type="dashboard",
-            constraints=["没有数据时显示空状态"],
+            constraints=["Show an empty state when no data is available."],
             use_cases=[
-                UseCase("UC-01", "查看关键指标", "用户", "查看关键指标", "理解指标"),
-                UseCase("UC-02", "查看状态", "用户", "查看状态", "理解当前状态"),
+                UseCase(
+                    "UC-01",
+                    "Review key metrics",
+                    "User",
+                    "Review key metrics",
+                    "Understand the metrics",
+                ),
+                UseCase(
+                    "UC-02",
+                    "Review status",
+                    "User",
+                    "Review the status",
+                    "Understand the current state",
+                ),
             ],
-            ui_title="指标看板空状态",
+            ui_title="Metric dashboard empty state",
             ui_summary="dashboard metric empty no data",
         )
         result_value = self.builder.build(
@@ -281,11 +343,17 @@ class GuidedPageSpecTest(TestCase):
 
     def test_relevant_empty_and_retry_validation_add_gated_acceptance(self) -> None:
         empty_context = build_context(
-            requirement="做一个桌面数据看板，支持列表筛选；没有匹配数据时显示空状态。",
-            summary="桌面指标、列表筛选和空状态。",
+            requirement=(
+                "Create a desktop dashboard with list filters and an empty "
+                "state when no records match."
+            ),
+            summary="Desktop metrics, list filtering, and an empty state.",
             device="desktop",
             task_type="dashboard",
-            constraints=["没有匹配数据时显示空状态并允许清除筛选"],
+            constraints=[
+                "Show an empty state and allow filters to be cleared when "
+                "no records match."
+            ],
             validation_title="Empty state regression",
             validation_summary="empty no data recovery",
         )
@@ -297,7 +365,9 @@ class GuidedPageSpecTest(TestCase):
         )
 
         retry_context = build_context(
-            constraints=["输入错误时允许修改并重试"],
+            constraints=[
+                "Allow users to correct invalid input and retry."
+            ],
             validation_title="Input error retry",
             validation_summary="input error permits retry",
         )
@@ -305,27 +375,51 @@ class GuidedPageSpecTest(TestCase):
             retry_context, RetrievalGuidanceBuilder().build(retry_context)
         )
         self.assertTrue(
-            any("输入错误重试边界" in item.description for item in retry_result.page_spec.acceptance_checks)
+            any(
+                "invalid-input retry" in item.description
+                for item in retry_result.page_spec.acceptance_checks
+            )
         )
 
     def test_explicit_location_and_empty_recovery_stay_context_sourced(self) -> None:
         map_context = build_context(
-            requirement="做一个移动端地址搜索页面，用户可以搜索地点、选择结果并确认位置。",
-            summary="地址搜索和位置确认。",
+            requirement=(
+                "Create a mobile address-search page where users search for "
+                "a place, select a result, and confirm the location."
+            ),
+            summary="Address search and location confirmation.",
             task_type="location_service",
-            constraints=["定位不可用时应允许手动选择地址"],
-            use_cases=[
-                UseCase("UC-01", "搜索地址", "用户", "搜索地址", "查看候选地点"),
-                UseCase("UC-02", "选择位置", "用户", "选择并确认位置", "位置已确认"),
+            constraints=[
+                "When location is unavailable, allow manual address "
+                "selection."
             ],
-            ui_title="地图地址位置",
+            use_cases=[
+                UseCase(
+                    "UC-01",
+                    "Search for an address",
+                    "User",
+                    "Search for an address",
+                    "Review candidate locations",
+                ),
+                UseCase(
+                    "UC-02",
+                    "Select a location",
+                    "User",
+                    "Select and confirm a location",
+                    "The location is confirmed",
+                ),
+            ],
+            ui_title="Map address location",
             ui_summary="location picker",
         )
         map_result = self.builder.build(
             map_context, RetrievalGuidanceBuilder().build(map_context)
         )
         self.assertTrue(
-            any(item.label == "手动选择地址" for item in map_result.page_spec.components)
+            any(
+                item.label == "Choose an address manually"
+                for item in map_result.page_spec.components
+            )
         )
         self.assertTrue(
             any(
@@ -335,12 +429,18 @@ class GuidedPageSpecTest(TestCase):
         )
 
         dashboard_context = build_context(
-            requirement="做一个桌面数据看板，展示关键指标、列表筛选和详情。",
-            summary="桌面数据看板。",
+            requirement=(
+                "Create a desktop dashboard with key metrics, list filters, "
+                "and detail views."
+            ),
+            summary="Desktop data dashboard.",
             device="desktop",
             task_type="dashboard",
-            constraints=["没有匹配数据时应显示空状态并允许清除筛选"],
-            ui_title="空状态列表筛选",
+            constraints=[
+                "When no records match, show an empty state and provide a "
+                "clear filter action."
+            ],
+            ui_title="Empty-state list filters",
             ui_summary="empty list filter",
         )
         dashboard_result = self.builder.build(
@@ -348,7 +448,10 @@ class GuidedPageSpecTest(TestCase):
         )
         self.assertEqual(dashboard_result.page_spec.layout.pattern, "guided_dashboard_flow")
         self.assertTrue(
-            any(item.label == "清除筛选" for item in dashboard_result.page_spec.components)
+            any(
+                item.label == "Clear filters"
+                for item in dashboard_result.page_spec.components
+            )
         )
         self.assertTrue(
             any(
@@ -367,7 +470,10 @@ class GuidedPageSpecTest(TestCase):
         for decision in implementation_decisions:
             for affected in decision.affected_fields:
                 self.assertEqual(constraints[affected.entity_id].source, "builder")
-                self.assertIn("检索实现参考", constraints[affected.entity_id].description)
+                self.assertIn(
+                    "Retrieved implementation guidance",
+                    constraints[affected.entity_id].description,
+                )
 
     def test_unrelated_permission_and_retry_do_not_pollute_page(self) -> None:
         context = build_context(
@@ -379,8 +485,8 @@ class GuidedPageSpecTest(TestCase):
         descriptions = " ".join(
             item.description for item in result_value.page_spec.acceptance_checks
         )
-        self.assertNotIn("权限拒绝恢复边界", descriptions)
-        self.assertNotIn("输入错误重试边界", descriptions)
+        self.assertNotIn("permission-denial recovery", descriptions)
+        self.assertNotIn("invalid-input retry", descriptions)
         self.assertFalse(
             any(item.target_state_id == "state-error" for item in result_value.page_spec.interactions)
         )
@@ -393,11 +499,26 @@ class GuidedPageSpecTest(TestCase):
 
     def test_rotating_trace_alone_is_not_semantic_relevance(self) -> None:
         context = build_context(
-            requirement="做一个设置页，用户填写名称并保存配置。",
-            summary="填写并保存设置。",
+            requirement=(
+                "Create a settings page where users enter a name and save "
+                "the configuration."
+            ),
+            summary="Enter and save settings.",
             use_cases=[
-                UseCase("UC-01", "填写名称", "用户", "填写名称", "名称已记录"),
-                UseCase("UC-02", "保存配置", "用户", "保存配置", "配置已保存"),
+                UseCase(
+                    "UC-01",
+                    "Enter a name",
+                    "User",
+                    "Enter a name",
+                    "The name is recorded",
+                ),
+                UseCase(
+                    "UC-02",
+                    "Save configuration",
+                    "User",
+                    "Save the configuration",
+                    "The configuration is saved",
+                ),
             ],
             ui_title="Settings form",
             ui_summary="form controls",
@@ -416,19 +537,41 @@ class GuidedPageSpecTest(TestCase):
                 }
             )
         )
-        self.assertFalse(any("滑动浏览" in item.action for item in result_value.page_spec.interactions))
+        self.assertFalse(
+            any(
+                "swipe navigation" in item.action
+                for item in result_value.page_spec.interactions
+            )
+        )
 
     def test_weak_pet_ui_keeps_media_input_sourced_from_context(self) -> None:
         context = build_context(
-            requirement="做一个宠物情绪识别 App，用户拍照或上传照片后查看分析结果。",
-            summary="宠物图片输入和情绪分析。",
+            requirement=(
+                "Create a pet-emotion recognition app where users capture or "
+                "upload a photo and review the analysis."
+            ),
+            summary="Pet-image input and emotion analysis.",
             task_type="recognition_tool",
-            constraints=["相机权限被拒绝时应提供恢复方式"],
-            use_cases=[
-                UseCase("UC-01", "拍摄或上传素材", "用户", "拍摄或上传素材", "素材已提交"),
-                UseCase("UC-02", "分析照片", "用户", "分析宠物照片", "查看情绪结果"),
+            constraints=[
+                "Provide a recovery path when camera permission is denied."
             ],
-            ui_title="搜索结果",
+            use_cases=[
+                UseCase(
+                    "UC-01",
+                    "Capture or upload media",
+                    "User",
+                    "Capture or upload media",
+                    "The media is submitted",
+                ),
+                UseCase(
+                    "UC-02",
+                    "Analyze a photo",
+                    "User",
+                    "Analyze the pet photo",
+                    "Review the emotion result",
+                ),
+            ],
+            ui_title="Search results",
             ui_summary="search result list",
             validation_title="Permission recovery",
             validation_summary="permission denied recovery",
@@ -450,7 +593,7 @@ class GuidedPageSpecTest(TestCase):
 
     def test_decisions_are_complete_and_auditable(self) -> None:
         context = build_context(
-            ui_title="地图位置",
+            ui_title="Map location",
             ui_summary="location picker",
             validation_title="Permission retry",
             validation_summary="permission denied retry",

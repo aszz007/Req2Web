@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import importlib.util
+import io
 import json
 from pathlib import Path
 import shutil
 import sys
 import unittest
+from contextlib import redirect_stderr
 import uuid
 
 
@@ -13,6 +15,8 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "src"))
 
 from req2web_runtime.phase5_formal_qwen_worker import (  # noqa: E402
+    PHASE5_FORMAL_MODEL_ACTION_ENABLED,
+    Phase5FormalQwenWorker,
     Phase5FormalQwenWorkerError,
     STREAM_SCHEMA_VERSION,
     _StreamMirror,
@@ -70,6 +74,17 @@ class Phase5FormalQwenWorkerContractTest(unittest.TestCase):
         self.assertEqual(artifacts["config"]["dtype"], "bfloat16")
         self.assertEqual(artifacts["config"]["quantization"], "none")
 
+    def test_real_worker_is_hard_paused_before_model_or_subprocess_action(self) -> None:
+        self.assertFalse(PHASE5_FORMAL_MODEL_ACTION_ENABLED)
+        with self.assertRaisesRegex(
+            Phase5FormalQwenWorkerError,
+            "formal model/H1 action remains disabled",
+        ):
+            Phase5FormalQwenWorker(
+                model_root=self.temp / "model-does-not-need-to-exist",
+                profile=None,  # type: ignore[arg-type]
+            )
+
     def test_real_worker_contract_rejects_missing_final_action_receipt(self) -> None:
         with self.assertRaisesRegex(
             Phase5FormalQwenWorkerError,
@@ -121,6 +136,32 @@ class Phase5FormalQwenWorkerContractTest(unittest.TestCase):
                 must_exist=False,
                 name="real package",
             )
+
+    def test_cli_rejects_real_package_before_reading_it(self) -> None:
+        script = ROOT / "scripts" / "run_phase5_formal_holdout.py"
+        spec = importlib.util.spec_from_file_location(
+            "phase5_formal_holdout_pause_test",
+            script,
+        )
+        self.assertIsNotNone(spec)
+        self.assertIsNotNone(spec.loader)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        missing_package = self.temp / "must-not-be-read.json"
+        stderr = io.StringIO()
+        with redirect_stderr(stderr):
+            result = module.main(
+                [
+                    "--action-package",
+                    str(missing_package),
+                    "--result-root",
+                    str(self.temp / "must-not-be-created"),
+                ]
+            )
+        self.assertEqual(result, 2)
+        self.assertIn("package access", stderr.getvalue())
+        self.assertFalse(missing_package.exists())
+        self.assertFalse((self.temp / "must-not-be-created").exists())
 
     def test_stream_mirror_accepts_empty_non_token_delta_and_marks_start(self) -> None:
         class _Target:

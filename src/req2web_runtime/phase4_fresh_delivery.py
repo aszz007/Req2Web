@@ -36,6 +36,10 @@ from req2web_generation import (
     RetrievalGuidanceBuilder,
     RetrievalGuidedPageSpecBuilder,
     RetrievalInfluenceChecker,
+    PublicationLanguageError,
+    validate_english_publication_artifact,
+    validate_english_publication_page_spec,
+    validate_english_publication_tree,
 )
 from req2web_orchestration.model_route import (
     PHASE4_FRESH_INTEGRATED_DISPOSITION,
@@ -1312,6 +1316,7 @@ def _build_same_context_g0(
 ]:
     baseline = PageSpecBuilder().build(context)
     guided = RetrievalGuidedPageSpecBuilder().build(context, guidance)
+    validate_english_publication_page_spec(guided.page_spec)
     ablations = {
         role: RetrievalGuidedPageSpecBuilder().build(
             context,
@@ -1323,6 +1328,14 @@ def _build_same_context_g0(
     render = DeterministicPageRenderer().render(
         guided.page_spec,
         material_root / "g0-render",
+    )
+    validate_english_publication_artifact(
+        render.index_html.read_bytes(),
+        artifact_name="g0-render/index.html",
+    )
+    validate_english_publication_artifact(
+        render.app_js.read_bytes(),
+        artifact_name="g0-render/app.js",
     )
     consistency = MinimalConsistencyChecker().check(guided.page_spec, render)
     influence = RetrievalInfluenceChecker().check(
@@ -1626,6 +1639,17 @@ def run_phase4_fresh_delivery(
         guidance=guidance,
     )
     source.validate_context_guidance(context, guidance)
+    try:
+        validate_english_publication_page_spec(
+            source.assembled.page_spec
+        )
+        package_dir = getattr(package, "package_dir", None)
+        if package_dir is not None:
+            validate_english_publication_tree(Path(package_dir))
+    except (OSError, PublicationLanguageError) as exc:
+        raise Phase4FreshDeliveryError(
+            "English publication language gate failed closed"
+        ) from exc
     if source.case_id != fallback_record.case_id:
         raise Phase4FreshDeliveryError("fallback record is cross-case")
     frozen_g0_reference.validate_against(package, context, guidance)
@@ -1762,6 +1786,12 @@ def run_phase4_fresh_delivery(
             raise Phase4FreshDeliveryError(
                 "fresh delivery field gate returned a non-routable decision"
             )
+    try:
+        validate_english_publication_tree(root)
+    except (OSError, PublicationLanguageError) as exc:
+        raise Phase4FreshDeliveryError(
+            "English-only delivery artifact gate failed closed"
+        ) from exc
     receipt = Phase4FreshDeliveryReceipt.create(
         source=source,
         route_outcome=route,

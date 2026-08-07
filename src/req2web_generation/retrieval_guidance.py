@@ -202,20 +202,55 @@ def _reference_uris(result: dict[str, Any], allowed_kinds: set[str]) -> list[str
 
 
 _TOKEN_RULES: tuple[tuple[str, tuple[str, ...]], ...] = (
-    ("search_input", ("搜索", "search")),
-    ("filter_control", ("筛选", "filter")),
-    ("result_list", ("结果", "result", "列表", "list")),
-    ("cart_summary", ("购物车", "cart", "basket")),
-    ("checkout_action", ("结算", "checkout", "支付", "payment")),
-    ("media_input", ("拍摄", "上传", "照片", "图片", "camera", "photo", "upload")),
-    ("analysis_result", ("识别", "分析", "recognition", "analysis")),
-    ("location_picker", ("地图", "地址", "位置", "定位", "map", "address", "location")),
-    ("metric_summary", ("仪表盘", "看板", "指标", "统计", "dashboard", "metric")),
-    ("detail_view", ("详情", "detail")),
-    ("empty_state", ("空状态", "无匹配", "empty", "no data")),
-    ("permission_recovery", ("权限", "permission", "拒绝")),
-    ("retry_recovery", ("重试", "retry", "错误", "error", "失败", "failure")),
-    ("loading_completion", ("加载", "loading", "load")),
+    ("search_input", ("\u641c\u7d22", "search")),
+    ("filter_control", ("\u7b5b\u9009", "filter")),
+    ("result_list", ("\u7ed3\u679c", "result", "\u5217\u8868", "list")),
+    ("cart_summary", ("\u8d2d\u7269\u8f66", "cart", "basket")),
+    ("checkout_action", ("\u7ed3\u7b97", "checkout", "\u652f\u4ed8", "payment")),
+    (
+        "media_input",
+        (
+            "\u62cd\u6444",
+            "\u4e0a\u4f20",
+            "\u7167\u7247",
+            "\u56fe\u7247",
+            "camera",
+            "photo",
+            "upload",
+        ),
+    ),
+    ("analysis_result", ("\u8bc6\u522b", "\u5206\u6790", "recognition", "analysis")),
+    (
+        "location_picker",
+        (
+            "\u5730\u56fe",
+            "\u5730\u5740",
+            "\u4f4d\u7f6e",
+            "\u5b9a\u4f4d",
+            "map",
+            "address",
+            "location",
+        ),
+    ),
+    (
+        "metric_summary",
+        (
+            "\u4eea\u8868\u76d8",
+            "\u770b\u677f",
+            "\u6307\u6807",
+            "\u7edf\u8ba1",
+            "dashboard",
+            "metric",
+        ),
+    ),
+    ("detail_view", ("\u8be6\u60c5", "detail")),
+    ("empty_state", ("\u7a7a\u72b6\u6001", "\u65e0\u5339\u914d", "empty", "no data")),
+    ("permission_recovery", ("\u6743\u9650", "permission", "\u62d2\u7edd")),
+    (
+        "retry_recovery",
+        ("\u91cd\u8bd5", "retry", "\u9519\u8bef", "error", "\u5931\u8d25", "failure"),
+    ),
+    ("loading_completion", ("\u52a0\u8f7d", "loading", "load")),
 )
 
 
@@ -356,7 +391,7 @@ class RetrievalGuidanceBuilder:
             text = _result_text(result)
             if "mixed" in text:
                 pattern = "tap_and_swipe"
-            elif "swipe" in text or "滑动" in text:
+            elif "swipe" in text or "\u6ed1\u52a8" in text:
                 pattern = "swipe"
             else:
                 pattern = "tap"

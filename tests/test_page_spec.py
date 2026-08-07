@@ -20,15 +20,20 @@ from req2web_rag.corpus import ROLE_ORDER  # noqa: E402
 
 
 ECOMMERCE_REQUIREMENT = (
-    "我想做一个移动端电商应用，支持搜索筛选商品、查看详情、加入购物车和结算，"
-    "需要清楚的异常反馈。"
+    "Create a mobile commerce page with product search and filters, product "
+    "details, a cart, checkout, and clear error feedback."
 )
 PET_REQUIREMENT = (
-    "做一个宠物情绪识别 App，用户拍照后系统分析宠物情绪并展示结果，"
-    "相机权限被拒绝时要给出恢复提示。"
+    "Create a mobile pet-emotion recognition app that analyzes a photo, "
+    "presents the result, and provides recovery guidance when camera "
+    "permission is denied."
 )
-ECOMMERCE_RECOVERY_CONSTRAINT = "输入错误时给出可恢复提示"
-PET_RECOVERY_CONSTRAINT = "相机权限被拒绝时给出恢复提示"
+ECOMMERCE_RECOVERY_CONSTRAINT = (
+    "Allow users to recover from invalid input and retry."
+)
+PET_RECOVERY_CONSTRAINT = (
+    "Provide a recovery path when camera permission is denied."
+)
 
 
 class FixtureRetriever:
@@ -67,7 +72,10 @@ class FixtureRetriever:
 
 def build_context(requirement: str, *, constraints: Iterable[str] = ()):
     return MinimalAgentChain(
-        DeterministicRequirementProvider(),
+        DeterministicRequirementProvider(
+            output_language="en",
+            strict_english_input=True,
+        ),
         FixtureRetriever(),
         top_k_per_role=2,
     ).run(requirement, constraints=list(constraints))
@@ -176,13 +184,16 @@ class PageSpecTest(unittest.TestCase):
             and item.target_state_id == "state-initial"
         )
         components = {item.component_id: item for item in spec.components}
-        self.assertEqual(components[error.trigger_component_id].label, "模拟输入错误")
+        self.assertEqual(
+            components[error.trigger_component_id].label,
+            "Simulate invalid input",
+        )
         self.assertEqual(
             components[recovery.trigger_component_id].label,
-            "修改输入并重试",
+            "Update the input and try again",
         )
-        self.assertIn("输入内容无效", error.user_feedback)
-        self.assertIn("重新搜索", recovery.user_feedback)
+        self.assertIn("input is invalid", error.user_feedback)
+        self.assertIn("Update the value", recovery.user_feedback)
         error_state = next(item for item in spec.states if item.name == "error")
         self.assertIn(recovery.trigger_component_id, error_state.visible_component_ids)
         acceptance_states = {
@@ -213,21 +224,24 @@ class PageSpecTest(unittest.TestCase):
         components = {item.component_id: item for item in spec.components}
         self.assertEqual(
             components[error.trigger_component_id].label,
-            "模拟相机权限拒绝",
+            "Simulate camera permission denial",
         )
         self.assertEqual(
             components[recovery.trigger_component_id].label,
-            "返回并改用示例输入",
+            "Return and use sample input",
         )
-        self.assertIn("相机权限已被拒绝", error.user_feedback)
-        self.assertIn("示例输入继续识别", recovery.user_feedback)
+        self.assertIn("Camera permission was denied", error.user_feedback)
+        self.assertIn("Continue with sample input", recovery.user_feedback)
 
     def test_page_without_recovery_constraint_gets_no_error_controls(self) -> None:
         self.assertFalse(
             any(item.target_state_id == "state-error" for item in self.spec.interactions)
         )
         self.assertFalse(
-            any(item.label.startswith("模拟") for item in self.spec.components)
+            any(
+                item.label.startswith("Simulate")
+                for item in self.spec.components
+            )
         )
 
     def test_explicit_recovery_page_spec_is_deterministic(self) -> None:

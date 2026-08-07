@@ -155,7 +155,7 @@ class DeterministicPageRenderer:
         return "\n".join(
             (
                 "<!doctype html>",
-                f'<html lang="zh-CN" data-page-spec-schema="{PAGE_SPEC_SCHEMA_VERSION}">',
+                f'<html lang="en" data-page-spec-schema="{PAGE_SPEC_SCHEMA_VERSION}">',
                 "<head>",
                 '  <meta charset="utf-8">',
                 '  <meta name="viewport" content="width=device-width, initial-scale=1">',
@@ -175,8 +175,8 @@ class DeterministicPageRenderer:
                 f"        <p class=\"summary\">{_escape(page_spec.summary)}</p>",
                 "      </div>",
                 '      <dl class="page-meta">',
-                f"        <div><dt>设备</dt><dd>{_escape(page_spec.target_device)}</dd></div>",
-                f"        <div><dt>页面类型</dt><dd>{_escape(page_spec.page_type)}</dd></div>",
+                f"        <div><dt>Device</dt><dd>{_escape(page_spec.target_device)}</dd></div>",
+                f"        <div><dt>Page type</dt><dd>{_escape(page_spec.page_type)}</dd></div>",
                 "      </dl>",
                 '      <div class="page-state" id="page-state" role="status" aria-live="polite" '
                 f'data-state-id="{_escape(initial_state.state_id)}" '
@@ -217,16 +217,16 @@ class DeterministicPageRenderer:
             ]
         elif component.component_type == "media_input":
             content = [
-                f'          <label class="file-control" for="input-{component_id}">选择图片或媒体</label>',
+                f'          <label class="file-control" for="input-{component_id}">Choose image or media</label>',
                 f'          <input id="input-{component_id}" class="media-input" type="file" accept="image/*"{trigger}>',
-                f'          <button class="secondary-button" type="button"{trigger}>使用示例输入</button>',
+                f'          <button class="secondary-button" type="button"{trigger}>Use sample input</button>',
             ]
         elif component.component_type == "search_input":
             content = [
                 '          <div class="inline-control">',
                 f'            <label class="sr-only" for="input-{component_id}">{label}</label>',
-                f'            <input id="input-{component_id}" type="search" placeholder="输入关键词">',
-                f'            <button type="button"{trigger}>搜索</button>',
+                f'            <input id="input-{component_id}" type="search" placeholder="Enter keywords">',
+                f'            <button type="button"{trigger}>Search</button>',
                 "          </div>",
             ]
         elif component.component_type == "form":
@@ -236,22 +236,22 @@ class DeterministicPageRenderer:
             content = [
                 f'          <form class="compact-form"{form_trigger}>',
                 f'            <label for="input-{component_id}">{label}</label>',
-                f'            <input id="input-{component_id}" type="text" placeholder="填写必要信息">',
-                "            <button type=\"submit\">提交</button>",
+                f'            <input id="input-{component_id}" type="text" placeholder="Enter required information">',
+                "            <button type=\"submit\">Submit</button>",
                 "          </form>",
             ]
         elif component.component_type == "data_view":
             content = [
-                '          <div class="metric-grid" role="group" aria-label="数据摘要">',
-                "            <div><strong>24</strong><span>当前项目</span></div>",
-                "            <div><strong>88%</strong><span>完成度</span></div>",
+                '          <div class="metric-grid" role="group" aria-label="Data summary">',
+                "            <div><strong>24</strong><span>Active items</span></div>",
+                "            <div><strong>88%</strong><span>Completion</span></div>",
                 "          </div>",
-                f'          <button class="secondary-button" type="button"{trigger}>刷新数据</button>',
+                f'          <button class="secondary-button" type="button"{trigger}>Refresh data</button>',
             ]
         elif component.component_type == "location_picker":
             content = [
                 '          <div class="location-preview" aria-hidden="true"><span></span></div>',
-                f'          <button class="secondary-button" type="button"{trigger}>选择位置</button>',
+                f'          <button class="secondary-button" type="button"{trigger}>Choose location</button>',
             ]
         elif component.component_type == "status_panel":
             content = [
@@ -259,15 +259,15 @@ class DeterministicPageRenderer:
             ]
             if has_interaction:
                 content.append(
-                    f'          <button class="secondary-button" type="button"{trigger}>确认状态</button>'
+                    f'          <button class="secondary-button" type="button"{trigger}>Confirm status</button>'
                 )
         else:
             content = [
-                f'          <p class="fallback-note">通用控件：{component_type}</p>',
+                f'          <p class="fallback-note">Generic control: {component_type}</p>',
             ]
             if has_interaction:
                 content.append(
-                    f'          <button class="secondary-button" type="button"{trigger}>执行操作</button>'
+                    f'          <button class="secondary-button" type="button"{trigger}>Run action</button>'
                 )
 
         renderer_kind = (

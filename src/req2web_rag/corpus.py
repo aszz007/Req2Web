@@ -18,11 +18,11 @@ ROLE_ORDER = (
 )
 
 ROLE_CONTEXT = {
-    "requirement": "需求 产品需求 用户场景 核心功能 页面约束 requirement product user story feature constraint",
-    "ui_reference": "界面参考 视觉布局 控件结构 UI截图 ui reference screen layout component visual",
-    "interaction_flow": "交互流程 页面状态 点击 滑动 操作步骤 interaction flow state tap swipe gesture",
-    "implementation": "前端实现 响应式网页 HTML 原型 布局 implementation frontend responsive webpage prototype layout",
-    "validation": "验收标准 测试点 异常流程 错误 权限 validation acceptance test error edge case permission",
+    "requirement": "requirement product user story feature scope page constraint",
+    "ui_reference": "UI reference visual layout control structure screenshot screen layout component",
+    "interaction_flow": "interaction flow page state tap swipe operation step gesture",
+    "implementation": "frontend implementation responsive webpage HTML prototype layout",
+    "validation": "acceptance criterion test point error flow invalid input permission edge case",
 }
 
 

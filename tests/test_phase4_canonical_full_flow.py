@@ -43,6 +43,11 @@ from req2web_orchestration.phase4_graph import (  # noqa: E402
     make_real_model_raw_capture,
     phase4_synthetic_fixture_output,
 )
+from req2web_generation import (  # noqa: E402
+    ENGLISH_PUBLICATION_LANGUAGE_POLICY_VERSION,
+    contains_cjk_text,
+    validate_english_publication_value,
+)
 
 
 class Phase4CanonicalFullFlowTest(unittest.TestCase):
@@ -190,6 +195,33 @@ class Phase4CanonicalFullFlowTest(unittest.TestCase):
         self.assertTrue(receipt["same_context_guidance_used_for_downstream"])
         self.assertFalse(receipt["synthetic_downstream_context_rebuilt"])
         self.assertEqual(
+            receipt["publication_language_policy"],
+            ENGLISH_PUBLICATION_LANGUAGE_POLICY_VERSION,
+        )
+        context = upstream["context"]
+        publication_text = [
+            context.requirement_summary,
+            *context.constraints,
+            *(
+                value
+                for item in context.use_cases
+                for value in (
+                    item.title,
+                    item.actor,
+                    item.goal,
+                    item.expected_outcome,
+                )
+            ),
+        ]
+        self.assertFalse(
+            any(contains_cjk_text(value) for value in publication_text)
+        )
+        for artifact_name, value in saved.items():
+            validate_english_publication_value(
+                value,
+                artifact_name=artifact_name,
+            )
+        self.assertEqual(
             saved["canonical_b_adapter_receipt.json"][
                 "explicit_user_input_identity"
             ],
@@ -209,6 +241,28 @@ class Phase4CanonicalFullFlowTest(unittest.TestCase):
             saved_receipt["receipt_identity"],
             receipt["receipt_identity"],
         )
+
+    def test_upstream_rejects_cjk_before_writing_artifacts(self) -> None:
+        case = dict(get_case_set()["cases"][0])
+        case["requirement"] = (
+            "Create a checkout page "
+            "\u4e2d\u6587"
+        )
+        writes: list[Path] = []
+        with patch(
+            "req2web_runtime.phase4_canonical_full_flow._write_json",
+            side_effect=lambda path, value: writes.append(path),
+        ):
+            with self.assertRaisesRegex(
+                Phase4CanonicalFullFlowError,
+                "English-only raw input gate failed closed",
+            ):
+                _build_upstream(
+                    case=case,
+                    index_dir=ROOT / "data/processed/rag",
+                    output_root=Path("unused"),
+                )
+        self.assertEqual(writes, [])
 
     def test_raw_requirement_reaches_the_same_real_graph_topology(self) -> None:
         case = get_case_set()["cases"][0]

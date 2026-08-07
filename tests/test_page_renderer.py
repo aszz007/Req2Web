@@ -14,23 +14,35 @@ sys.path.insert(0, str(ROOT / "src"))
 
 from req2web_agent import DeterministicRequirementProvider, MinimalAgentChain  # noqa: E402
 from req2web_generation import (  # noqa: E402
+    PublicationLanguageError,
     RENDER_MANIFEST_SCHEMA_VERSION,
     SUPPORTED_COMPONENT_TYPES,
     DeterministicPageRenderer,
     PageSpecBuilder,
+    RetrievalGuidanceBuilder,
+    RetrievalGuidedPageSpecBuilder,
+    contains_cjk_text,
+    validate_english_publication_page_spec,
 )
 from req2web_rag.corpus import ROLE_ORDER  # noqa: E402
 
 
 ECOMMERCE_REQUIREMENT = (
-    "我想做一个移动端电商应用，支持搜索筛选商品、查看详情、加入购物车和结算，"
-    "需要清楚的异常反馈。"
+    "Create a mobile commerce page with product search and filters, product "
+    "details, a cart, checkout, and clear error feedback."
 )
 PET_REQUIREMENT = (
-    "做一个宠物情绪识别 App，用户拍照后系统分析宠物情绪并展示结果，"
-    "相机权限被拒绝时要给出恢复提示。"
+    "Create a mobile pet-emotion recognition app that analyzes a photo, "
+    "presents the result, and provides recovery guidance when camera "
+    "permission is denied."
 )
-ECOMMERCE_RECOVERY_CONSTRAINT = "输入错误时给出可恢复提示"
+ECOMMERCE_RECOVERY_CONSTRAINT = (
+    "Provide recoverable guidance after invalid input."
+)
+ENGLISH_ECOMMERCE_REQUIREMENT = (
+    "Create a mobile grocery checkout page with search, filters, a cart, "
+    "checkout, and recoverable validation errors."
+)
 
 
 class FixtureRetriever:
@@ -46,7 +58,11 @@ class FixtureRetriever:
                 "score": 1.0 - index / 10,
                 "doc_id": f"{role}:fixture:sample-{index}",
                 "role": role,
+                "dataset": "page_renderer_fixture",
+                "subset": "english_publication",
+                "sample_id": f"{role}-sample-{index}",
                 "title": f"{role} fixture {index}",
+                "summary": f"Stable {role} structure for the current page",
                 "references": [
                     {
                         "kind": "fixture",
@@ -66,13 +82,34 @@ class FixtureRetriever:
         }
 
 
-def build_spec(requirement: str, *, constraints: Iterable[str] = ()):
-    context = MinimalAgentChain(
-        DeterministicRequirementProvider(),
+def build_spec(
+    requirement: str,
+    *,
+    constraints: Iterable[str] = (),
+    output_language: str = "en",
+):
+    context = build_context(
+        requirement,
+        constraints=constraints,
+        output_language=output_language,
+    )
+    return PageSpecBuilder().build(context)
+
+
+def build_context(
+    requirement: str,
+    *,
+    constraints: Iterable[str] = (),
+    output_language: str = "en",
+):
+    return MinimalAgentChain(
+        DeterministicRequirementProvider(
+            output_language=output_language,
+            strict_english_input=True,
+        ),
         FixtureRetriever(),
         top_k_per_role=2,
     ).run(requirement, constraints=list(constraints))
-    return PageSpecBuilder().build(context)
 
 
 class PageRendererTest(unittest.TestCase):
@@ -198,7 +235,63 @@ class PageRendererTest(unittest.TestCase):
         markup = result.index_html.read_text(encoding="utf-8")
         self.assertIn('data-component-type="custom_chart"', markup)
         self.assertIn('data-renderer-kind="fallback"', markup)
-        self.assertIn("通用控件：custom_chart", markup)
+        self.assertIn("Generic control: custom_chart", markup)
+
+    def test_english_publication_render_contains_no_cjk_text(self) -> None:
+        spec = build_spec(
+            ENGLISH_ECOMMERCE_REQUIREMENT,
+            constraints=("Keep the checkout form accessible.",),
+            output_language="en",
+        )
+        validate_english_publication_page_spec(spec)
+        result = self.renderer.render(spec, self.root / "english")
+        markup = result.index_html.read_text(encoding="utf-8")
+        script = result.app_js.read_text(encoding="utf-8")
+        self.assertIn('<html lang="en"', markup)
+        self.assertIn("<dt>Device</dt>", markup)
+        self.assertIn("<dt>Page type</dt>", markup)
+        self.assertFalse(contains_cjk_text(markup))
+        self.assertFalse(contains_cjk_text(script))
+
+    def test_english_guided_publication_render_contains_no_cjk_text(
+        self,
+    ) -> None:
+        context = build_context(
+            ENGLISH_ECOMMERCE_REQUIREMENT,
+            constraints=("Keep the checkout form accessible.",),
+            output_language="en",
+        )
+        guidance = RetrievalGuidanceBuilder().build(context)
+        guided = RetrievalGuidedPageSpecBuilder().build(context, guidance)
+        validate_english_publication_page_spec(guided.page_spec)
+        result = self.renderer.render(
+            guided.page_spec,
+            self.root / "english-guided",
+        )
+        self.assertFalse(
+            contains_cjk_text(
+                result.index_html.read_text(encoding="utf-8")
+            )
+        )
+        self.assertFalse(
+            contains_cjk_text(
+                result.app_js.read_text(encoding="utf-8")
+            )
+        )
+
+    def test_english_publication_page_spec_rejects_chinese_visible_text(
+        self,
+    ) -> None:
+        spec = build_spec(
+            ENGLISH_ECOMMERCE_REQUIREMENT,
+            output_language="en",
+        )
+        spec.title = "\u4e2d\u6587\u6807\u9898"
+        with self.assertRaisesRegex(
+            PublicationLanguageError,
+            "title",
+        ):
+            validate_english_publication_page_spec(spec)
 
     def test_invalid_page_spec_is_rejected_before_writing(self) -> None:
         destination = self.root / "invalid"

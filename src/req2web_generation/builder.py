@@ -23,28 +23,33 @@ from .schema import (
     TraceabilitySpec,
     UseCaseTrace,
 )
+from .publication_language import contains_cjk_text
 from .recovery import ErrorRecoveryScenario, match_error_recovery_constraint
 
 
-_TITLE_PREFIX = re.compile(r"^(?:我想|请|帮我)?(?:做|创建|构建|设计)(?:一个|一款)?")
+_TITLE_PREFIX = re.compile(
+    r"^(?:\u6211\u60f3|\u8bf7|\u5e2e\u6211)?"
+    r"(?:\u505a|\u521b\u5efa|\u6784\u5efa|\u8bbe\u8ba1)"
+    r"(?:\u4e00\u4e2a|\u4e00\u6b3e)?"
+)
 _EMPTY_STATE_KEYWORDS = (
-    "搜索",
-    "筛选",
-    "列表",
-    "目录",
-    "浏览",
-    "结果",
+    "\u641c\u7d22",
+    "\u7b5b\u9009",
+    "\u5217\u8868",
+    "\u76ee\u5f55",
+    "\u6d4f\u89c8",
+    "\u7ed3\u679c",
     "search",
     "filter",
     "list",
     "result",
 )
 _COMPONENT_TYPE_RULES = (
-    ("media_input", ("拍摄", "上传", "图片", "camera", "upload")),
-    ("search_input", ("搜索", "筛选", "查询", "search", "filter")),
-    ("form", ("填写", "表单", "登录", "注册", "form", "login")),
-    ("data_view", ("数据", "统计", "图表", "dashboard", "chart")),
-    ("location_picker", ("地图", "位置", "地址", "map", "location")),
+    ("media_input", ("\u62cd\u6444", "\u4e0a\u4f20", "\u56fe\u7247", "camera", "upload")),
+    ("search_input", ("\u641c\u7d22", "\u7b5b\u9009", "\u67e5\u8be2", "search", "filter")),
+    ("form", ("\u586b\u5199", "\u8868\u5355", "\u767b\u5f55", "\u6ce8\u518c", "form", "login")),
+    ("data_view", ("\u6570\u636e", "\u7edf\u8ba1", "\u56fe\u8868", "dashboard", "chart")),
+    ("location_picker", ("\u5730\u56fe", "\u4f4d\u7f6e", "\u5730\u5740", "map", "location")),
 )
 
 
@@ -65,9 +70,15 @@ def _deduplicate(values: list[str]) -> list[str]:
 
 
 def _derive_title(requirement: str, task_type: str) -> str:
-    first_clause = re.split(r"[。！？!?\n]", requirement.strip(), maxsplit=1)[0]
-    title = _TITLE_PREFIX.sub("", first_clause).strip(" ，,：:")
-    if not title:
+    first_clause = re.split(
+        r"[\u3002\uff01\uff1f!?\n]",
+        requirement.strip(),
+        maxsplit=1,
+    )[0]
+    title = _TITLE_PREFIX.sub("", first_clause).strip(
+        " \u3000\uff0c,\uff1a:"
+    )
+    if not title or contains_cjk_text(title):
         title = task_type.replace("_", " ").strip()
     return title[:60]
 
@@ -110,6 +121,109 @@ def _select_recovery_component(
     raise ValueError("PageSpec cannot attach error recovery to a status-only page")
 
 
+def _uses_english_publication_copy(context: AgentContextBundle) -> bool:
+    visible_values = [
+        context.original_requirement,
+        context.requirement_summary,
+        *context.constraints,
+        *(
+            value
+            for item in context.use_cases
+            for value in (
+                item.title,
+                item.actor,
+                item.goal,
+                item.expected_outcome,
+            )
+        ),
+    ]
+    return not any(contains_cjk_text(value) for value in visible_values)
+
+
+def _english_recovery_scenario(
+    scenario: ErrorRecoveryScenario,
+) -> ErrorRecoveryScenario:
+    copy_by_kind = {
+        "permission": ErrorRecoveryScenario(
+            kind="permission",
+            preferred_component_types=("media_input",),
+            trigger_label="Simulate camera permission denial",
+            trigger_purpose=(
+                "Simulate denied camera permission offline without requesting "
+                "real browser permission."
+            ),
+            trigger_action="Simulate camera permission denial",
+            error_feedback=(
+                "Camera permission was denied. Return to use sample input, or "
+                "allow camera access and try again."
+            ),
+            recovery_label="Return and use sample input",
+            recovery_purpose=(
+                "Return to an actionable state and continue with offline "
+                "sample input."
+            ),
+            recovery_action="Recover by returning to sample input",
+            recovery_feedback=(
+                "The page is actionable again. Continue with sample input."
+            ),
+        ),
+        "input": ErrorRecoveryScenario(
+            kind="input",
+            preferred_component_types=("search_input", "form"),
+            trigger_label="Simulate invalid input",
+            trigger_purpose=(
+                "Simulate invalid input offline to verify the error reason "
+                "and recovery action."
+            ),
+            trigger_action="Simulate invalid input",
+            error_feedback=(
+                "The input is invalid. Return, update the value, and try again."
+            ),
+            recovery_label="Update the input and try again",
+            recovery_purpose=(
+                "Return to an actionable state, correct the input, and rerun "
+                "the normal flow."
+            ),
+            recovery_action="Recover by updating the input",
+            recovery_feedback=(
+                "The input state is available again. Update the value and "
+                "try again."
+            ),
+        ),
+        "generic": ErrorRecoveryScenario(
+            kind="generic",
+            preferred_component_types=(
+                "form",
+                "search_input",
+                "media_input",
+                "primary_action",
+                "data_view",
+                "location_picker",
+            ),
+            trigger_label="Simulate task failure",
+            trigger_purpose=(
+                "Simulate task failure offline to verify a clear reason and "
+                "recovery action."
+            ),
+            trigger_action="Simulate task failure",
+            error_feedback=(
+                "The task could not be completed. Return, check the input, "
+                "and try again."
+            ),
+            recovery_label="Return and try again",
+            recovery_purpose=(
+                "Return to an actionable state and rerun the normal flow "
+                "after correcting the issue."
+            ),
+            recovery_action="Recover by returning and trying again",
+            recovery_feedback=(
+                "The page is actionable again. You can retry the task."
+            ),
+        ),
+    }
+    return copy_by_kind[scenario.kind]
+
+
 class PageSpecBuilder:
     """Build ``req2web.page_spec.v1`` from an existing Agent context bundle."""
 
@@ -119,6 +233,7 @@ class PageSpecBuilder:
         if context.schema_version != AGENT_BUNDLE_SCHEMA_VERSION:
             raise ValueError(f"unsupported Agent context schema: {context.schema_version}")
         context.validate()
+        english_publication = _uses_english_publication_copy(context)
         for field_name in ("requirement_summary", "target_device", "task_type"):
             value = getattr(context, field_name)
             if not isinstance(value, str) or not value.strip():
@@ -192,7 +307,11 @@ class PageSpecBuilder:
                         component_id=output_id,
                         section_id=section_id,
                         component_type="status_panel",
-                        label=f"{use_case.title}反馈",
+                        label=(
+                            f"{use_case.title} feedback"
+                            if english_publication
+                            else f"{use_case.title} feedback"
+                        ),
                         purpose=use_case.expected_outcome,
                     ),
                 )
@@ -202,7 +321,11 @@ class PageSpecBuilder:
                     interaction_id=interaction_id,
                     trigger_component_id=action_id,
                     source_state_id="state-initial",
-                    action=f"执行：{use_case.goal}",
+                    action=(
+                        f"Perform: {use_case.goal}"
+                        if english_publication
+                        else f"Perform: {use_case.goal}"
+                    ),
                     target_state_id="state-success",
                     user_feedback=use_case.expected_outcome,
                     use_case_ids=[use_case.use_case_id],
@@ -220,6 +343,8 @@ class PageSpecBuilder:
         for description in context.constraints:
             scenario = match_error_recovery_constraint(description)
             if scenario is not None and scenario.kind not in seen_recovery_kinds:
+                if english_publication:
+                    scenario = _english_recovery_scenario(scenario)
                 recovery_matches.append(scenario)
                 seen_recovery_kinds.add(scenario.kind)
 
@@ -298,7 +423,11 @@ class PageSpecBuilder:
             PageState(
                 state_id="state-initial",
                 name="initial",
-                description="页面已就绪，核心任务入口可操作。",
+                description=(
+                    "The page is ready and the primary workflow is actionable."
+                    if english_publication
+                    else "The page is ready and the primary workflow is actionable."
+                ),
                 visible_component_ids=[
                     *action_component_ids,
                     *output_component_ids,
@@ -308,13 +437,21 @@ class PageSpecBuilder:
             PageState(
                 state_id="state-loading",
                 name="loading",
-                description="系统正在处理用户触发的核心任务。",
+                description=(
+                    "The system is processing the requested task."
+                    if english_publication
+                    else "The system is processing the requested task."
+                ),
                 visible_component_ids=output_component_ids.copy(),
             ),
             PageState(
                 state_id="state-error",
                 name="error",
-                description="任务无法完成时显示原因和可恢复操作。",
+                description=(
+                    "The page shows the failure reason and a recovery action."
+                    if english_publication
+                    else "The page shows the failure reason and a recovery action."
+                ),
                 visible_component_ids=[
                     *output_component_ids,
                     *error_recovery_component_ids,
@@ -323,7 +460,15 @@ class PageSpecBuilder:
             PageState(
                 state_id="state-success",
                 name="success",
-                description="核心任务完成并显示明确结果与后续入口。",
+                description=(
+                    "The primary task is complete with a clear result and "
+                    "next action."
+                    if english_publication
+                    else (
+                        "The primary task is complete with a clear result and "
+                        "next action."
+                    )
+                ),
                 visible_component_ids=[*action_component_ids, *output_component_ids],
             ),
         ]
@@ -340,7 +485,15 @@ class PageSpecBuilder:
                 PageState(
                     state_id="state-empty",
                     name="empty",
-                    description="暂无匹配内容时说明当前结果为空并提供下一步操作。",
+                    description=(
+                        "No matching content is available. The page explains "
+                        "the empty result and provides a next action."
+                        if english_publication
+                        else (
+                            "No matching content is available. The page explains "
+                            "the empty result and provides a next action."
+                        )
+                    ),
                     visible_component_ids=[*action_component_ids, *output_component_ids],
                 ),
             )
@@ -348,8 +501,24 @@ class PageSpecBuilder:
         constraint_descriptions = _deduplicate(
             [
                 *context.constraints,
-                f"页面必须适配目标设备：{context.target_device}",
-                "页面结构必须覆盖全部核心用例并提供明确状态反馈",
+                (
+                    f"The page must support the target device: "
+                    f"{context.target_device}"
+                    if english_publication
+                    else (
+                        f"The page must support the target device: "
+                        f"{context.target_device}"
+                    )
+                ),
+                (
+                    "The page structure must cover every core use case and "
+                    "provide clear state feedback"
+                    if english_publication
+                    else (
+                        "The page structure must cover every core use case and "
+                        "provide clear state feedback"
+                    )
+                ),
             ]
         )
         constraints = [
@@ -364,7 +533,15 @@ class PageSpecBuilder:
             AcceptanceCheck(
                 check_id=f"check-{index:02d}",
                 description=(
-                    f"用户完成“{use_case.title}”后，页面应{use_case.expected_outcome}。"
+                    (
+                        f'After the user completes "{use_case.title}", the '
+                        f"page must {use_case.expected_outcome}."
+                    )
+                    if english_publication
+                    else (
+                        f'After the user completes "{use_case.title}", the '
+                        f"page must {use_case.expected_outcome}."
+                    )
                 ),
                 use_case_ids=[use_case.use_case_id],
                 state_id="state-success",
@@ -377,7 +554,17 @@ class PageSpecBuilder:
                     AcceptanceCheck(
                         check_id=f"check-error-{scenario_token}",
                         description=(
-                            "明确错误恢复约束必须可确定性进入 error，并展示错误原因和恢复提示。"
+                            (
+                                "An explicit recovery constraint must "
+                                "deterministically enter the error state and "
+                                "show the reason plus a recovery action."
+                            )
+                            if english_publication
+                            else (
+                                "An explicit recovery constraint must "
+                                "deterministically enter the error state and "
+                                "show the reason plus a recovery action."
+                            )
                         ),
                         use_case_ids=[use_case_id],
                         state_id="state-error",
@@ -385,7 +572,16 @@ class PageSpecBuilder:
                     AcceptanceCheck(
                         check_id=f"check-recovery-{scenario_token}",
                         description=(
-                            "error 状态必须可通过恢复操作返回 initial，并可重新执行正常流程。"
+                            (
+                                "The recovery action must return from error "
+                                "to initial and allow the normal flow to run "
+                                "again."
+                            )
+                            if english_publication
+                            else (
+                                "The recovery action must return from error to "
+                                "initial and allow the normal flow to run again."
+                            )
                         ),
                         use_case_ids=[use_case_id],
                         state_id="state-initial",

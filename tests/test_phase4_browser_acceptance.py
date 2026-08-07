@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import copy
+from hashlib import sha256
 import json
 from pathlib import Path
 import shutil
@@ -265,6 +266,75 @@ class Phase4BrowserAcceptanceTest(unittest.TestCase):
             self.assertTrue(request["review_items"])
         finally:
             shutil.rmtree(root, ignore_errors=True)
+
+    def test_canonical_browser_audit_rejects_mixed_language_package(
+        self,
+    ) -> None:
+        temporary_root = (
+            ROOT
+            / "tests"
+            / ".tmp_phase4_browser_acceptance"
+            / self._testMethodName
+        )
+        shutil.rmtree(temporary_root, ignore_errors=True)
+        try:
+            package_root = temporary_root / "package"
+            output_root = temporary_root / "audit"
+            shutil.copytree(PACKAGE_ROOT, package_root)
+            context_path = package_root / "internal/agent_context.json"
+            context = json.loads(context_path.read_text(encoding="utf-8"))
+            context["requirement_summary"] += " \u4e2d\u6587"
+            context_raw = json.dumps(
+                context,
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode("utf-8")
+            context_path.write_bytes(context_raw)
+            manifest_path = package_root / "package_manifest.json"
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            row = next(
+                item
+                for item in manifest["files"]
+                if item["path"] == "internal/agent_context.json"
+            )
+            row["sha256"] = sha256(context_raw).hexdigest()
+            row["size"] = len(context_raw)
+            manifest_path.write_text(
+                json.dumps(
+                    manifest,
+                    ensure_ascii=False,
+                    sort_keys=True,
+                    separators=(",", ":"),
+                ),
+                encoding="utf-8",
+            )
+            source_identity = {
+                "identity_kind": "canonical_json",
+                "sha256": "sha256:" + "a" * 64,
+                "byte_length": 10,
+                "revision": "test.case_summary.v1",
+            }
+
+            with self.assertRaisesRegex(
+                Phase4BrowserAcceptanceError,
+                "English-only package",
+            ):
+                run_real_browser_case_audit(
+                    package_root=package_root,
+                    output_root=output_root,
+                    run_id="canonical-english-only-test",
+                    case_index=1,
+                    case_id="case-01",
+                    evidence_scope="phase4_canonical_canary",
+                    source_case_summary_identity=source_identity,
+                    backend_factory=lambda *_: self.fail(
+                        "browser backend must not be created"
+                    ),
+                )
+            self.assertFalse(output_root.exists())
+        finally:
+            shutil.rmtree(temporary_root, ignore_errors=True)
 
     @unittest.skipIf(
         sys.platform == "win32",

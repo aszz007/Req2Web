@@ -6,15 +6,23 @@ import shutil
 import sys
 import time
 import unittest
+from unittest.mock import patch
 import uuid
 
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "src"))
 
+from req2web_agent import (  # noqa: E402
+    PROMPT_AUTHORITY_IDENTITY,
+    PROMPT_AUTHORITY_REVISION,
+)
 from req2web_runtime.phase5_formal_runner import (  # noqa: E402
+    ACCEPTED_PHASE4_CANONICAL_FULL_FLOW_RUNNER,
     NODE_ORDER,
+    PHASE5_FORMAL_EXECUTION_STATUS,
     Phase5FormalRunnerError,
+    SYNTHETIC_VALIDATION_FLOW_ROLE,
     SyntheticPhase5CaseWorker,
     _record_id,
     build_phase5_local_assembly_bindings,
@@ -85,6 +93,39 @@ class Phase5FormalRunnerTest(unittest.TestCase):
             self.assertEqual(summary[key], 0, key)
         self.assertFalse(summary["owner_evaluation_executed"])
         self.assertFalse(summary["formal_quality_claimed"])
+        manifest = json.loads(
+            (result_root / "run_manifest.json").read_text(encoding="utf-8")
+        )
+        self.assertEqual(
+            manifest["phase5_formal_execution_status"],
+            PHASE5_FORMAL_EXECUTION_STATUS,
+        )
+        self.assertEqual(
+            manifest["accepted_phase4_canonical_full_flow_runner"],
+            ACCEPTED_PHASE4_CANONICAL_FULL_FLOW_RUNNER,
+        )
+        self.assertFalse(
+            manifest["phase5_manual_formal_f1_f4_loop_allowed"]
+        )
+        self.assertFalse(manifest["phase5_manual_f1_f4_loop_used"])
+        self.assertFalse(manifest["phase5_independent_b_allowed"])
+        self.assertFalse(manifest["phase5_independent_prompt_allowed"])
+        self.assertFalse(manifest["phase5_independent_downstream_allowed"])
+        self.assertTrue(
+            manifest["shared_phase4_langgraph_used_for_synthetic_validation"]
+        )
+        self.assertEqual(
+            manifest["phase4_real_model_graph_runtime_class"],
+            "Phase4RealModelGraphRuntime",
+        )
+        self.assertEqual(
+            manifest["synthetic_validation_flow_role"],
+            SYNTHETIC_VALIDATION_FLOW_ROLE,
+        )
+        self.assertFalse(manifest["synthetic_validation_is_active_full_flow"])
+        self.assertFalse(
+            manifest["historical_phase_specific_prompts_are_runtime_sources"]
+        )
         self.assertEqual(
             validate_phase5_formal_result_root(
                 package=self.package,
@@ -108,6 +149,18 @@ class Phase5FormalRunnerTest(unittest.TestCase):
                 case["supervisor_receipt"]["generate_calls"],
                 {node: 1 for node in NODE_ORDER},
             )
+            self.assertTrue((case_root / "langgraph_final_state.json").is_file())
+            self.assertTrue((case_root / "langgraph_events.json").is_file())
+            graph_state = json.loads(
+                (case_root / "langgraph_final_state.json").read_text(
+                    encoding="utf-8"
+                )
+            )
+            self.assertEqual(graph_state["status"], "completed")
+            self.assertEqual(
+                graph_state["graph_revision"],
+                manifest["phase4_real_model_graph_revision"],
+            )
             for node in NODE_ORDER:
                 attempt = case_root / "attempts" / node
                 for filename in (
@@ -118,16 +171,53 @@ class Phase5FormalRunnerTest(unittest.TestCase):
                     "request.json",
                     "generation_started.json",
                     "raw_response.bin",
-                    "registered_graph_state.json",
                     "attempt_result.json",
                 ):
                     self.assertTrue((attempt / filename).is_file(), filename)
                 receipt = json.loads(
                     (attempt / "attempt_result.json").read_text(encoding="utf-8")
                 )
+                prompt = json.loads(
+                    (attempt / "prompt.json").read_text(encoding="utf-8")
+                )
+                self.assertEqual(
+                    prompt["prompt_revision"],
+                    PROMPT_AUTHORITY_REVISION,
+                )
+                self.assertEqual(
+                    prompt["prompt_authority_identity"],
+                    PROMPT_AUTHORITY_IDENTITY,
+                )
                 self.assertEqual(receipt["status"], "raw_contract_pass")
                 self.assertTrue(receipt["generate_started"])
                 self.assertFalse(receipt["automatic_retry"])
+
+    def test_real_package_kinds_fail_closed_before_worker_creation(self) -> None:
+        for package_kind in (
+            "owner_sealed_formal_h1",
+            "project_authored_path2_model_pilot",
+        ):
+            with self.subTest(package_kind=package_kind):
+                payload = self.package.to_dict()
+                payload["package_kind"] = package_kind
+                with patch.object(
+                    type(self.package),
+                    "to_dict",
+                    return_value=payload,
+                ):
+                    with self.assertRaisesRegex(
+                        Phase5FormalRunnerError,
+                        "formal model/H1 action remains disabled",
+                    ):
+                        run_phase5_formal_runner(
+                            package=self.package,
+                            result_root=(
+                                self.temp / f"paused-{package_kind}"
+                            ).resolve(),
+                            worker_factory=lambda row: self.fail(
+                                f"paused formal package created worker: {row}"
+                            ),
+                        )
 
     def test_provider_artifacts_exclude_local_row_intervention_and_gold(self) -> None:
         result_root = (self.temp / "visibility").resolve()

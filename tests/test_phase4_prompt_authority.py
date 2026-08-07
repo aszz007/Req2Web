@@ -52,6 +52,12 @@ class Phase4PromptAuthorityTest(unittest.TestCase):
                 "historical_phase_specific_revisions_are_runtime_sources"
             ]
         )
+        instructions = "\n".join(manifest["instructions"])
+        self.assertIn(
+            "user-visible natural-language value in English only",
+            instructions,
+        )
+        self.assertIn("Do not emit Han characters", instructions)
 
     def test_prompt_replays_from_exact_input_and_plan(self) -> None:
         input_bytes = _canonical(

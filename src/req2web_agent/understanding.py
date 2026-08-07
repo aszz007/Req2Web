@@ -7,7 +7,7 @@ from .schema import RequirementUnderstanding, UseCase
 
 
 class RequirementUnderstandingProvider(Protocol):
-    """Replaceable requirement-understanding boundary; no remote service required."""
+    """Replaceable requirement-understanding boundary."""
 
     def understand(
         self,
@@ -20,129 +20,269 @@ class RequirementUnderstandingProvider(Protocol):
 
 
 DEVICE_RULES = (
-    ("mobile", ("移动端", "手机", " app", "app ")),
-    ("responsive_web", ("响应式", "多端", "desktop tablet mobile")),
+    ("mobile", ("\u79fb\u52a8\u7aef", "\u624b\u673a", " app", "app ")),
+    (
+        "responsive_web",
+        ("\u54cd\u5e94\u5f0f", "\u591a\u7aef", "desktop tablet mobile"),
+    ),
     ("mobile", ("mobile",)),
-    ("tablet", ("平板", "tablet")),
-    ("desktop", ("桌面端", "desktop")),
-    ("web", ("网页", "网站", "web", "browser")),
+    ("tablet", ("\u5e73\u677f", "tablet")),
+    ("desktop", ("\u684c\u9762\u7aef", "desktop")),
+    ("web", ("\u7f51\u9875", "\u7f51\u7ad9", "web", "browser")),
 )
 
 TASK_RULES = (
-    ("ecommerce", ("电商", "商品", "购物车", "结算", "商城", "commerce", "shop")),
-    ("location_service", ("地图", "地址", "定位", "location", "map")),
-    ("content_platform", ("文章", "媒体", "视频", "内容", "media", "content")),
-    ("social_communication", ("聊天", "消息", "社交", "评论", "chat", "message")),
-    ("dashboard", ("后台", "管理", "仪表盘", "统计", "dashboard", "admin")),
-    ("recognition_tool", ("识别", "检测", "分析", "recognition", "detect", "analyze")),
+    (
+        "ecommerce",
+        (
+            "\u7535\u5546",
+            "\u5546\u54c1",
+            "\u8d2d\u7269\u8f66",
+            "\u7ed3\u7b97",
+            "\u5546\u57ce",
+            "commerce",
+            "shop",
+        ),
+    ),
+    (
+        "location_service",
+        ("\u5730\u56fe", "\u5730\u5740", "\u5b9a\u4f4d", "location", "map"),
+    ),
+    (
+        "content_platform",
+        (
+            "\u6587\u7ae0",
+            "\u5a92\u4f53",
+            "\u89c6\u9891",
+            "\u5185\u5bb9",
+            "media",
+            "content",
+        ),
+    ),
+    (
+        "social_communication",
+        (
+            "\u804a\u5929",
+            "\u6d88\u606f",
+            "\u793e\u4ea4",
+            "\u8bc4\u8bba",
+            "chat",
+            "message",
+        ),
+    ),
+    (
+        "dashboard",
+        (
+            "\u540e\u53f0",
+            "\u7ba1\u7406",
+            "\u4eea\u8868\u76d8",
+            "\u7edf\u8ba1",
+            "dashboard",
+            "admin",
+        ),
+    ),
+    (
+        "recognition_tool",
+        (
+            "\u8bc6\u522b",
+            "\u68c0\u6d4b",
+            "\u5206\u6790",
+            "recognition",
+            "detect",
+            "analyze",
+        ),
+    ),
 )
 
 FEATURE_RULES = (
     (
-        "登录与身份验证",
-        ("登录", "注册", "鉴权", "login", "sign in", "register"),
-        "完成身份验证并进入可用状态",
+        "Sign in and authenticate",
+        (
+            "\u767b\u5f55",
+            "\u6ce8\u518c",
+            "\u9274\u6743",
+            "login",
+            "sign in",
+            "register",
+        ),
+        "Complete authentication and enter a usable signed-in state",
     ),
     (
-        "搜索、筛选与查看详情",
+        "Search, filter, and inspect details",
         (
-            "搜索",
-            "筛选",
-            "查询",
-            "列表",
-            "详情",
-            "商品",
-            "目录",
+            "\u641c\u7d22",
+            "\u7b5b\u9009",
+            "\u67e5\u8be2",
+            "\u5217\u8868",
+            "\u8be6\u60c5",
+            "\u5546\u54c1",
+            "\u76ee\u5f55",
             "search",
             "filter",
             "list",
             "detail",
             "product",
         ),
-        "快速定位候选内容并查看关键信息",
+        "Locate relevant options quickly and review their key details",
     ),
     (
-        "购物车与结算",
+        "Manage the cart and complete checkout",
         (
-            "购物车",
-            "加购",
-            "结算",
-            "支付",
-            "下单",
+            "\u8d2d\u7269\u8f66",
+            "\u52a0\u8d2d",
+            "\u7ed3\u7b97",
+            "\u652f\u4ed8",
+            "\u4e0b\u5355",
             "cart",
             "basket",
             "checkout",
             "payment",
             "order",
         ),
-        "保存待购买项目、完成订单并获得结果反馈",
+        "Keep selected items, complete the order, and receive clear feedback",
     ),
     (
-        "拍摄或上传素材",
-        ("拍照", "上传", "图片", "upload", "camera", "photo"),
-        "提交可供系统处理的素材",
+        "Capture or upload media",
+        (
+            "\u62cd\u7167",
+            "\u4e0a\u4f20",
+            "\u56fe\u7247",
+            "upload",
+            "camera",
+            "photo",
+        ),
+        "Provide media that the system can process",
     ),
     (
-        "执行识别或分析",
-        ("识别", "检测", "分析", "recognition", "detect", "analyze"),
-        "获得清楚、可理解的分析结果",
+        "Run recognition or analysis",
+        (
+            "\u8bc6\u522b",
+            "\u68c0\u6d4b",
+            "\u5206\u6790",
+            "recognition",
+            "detect",
+            "analyze",
+        ),
+        "Receive a clear and understandable analysis result",
     ),
     (
-        "查看结果与状态",
-        ("展示结果", "查看结果", "结果", "状态", "result", "status"),
-        "理解处理结果及下一步操作",
+        "Review results and status",
+        (
+            "\u5c55\u793a\u7ed3\u679c",
+            "\u67e5\u770b\u7ed3\u679c",
+            "\u7ed3\u679c",
+            "\u72b6\u6001",
+            "result",
+            "status",
+        ),
+        "Understand the result and the next available action",
     ),
     (
-        "填写并提交表单",
-        ("表单", "填写", "提交", "form", "submit", "input"),
-        "完成有效输入并收到提交反馈",
+        "Complete and submit a form",
+        (
+            "\u8868\u5355",
+            "\u586b\u5199",
+            "\u63d0\u4ea4",
+            "form",
+            "submit",
+            "input",
+        ),
+        "Provide valid input and receive submission feedback",
     ),
     (
-        "查看地图与选择位置",
-        ("地图", "地址", "位置", "定位", "map", "address", "location"),
-        "找到目标地点并确认位置",
+        "Review a map and choose a location",
+        (
+            "\u5730\u56fe",
+            "\u5730\u5740",
+            "\u4f4d\u7f6e",
+            "\u5b9a\u4f4d",
+            "map",
+            "address",
+            "location",
+        ),
+        "Find the intended place and confirm the selected location",
     ),
     (
-        "查看数据概览",
-        ("仪表盘", "统计", "图表", "dashboard", "chart", "analytics"),
-        "快速理解关键指标与状态",
+        "Review a data overview",
+        (
+            "\u4eea\u8868\u76d8",
+            "\u7edf\u8ba1",
+            "\u56fe\u8868",
+            "dashboard",
+            "chart",
+            "analytics",
+        ),
+        "Understand the key metrics and current status quickly",
     ),
 )
 
 CONSTRAINT_RULES = (
-    (("响应式", "多端", "responsive"), "适配不同屏幕尺寸的响应式布局"),
-    (("无障碍", "accessibility", "a11y"), "支持基础无障碍访问"),
-    (("离线", "offline"), "支持离线或弱网场景"),
-    (("权限", "permission"), "处理权限不足与拒绝授权"),
-    (("错误", "异常", "失败", "error", "failure"), "提供输入错误和异常状态反馈"),
-    (("性能", "快速", "performance"), "保持关键交互响应及时"),
+    (
+        ("\u54cd\u5e94\u5f0f", "\u591a\u7aef", "responsive"),
+        "Use a responsive layout across supported screen sizes",
+    ),
+    (
+        ("\u65e0\u969c\u788d", "accessibility", "a11y"),
+        "Support baseline accessible operation",
+    ),
+    (
+        ("\u79bb\u7ebf", "offline"),
+        "Support offline or weak-network conditions",
+    ),
+    (
+        ("\u6743\u9650", "permission"),
+        "Handle missing or denied permissions",
+    ),
+    (
+        (
+            "\u9519\u8bef",
+            "\u5f02\u5e38",
+            "\u5931\u8d25",
+            "error",
+            "failure",
+        ),
+        "Show clear input and runtime error feedback",
+    ),
+    (
+        ("\u6027\u80fd", "\u5feb\u901f", "performance"),
+        "Keep critical interactions responsive",
+    ),
 )
 
 DEVICE_LABELS = {
-    "responsive_web": "响应式 Web",
-    "mobile": "移动端",
-    "tablet": "平板端",
-    "desktop": "桌面端",
-    "web": "Web",
-    "unspecified": "未指定设备的",
+    "responsive_web": "responsive web",
+    "mobile": "mobile",
+    "tablet": "tablet",
+    "desktop": "desktop",
+    "web": "web",
+    "unspecified": "device-neutral",
 }
 
 TASK_LABELS = {
-    "ecommerce": "电商应用",
-    "location_service": "位置服务应用",
-    "content_platform": "内容平台",
-    "social_communication": "社交沟通应用",
-    "dashboard": "数据管理应用",
-    "recognition_tool": "识别分析工具",
-    "web_application": "交互应用",
+    "ecommerce": "e-commerce application",
+    "location_service": "location-service application",
+    "content_platform": "content platform",
+    "social_communication": "social communication application",
+    "dashboard": "data-management application",
+    "recognition_tool": "recognition and analysis tool",
+    "web_application": "interactive application",
 }
+
+_CJK_TEXT = re.compile(
+    r"[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff"
+    r"\U00020000-\U0002fa1f]"
+)
 
 
 def _normalize(text: str) -> str:
     return re.sub(r"\s+", " ", text).strip()
 
 
-def _infer(value: str, rules: tuple[tuple[str, tuple[str, ...]], ...], fallback: str) -> str:
+def _infer(
+    value: str,
+    rules: tuple[tuple[str, tuple[str, ...]], ...],
+    fallback: str,
+) -> str:
     lowered = f" {value.casefold()} "
     for label, keywords in rules:
         if any(keyword in lowered for keyword in keywords):
@@ -171,9 +311,18 @@ def _build_use_cases(requirement: str) -> list[UseCase]:
             break
 
     fallbacks = (
-        ("浏览核心功能入口", "找到主要操作入口和当前状态"),
-        ("完成核心任务", "完成需求目标并获得明确反馈"),
-        ("确认结果或异常", "理解成功、失败和可继续执行的操作"),
+        (
+            "Review the primary workflow entry points",
+            "Find the main actions and understand the current state",
+        ),
+        (
+            "Complete the primary task",
+            "Complete the requested goal and receive clear feedback",
+        ),
+        (
+            "Confirm the result or recover from an error",
+            "Understand success, failure, and the next available action",
+        ),
     )
     for item in fallbacks:
         if len(selected) >= 2:
@@ -185,7 +334,7 @@ def _build_use_cases(requirement: str) -> list[UseCase]:
         UseCase(
             use_case_id=f"UC-{index:02d}",
             title=title,
-            actor="用户",
+            actor="User",
             goal=title,
             expected_outcome=outcome,
         )
@@ -194,7 +343,18 @@ def _build_use_cases(requirement: str) -> list[UseCase]:
 
 
 class DeterministicRequirementProvider:
-    """Rule-based first version that can later be replaced by another provider."""
+    """Deterministic English requirement understanding for the active flow."""
+
+    def __init__(
+        self,
+        *,
+        output_language: str = "en",
+        strict_english_input: bool = False,
+    ) -> None:
+        if output_language != "en":
+            raise ValueError("the active requirement provider supports English only")
+        self.output_language = output_language
+        self.strict_english_input = strict_english_input
 
     def understand(
         self,
@@ -208,11 +368,28 @@ class DeterministicRequirementProvider:
         if not requirement:
             raise ValueError("original_requirement must not be empty")
 
+        explicit_constraints = list(constraints)
+        if self.strict_english_input:
+            publication_inputs = [
+                requirement,
+                target_device or "",
+                task_type or "",
+                *explicit_constraints,
+            ]
+            if any(_CJK_TEXT.search(value) for value in publication_inputs):
+                raise ValueError(
+                    "English publication understanding requires English inputs"
+                )
+
         inferred_device = target_device or _infer(
-            requirement, DEVICE_RULES, "unspecified"
+            requirement,
+            DEVICE_RULES,
+            "unspecified",
         )
         inferred_task = task_type or _infer(
-            requirement, TASK_RULES, "web_application"
+            requirement,
+            TASK_RULES,
+            "web_application",
         )
         use_cases = _build_use_cases(requirement)
 
@@ -221,14 +398,21 @@ class DeterministicRequirementProvider:
             for keywords, normalized in CONSTRAINT_RULES
             if any(keyword in requirement.casefold() for keyword in keywords)
         ]
-        all_constraints = _deduplicate([*constraints, *detected_constraints])
+        all_constraints = _deduplicate(
+            [*explicit_constraints, *detected_constraints]
+        )
         target_label = DEVICE_LABELS.get(inferred_device, inferred_device)
         task_label = TASK_LABELS.get(inferred_task, inferred_task)
-        feature_summary = "、".join(use_case.title for use_case in use_cases)
-        short_requirement = requirement[:180] + ("…" if len(requirement) > 180 else "")
+        feature_summary = ", ".join(item.title for item in use_cases)
+        if _CJK_TEXT.search(requirement):
+            requirement_focus = "the supplied requirement"
+        else:
+            requirement_focus = requirement[:180]
+            if len(requirement) > 180:
+                requirement_focus += "..."
         summary = (
-            f"构建{target_label}{task_label}，围绕“{short_requirement}”，"
-            f"核心流程包括{feature_summary}。"
+            f'Build a {target_label} {task_label} for "{requirement_focus}". '
+            f"Core flows include {feature_summary}."
         )
         return RequirementUnderstanding(
             requirement_summary=summary,

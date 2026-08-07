@@ -14,7 +14,12 @@ from req2web_agent import (
     MinimalAgentChain,
     PROMPT_AUTHORITY_IDENTITY,
 )
-from req2web_generation import RetrievalGuidanceBuilder
+from req2web_generation import (
+    ENGLISH_PUBLICATION_LANGUAGE_POLICY_VERSION,
+    PublicationLanguageError,
+    RetrievalGuidanceBuilder,
+    validate_english_publication_value,
+)
 from req2web_orchestration.phase4_canonical_b_adapter import (
     ADAPTER_REVISION,
     adapt_agent_context_to_phase4_canonical_b,
@@ -63,7 +68,10 @@ class Phase4CanonicalFullFlowError(ValueError):
 
 class _RecordingRequirementProvider:
     def __init__(self) -> None:
-        self._provider = DeterministicRequirementProvider()
+        self._provider = DeterministicRequirementProvider(
+            output_language="en",
+            strict_english_input=True,
+        )
         self.calls: list[dict[str, object]] = []
 
     def understand(
@@ -264,6 +272,15 @@ def _build_upstream(
     index_dir: Path,
     output_root: Path,
 ) -> dict[str, object]:
+    try:
+        validate_english_publication_value(
+            dict(case),
+            artifact_name="raw_input",
+        )
+    except PublicationLanguageError as exc:
+        raise Phase4CanonicalFullFlowError(
+            "English-only raw input gate failed closed"
+        ) from exc
     scope_receipt = validate_supported_requirement_scope(case["requirement"])
     _write_json(output_root / "scope_receipt.json", scope_receipt)
     if scope_receipt["supported"] is not True:
@@ -303,6 +320,24 @@ def _build_upstream(
             "formal upstream call accounting drifted"
         )
     requirement_understanding = provider.calls[0]["result"]
+    try:
+        for name, value in (
+            ("raw_input", dict(case)),
+            ("requirement_understanding", requirement_understanding),
+            ("retrieval_calls", retriever.calls),
+            ("agent_context", context.to_dict()),
+            ("retrieval_guidance", guidance.to_dict()),
+            ("canonical_b", adaptation.b_input),
+            ("canonical_b_adapter_receipt", adaptation.receipt),
+        ):
+            validate_english_publication_value(
+                value,
+                artifact_name=name,
+            )
+    except PublicationLanguageError as exc:
+        raise Phase4CanonicalFullFlowError(
+            "English-only upstream artifact gate failed closed"
+        ) from exc
     _write_json(
         output_root / "raw_input.json",
         copy.deepcopy(dict(case)),
@@ -339,7 +374,13 @@ def _build_upstream(
             scope_receipt,
             revision="req2web.phase4.requirement_scope_check.v1",
         ),
-        "requirement_provider": "DeterministicRequirementProvider",
+        "requirement_provider": (
+            "DeterministicRequirementProvider("
+            "output_language=en,strict_english_input=true)"
+        ),
+        "publication_language_policy": (
+            ENGLISH_PUBLICATION_LANGUAGE_POLICY_VERSION
+        ),
         "requirement_provider_call_count": 1,
         "retriever_backend": "tfidf",
         "retriever_index_root": str(index_dir),

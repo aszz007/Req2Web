@@ -40,7 +40,12 @@ class DeliverySidecarTest(TestCase):
         shutil.rmtree(self.root.parent, ignore_errors=True)
 
     def _package(self, *, asset_refs: bool = False, injected_title: str | None = None):
-        context = build_context(constraints=["输入错误时显示错误并允许修改输入后重试"])
+        context = build_context(
+            constraints=[
+                "Show an error after invalid input and allow the user to "
+                "correct the value and retry."
+            ]
+        )
         if asset_refs:
             refs = [
                 {"kind": "screenshot", "uri": "fixtures/ui.png"},
@@ -80,7 +85,14 @@ class DeliverySidecarTest(TestCase):
         self.assertEqual(paths, ["delivery_manifest.json", "index.html", "storyboard.json", "styles.css", "ui_references.json"])
         refs = json.loads((result.output_dir / "ui_references.json").read_text(encoding="utf-8"))
         self.assertTrue(all(item["delivery_mode"] == "reference_only" for item in refs["references"]))
-        self.assertEqual(refs["source_statement"], "参考图来自检索数据，只作设计参考，不代表生成页面截图或视觉理解。")
+        self.assertEqual(
+            refs["source_statement"],
+            (
+                "Reference images come from retrieval data and are design "
+                "references only; they are not generated-page screenshots "
+                "or visual understanding evidence."
+            ),
+        )
         storyboard = json.loads((result.output_dir / "storyboard.json").read_text(encoding="utf-8"))
         self.assertTrue(storyboard["semantics"]["scenario_boards_not_single_global_journey"])
         self.assertGreater(result.step_count, 0)

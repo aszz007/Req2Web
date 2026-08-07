@@ -10,14 +10,20 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "src"))
 
+from req2web_generation import contains_cjk_text  # noqa: E402
 from req2web_rag.corpus import ROLE_ORDER, build_unified_documents  # noqa: E402
-from req2web_rag.index import TfidfIndex, build_tfidf_index  # noqa: E402
+from req2web_rag.index import (  # noqa: E402
+    RETRIEVAL_RESULT_PROJECTION_REVISION,
+    TfidfIndex,
+    build_tfidf_index,
+)
 from req2web_rag.schema import validate_document  # noqa: E402
 
 
 DEMO_QUERY = (
-    "移动端电商应用，支持登录、搜索筛选商品、购物车和结算，需要响应式页面、"
-    "点击流程，以及输入错误和权限异常的验收"
+    "Create a responsive mobile commerce page with sign-in, product search "
+    "and filters, a cart, checkout, clear interactions, and acceptance "
+    "coverage for invalid input and denied permissions."
 )
 
 
@@ -92,6 +98,17 @@ class RagPipelineTest(unittest.TestCase):
             self.assertGreater(len(items), 0, role)
             self.assertTrue(all(item["role"] == role for item in items), role)
             self.assertTrue(all(item["score"] > 0 for item in items), role)
+            for item in items:
+                self.assertEqual(
+                    item["result_projection_revision"],
+                    RETRIEVAL_RESULT_PROJECTION_REVISION,
+                )
+                self.assertFalse(contains_cjk_text(item["title"]))
+                self.assertFalse(contains_cjk_text(item["summary"]))
+                for reference in item["references"]:
+                    uri = reference.get("uri", "")
+                    self.assertFalse(contains_cjk_text(uri))
+                    self.assertTrue(uri.isascii())
 
 
 if __name__ == "__main__":

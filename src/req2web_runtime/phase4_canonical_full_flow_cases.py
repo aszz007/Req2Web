@@ -37,11 +37,11 @@ _OUT_OF_SCOPE_MARKERS = (
     "entire enterprise system",
     "multi-tenant platform",
     "all business modules",
-    "完整企业系统",
-    "完整医院管理系统",
-    "完整学校管理系统",
-    "多租户平台",
-    "全部业务模块",
+    "\u5b8c\u6574\u4f01\u4e1a\u7cfb\u7edf",
+    "\u5b8c\u6574\u533b\u9662\u7ba1\u7406\u7cfb\u7edf",
+    "\u5b8c\u6574\u5b66\u6821\u7ba1\u7406\u7cfb\u7edf",
+    "\u591a\u79df\u6237\u5e73\u53f0",
+    "\u5168\u90e8\u4e1a\u52a1\u6a21\u5757",
 )
 _MAX_REQUIREMENT_CHARACTERS = 1_200
 
