@@ -73,6 +73,14 @@ class Phase4PromptAuthorityTest(unittest.TestCase):
             "dedicated advancement control",
             f1_instructions,
         )
+        self.assertIn(
+            "Proceed to Checkout",
+            f1_instructions,
+        )
+        self.assertIn(
+            "does not replace a dedicated control",
+            f1_instructions,
+        )
         self.assertIn("required_f1_component_order", f2_instructions)
         self.assertIn("exact subsequence", f2_instructions)
 
@@ -284,6 +292,73 @@ class Phase4PromptAuthorityTest(unittest.TestCase):
                 plan[index + 1]["allowed_trigger_component_local_ids"],
                 [plan[index + 1]["required_trigger_component_local_id"]],
             )
+
+    def test_shared_f3_plan_does_not_treat_active_validation_as_error(
+        self,
+    ) -> None:
+        plan = build_canonical_f3_interaction_plan(
+            f1_registered_structure_view={
+                "components": [
+                    {
+                        "local_id": "search_input",
+                        "component_type": "input",
+                        "label": "Search",
+                        "purpose": "Search available items.",
+                    },
+                    {
+                        "local_id": "proceed_button",
+                        "component_type": "action_button",
+                        "label": "Proceed to Checkout",
+                        "purpose": "Advance from cart review to checkout.",
+                    },
+                    {
+                        "local_id": "checkout_form",
+                        "component_type": "form",
+                        "label": "Checkout Details",
+                        "purpose": "Collect shipping and payment details.",
+                    },
+                    {
+                        "local_id": "submit_button",
+                        "component_type": "action_button",
+                        "label": "Submit Order",
+                        "purpose": "Submit the final order.",
+                    },
+                ]
+            },
+            f2_registered_state_visibility_view={
+                "states": [
+                    {
+                        "local_id": "state-cart",
+                        "name": "Cart Review",
+                        "description": "Review selected items.",
+                        "visible_component_local_ids": [
+                            "search_input",
+                            "proceed_button",
+                        ],
+                    },
+                    {
+                        "local_id": "state-checkout",
+                        "name": "Complete Order",
+                        "description": (
+                            "Enter shipping and payment details while inline "
+                            "validation is active."
+                        ),
+                        "visible_component_local_ids": [
+                            "checkout_form",
+                            "submit_button",
+                        ],
+                    },
+                ]
+            },
+        )
+        self.assertEqual(
+            plan[1]["required_trigger_component_local_id"],
+            "proceed_button",
+        )
+        self.assertEqual(
+            plan[2]["required_trigger_component_local_id"],
+            "checkout_form",
+        )
 
     def test_f4_prompt_reconstructs_reference_contract_key_order(self) -> None:
         input_bytes = _canonical(

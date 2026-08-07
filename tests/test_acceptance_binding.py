@@ -20,6 +20,7 @@ from req2web_acceptance import (
     compile_acceptance_plan,
     project_requirement_view,
 )
+from req2web_acceptance.binding import _is_semantic_error_state
 from req2web_agent import AgentContextBundle, UseCase
 from req2web_generation import DeterministicPageRenderer, PageSpecBuilder
 from req2web_rag.corpus import ROLE_ORDER
@@ -577,6 +578,25 @@ class AcceptanceBindingTest(unittest.TestCase):
                 recovery.interaction_id,
             ],
         )
+
+    def test_error_state_classifier_ignores_active_validation_copy(self) -> None:
+        normal_state = next(
+            item for item in self.spec.states if item.name == "success"
+        )
+        normal_state.name = "Complete Order"
+        normal_state.description = (
+            "Enter shipping and payment details while inline validation is active."
+        )
+        error_state = next(
+            item for item in self.spec.states if item.name == "error"
+        )
+        error_state.name = "Validation Error"
+        error_state.description = (
+            "Validation failed and invalid input requires correction."
+        )
+
+        self.assertFalse(_is_semantic_error_state(normal_state))
+        self.assertTrue(_is_semantic_error_state(error_state))
 
     def test_supported_recovery_without_matching_stable_fixture_fails(self) -> None:
         bundle = make_bundle(

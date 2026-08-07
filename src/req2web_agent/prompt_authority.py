@@ -16,7 +16,7 @@ from typing import Mapping
 PROMPT_AUTHORITY_SCHEMA_VERSION = "req2web.agent.f1_f4_prompt_authority.v1"
 PROMPT_SCHEMA_VERSION = "req2web.agent.f1_f4_prompt.v1"
 PROMPT_AUTHORITY_REVISION = (
-    "f3_f4_explicit_actual_state_plan_a07a_direct_english_v11"
+    "f3_f4_explicit_actual_state_plan_a07a_direct_english_v12"
 )
 REGISTRY_REVISION = "req2web.phase4.registry.p4_02a.v1"
 NODE_ORDER = ("F1", "F2", "F3", "F4")
@@ -232,6 +232,13 @@ def _node_specific_instructions() -> dict[str, list[str]]:
                 "distinct from the input, list, summary, or feedback component "
                 "used for the in-state work."
             ),
+            (
+                "Name and describe each advancement control with its actual "
+                "transition purpose, such as Proceed to Checkout, Continue, "
+                "Submit, or Retry. A generic cart-update or remove-items action "
+                "group does not replace a dedicated control that advances from "
+                "cart review to checkout."
+            ),
         ],
         "F2": [
             (
@@ -396,6 +403,53 @@ def _f3_has_any(text: str, words: tuple[str, ...]) -> bool:
     return any(word in text for word in words)
 
 
+def _f3_is_error_state(value: Mapping[str, object]) -> bool:
+    name = str(value.get("name", "")).strip().lower()
+    description = str(value.get("description", "")).strip().lower()
+    if _f3_has_any(
+        name,
+        ("error", "failed", "failure", "invalid", "denied"),
+    ):
+        return True
+    return _f3_has_any(
+        description,
+        (
+            "validation error",
+            "validation failed",
+            "validation fails",
+            "validation failure",
+            "failed validation",
+            "invalid input",
+            "invalid data",
+            "error state",
+            "failure state",
+            "permission denied",
+            "access denied",
+        ),
+    )
+
+
+def _f3_is_success_state(value: Mapping[str, object]) -> bool:
+    name = str(value.get("name", "")).strip().lower()
+    description = str(value.get("description", "")).strip().lower()
+    if _f3_has_any(
+        name,
+        ("success", "confirmed", "recovered", "recovery"),
+    ):
+        return True
+    return _f3_has_any(
+        description,
+        (
+            "final state",
+            "success message",
+            "success feedback",
+            "successfully completed",
+            "order confirmed",
+            "recovery complete",
+        ),
+    )
+
+
 def _f3_forward_score(
     component: Mapping[str, object],
     *,
@@ -404,20 +458,9 @@ def _f3_forward_score(
 ) -> int:
     text = _f3_text(component)
     component_type = str(component.get("component_type", "")).lower()
-    source_text = _f3_text(source_state)
-    target_text = _f3_text(target_state)
-    target_is_error = _f3_has_any(
-        target_text,
-        ("error", "validation", "failure", "invalid"),
-    )
-    source_is_error = _f3_has_any(
-        source_text,
-        ("error", "validation", "failure", "invalid"),
-    )
-    target_is_success = _f3_has_any(
-        target_text,
-        ("success", "confirmed", "confirmation", "recovered", "complete"),
-    )
+    target_is_error = _f3_is_error_state(target_state)
+    source_is_error = _f3_is_error_state(source_state)
+    target_is_success = _f3_is_success_state(target_state)
     is_button = _f3_has_any(component_type, ("button", "action", "control"))
     is_form = _f3_has_any(
         component_type,
@@ -464,10 +507,7 @@ def _f3_same_state_score(
 ) -> int:
     text = _f3_text(component)
     component_type = str(component.get("component_type", "")).lower()
-    source_is_error = _f3_has_any(
-        _f3_text(source_state),
-        ("error", "validation", "failure", "invalid"),
-    )
+    source_is_error = _f3_is_error_state(source_state)
     is_feedback = _f3_has_any(
         component_type + " " + text,
         ("alert", "message", "feedback", "error"),

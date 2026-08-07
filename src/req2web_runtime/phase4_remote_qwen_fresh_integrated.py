@@ -17,6 +17,7 @@ import copy
 import json
 import os
 import queue
+import signal
 from pathlib import Path
 import subprocess
 import sys

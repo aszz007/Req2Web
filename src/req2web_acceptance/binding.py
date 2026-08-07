@@ -985,22 +985,41 @@ def _has_any_semantic_word(values: tuple[str, ...], expected: set[str]) -> bool:
     return bool(_semantic_words(*values) & expected)
 
 
+def _is_semantic_error_state(state: Any) -> bool:
+    name = str(state.name).casefold()
+    description = str(state.description).casefold()
+    if _semantic_words(name) & {
+        "denied",
+        "error",
+        "failed",
+        "failure",
+        "invalid",
+    }:
+        return True
+    return any(
+        phrase in description
+        for phrase in (
+            "validation error",
+            "validation failed",
+            "validation fails",
+            "validation failure",
+            "failed validation",
+            "invalid input",
+            "invalid data",
+            "error state",
+            "failure state",
+            "permission denied",
+            "access denied",
+        )
+    )
+
+
 def _semantic_recovery_path(
     page_spec: PageSpec,
     *,
     scenario_token: str,
 ) -> tuple[Any, Any, Any, list[Any]] | None:
     initial_state = page_spec.states[0]
-    error_state_words = {
-        "denied",
-        "error",
-        "failed",
-        "failure",
-        "invalid",
-        "recovery",
-        "retry",
-        "validation",
-    }
     entry_words = {
         "input": {"error", "failed", "failure", "invalid", "validation"},
         "permission": {
@@ -1029,10 +1048,7 @@ def _semantic_recovery_path(
         state
         for state in page_spec.states
         if state.state_id != initial_state.state_id
-        and _has_any_semantic_word(
-            (state.name, state.description),
-            error_state_words,
-        )
+        and _is_semantic_error_state(state)
     ]
     candidates: list[tuple[Any, Any, Any, list[Any]]] = []
     for error_state in error_states:
