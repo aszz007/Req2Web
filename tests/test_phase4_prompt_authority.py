@@ -121,6 +121,23 @@ class Phase4PromptAuthorityTest(unittest.TestCase):
                 "submit_order",
             ],
         )
+        self.assertEqual(
+            value["required_f1_component_positions"],
+            [
+                {"position": 0, "component_local_id": "search_input"},
+                {"position": 1, "component_local_id": "cart_items"},
+                {"position": 2, "component_local_id": "cart_total"},
+                {"position": 3, "component_local_id": "delivery_form"},
+                {"position": 4, "component_local_id": "submit_order"},
+            ],
+        )
+        self.assertEqual(
+            value["required_f1_component_order_literal"],
+            (
+                "0:search_input < 1:cart_items < 2:cart_total < "
+                "3:delivery_form < 4:submit_order"
+            ),
+        )
         instructions = "\n".join(value["instructions"])
         self.assertIn(
             "scanning required_f1_component_order from left to right",
@@ -135,6 +152,15 @@ class Phase4PromptAuthorityTest(unittest.TestCase):
             instructions,
         )
         self.assertIn("error state must not be the final state", instructions)
+        self.assertIn(
+            "position numbers in each emitted visible_component_local_ids "
+            "array must be strictly increasing",
+            instructions,
+        )
+        self.assertIn(
+            "never move a feedback component before an earlier submit",
+            instructions,
+        )
         phase5_input_bytes = _canonical(
             {
                 "schema_version": "test.phase5.input.v1",

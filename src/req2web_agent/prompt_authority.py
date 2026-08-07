@@ -16,7 +16,7 @@ from typing import Mapping
 PROMPT_AUTHORITY_SCHEMA_VERSION = "req2web.agent.f1_f4_prompt_authority.v1"
 PROMPT_SCHEMA_VERSION = "req2web.agent.f1_f4_prompt.v1"
 PROMPT_AUTHORITY_REVISION = (
-    "f3_f4_explicit_actual_state_plan_a07a_direct_english_v12"
+    "f3_f4_explicit_actual_state_plan_a07a_direct_english_v13"
 )
 REGISTRY_REVISION = "req2web.phase4.registry.p4_02a.v1"
 NODE_ORDER = ("F1", "F2", "F3", "F4")
@@ -706,9 +706,33 @@ def build_canonical_f1_f4_prompt(
         "exact_output_contract": _base_output_contracts()[node_id],
     }
     if node_id == "F2":
-        payload["required_f1_component_order"] = (
-            _required_f1_component_order(input_value)
+        component_order = _required_f1_component_order(input_value)
+        payload["required_f1_component_order"] = component_order
+        payload["required_f1_component_positions"] = [
+            {
+                "position": position,
+                "component_local_id": component_local_id,
+            }
+            for position, component_local_id in enumerate(component_order)
+        ]
+        payload["required_f1_component_order_literal"] = " < ".join(
+            f"{position}:{component_local_id}"
+            for position, component_local_id in enumerate(component_order)
         )
+        payload["instructions"] = [
+            *instructions,
+            (
+                "For every F2 state, first choose the visible component IDs, "
+                "then emit them only by scanning "
+                "required_f1_component_positions from position 0 upward. The "
+                "position numbers in each emitted visible_component_local_ids "
+                "array must be strictly increasing. "
+                "required_f1_component_order_literal is the exact concrete "
+                "order for this call; copy selected IDs from left to right and "
+                "never move a feedback component before an earlier submit or "
+                "advancement control. Do not emit the position numbers."
+            ),
+        ]
     if interaction_plan is not None:
         payload["required_interaction_plan"] = interaction_plan
         payload["instructions"] = [
