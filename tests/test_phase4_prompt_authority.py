@@ -186,6 +186,10 @@ class Phase4PromptAuthorityTest(unittest.TestCase):
             "choose distinct visible trigger components",
             instructions,
         )
+        self.assertIn(
+            "absent from that exact source-state list",
+            instructions,
+        )
 
     def test_prompt_replays_from_exact_input_and_plan(self) -> None:
         input_bytes = _canonical(

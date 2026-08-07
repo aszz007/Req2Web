@@ -1061,7 +1061,15 @@ def _validate_f3(output: object, state: Mapping[str, object]) -> dict[str, objec
     if not isinstance(data["interactions"], list) or not data["interactions"]:
         raise Phase4ContractError("F3.interactions must be non-empty")
     _, component_ids = _f1_ids(state)
-    state_ids = _f2_ids(state)
+    f2_states = state["node_results"]["F2"]["payload"]["node_output"]["states"]
+    state_ids = [str(item["local_id"]) for item in f2_states]
+    visible_components_by_state = {
+        str(item["local_id"]): {
+            str(component_id)
+            for component_id in item["visible_component_local_ids"]
+        }
+        for item in f2_states
+    }
     interaction_ids: list[str] = []
     source_trigger_pairs: set[tuple[str, str]] = set()
     for raw in data["interactions"]:
@@ -1080,6 +1088,15 @@ def _validate_f3(output: object, state: Mapping[str, object]) -> dict[str, objec
             raise Phase4ContractError("F3 trigger component ref is invalid")
         if row["source_state_local_id"] not in state_ids or row["target_state_local_id"] not in state_ids:
             raise Phase4ContractError("F3 state ref is invalid")
+        if (
+            row["trigger_component_local_id"]
+            not in visible_components_by_state[
+                str(row["source_state_local_id"])
+            ]
+        ):
+            raise Phase4ContractError(
+                "F3 trigger component is not visible in source state"
+            )
         source_trigger_pair = (
             str(row["source_state_local_id"]),
             str(row["trigger_component_local_id"]),

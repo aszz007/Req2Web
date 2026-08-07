@@ -16,7 +16,7 @@ from typing import Mapping
 PROMPT_AUTHORITY_SCHEMA_VERSION = "req2web.agent.f1_f4_prompt_authority.v1"
 PROMPT_SCHEMA_VERSION = "req2web.agent.f1_f4_prompt.v1"
 PROMPT_AUTHORITY_REVISION = (
-    "f3_f4_explicit_actual_state_plan_a07a_direct_english_v8"
+    "f3_f4_explicit_actual_state_plan_a07a_direct_english_v9"
 )
 REGISTRY_REVISION = "req2web.phase4.registry.p4_02a.v1"
 NODE_ORDER = ("F1", "F2", "F3", "F4")
@@ -240,6 +240,14 @@ def _node_specific_instructions() -> dict[str, list[str]]:
                 "both states must expose the relevant form, feedback, and "
                 "recovery controls in required F1 order."
             ),
+            (
+                "For every non-final state, keep visible at least two distinct "
+                "interactive controls when the F1 structure provides them: "
+                "one control for required same-state work and a different "
+                "control for the forward transition to the next state. A "
+                "control that is not visible in the source state cannot be "
+                "used by F3."
+            ),
         ],
         "F3": [
             (
@@ -258,6 +266,12 @@ def _node_specific_instructions() -> dict[str, list[str]]:
                 "interaction and the required forward transition. One visible "
                 "control cannot represent two different actions in the same "
                 "state; choose distinct visible trigger components."
+            ),
+            (
+                "For every interaction, copy trigger_component_local_id "
+                "directly from the source state's "
+                "visible_component_local_ids. Never select a preferred action "
+                "control that is absent from that exact source-state list."
             ),
         ],
     }

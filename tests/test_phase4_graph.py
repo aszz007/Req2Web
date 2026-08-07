@@ -71,6 +71,28 @@ class Phase4GraphTest(unittest.TestCase):
         ):
             phase4_graph._validate_f3(output, state)
 
+    def test_f3_rejects_trigger_hidden_in_source_state(self) -> None:
+        f1 = phase4_graph._happy_f1({})
+        state = {
+            "node_results": {
+                "F1": {"payload": {"node_output": f1}},
+            }
+        }
+        f2 = phase4_graph._happy_f2(state)
+        state["node_results"]["F2"] = {
+            "payload": {"node_output": f2},
+        }
+        output = phase4_graph._happy_f3({})
+        output["interactions"][0][
+            "trigger_component_local_id"
+        ] = "component-submit"
+
+        with self.assertRaisesRegex(
+            Phase4ContractError,
+            "trigger component is not visible in source state",
+        ):
+            phase4_graph._validate_f3(output, state)
+
     def test_happy_path_composes_existing_candidate_contract(self) -> None:
         result = Phase4GraphRuntime().invoke(
             self.state("happy"), thread_id="p4-02a-thread-happy"
