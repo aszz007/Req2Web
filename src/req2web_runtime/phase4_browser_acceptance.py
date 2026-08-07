@@ -51,8 +51,12 @@ CASE_AUDIT_SCHEMA_VERSION = "req2web.phase4.real_browser_case_audit.v2"
 CANARY_RECEIPT_SCHEMA_VERSION = (
     "req2web.phase4.real_browser_canary_receipt.v2"
 )
+FINAL_BROWSER_SUMMARY_SCHEMA_VERSION = (
+    "req2web.phase4.real_browser_final_summary.v1"
+)
 BROWSER_HARNESS_REVISION = "phase4_acceptance_plan_playwright_v2"
 CANARY_CASE_COUNT = 3
+FINAL_CASE_COUNT = 10
 CASE_SUMMARY_SCHEMA_VERSION = (
     "req2web.phase4.canonical_full_flow.v1.case_summary"
 )
@@ -1151,6 +1155,229 @@ def validate_real_browser_case_audit(value: object) -> dict[str, object]:
     return data
 
 
+def build_browser_final_summary(
+    *,
+    flow_summary: Mapping[str, object],
+    case_audits: tuple[Mapping[str, object], ...],
+) -> dict[str, object]:
+    """Build a ten-case browser table without inventing missing executions."""
+
+    if (
+        flow_summary.get("schema_version")
+        != "req2web.phase4.canonical_full_flow.v1.summary"
+        or flow_summary.get("all_cases_complete") is not True
+        or flow_summary.get("completed_case_count") != FINAL_CASE_COUNT
+    ):
+        raise Phase4BrowserAcceptanceError(
+            "final browser summary requires a complete ten-case flow"
+        )
+    run_id = _text(flow_summary.get("run_id"), "final browser run_id")
+    source_rows = flow_summary.get("case_summaries")
+    if not isinstance(source_rows, list) or len(source_rows) != FINAL_CASE_COUNT:
+        raise Phase4BrowserAcceptanceError(
+            "final browser source case summaries are invalid"
+        )
+
+    audits_by_index: dict[int, dict[str, object]] = {}
+    for value in case_audits:
+        audit = validate_real_browser_case_audit(value)
+        case_index = audit["case_index"]
+        if (
+            not isinstance(case_index, int)
+            or isinstance(case_index, bool)
+            or case_index in audits_by_index
+            or audit["run_id"] != run_id
+            or audit["evidence_scope"]
+            not in {"phase4_canonical_canary", "phase4_canonical_full"}
+        ):
+            raise Phase4BrowserAcceptanceError(
+                "final browser case audit binding is invalid"
+            )
+        audits_by_index[case_index] = audit
+
+    rows: list[dict[str, object]] = []
+    for expected_index, source_value in enumerate(source_rows, start=1):
+        if not isinstance(source_value, Mapping):
+            raise Phase4BrowserAcceptanceError(
+                "final browser source case summary must be an object"
+            )
+        source = copy.deepcopy(dict(source_value))
+        if (
+            source.get("case_index") != expected_index
+            or not isinstance(source.get("case_id"), str)
+        ):
+            raise Phase4BrowserAcceptanceError(
+                "final browser source case order drifted"
+            )
+        source_identity = _identity_record(
+            source.get("case_summary_identity"),
+            "final browser source case summary",
+        )
+        audit = audits_by_index.pop(expected_index, None)
+        if audit is None:
+            disposition = (
+                "not_executed_missing_required_audit"
+                if source.get("downstream_delivery_success") is True
+                else "not_executed_no_successful_result_package"
+            )
+            rows.append(
+                {
+                    "case_index": expected_index,
+                    "case_id": source["case_id"],
+                    "source_case_summary_identity": source_identity,
+                    "model_case_status": source.get("status"),
+                    "downstream_delivery_success": (
+                        source.get("downstream_delivery_success") is True
+                    ),
+                    "browser_disposition": disposition,
+                    "real_browser_executed": False,
+                    "browser_execution_status": "not_executed",
+                    "page_spec_conformance_status": "not_executed",
+                    "semantic_alignment_status": "not_executed",
+                    "automation_reliable": False,
+                    "case_browser_audit_identity": None,
+                    "failure": copy.deepcopy(source.get("failure")),
+                }
+            )
+            continue
+        if (
+            audit["case_id"] != source["case_id"]
+            or _canonical(audit["source_case_summary_identity"])
+            != _canonical(source_identity)
+        ):
+            raise Phase4BrowserAcceptanceError(
+                "final browser audit source binding drifted"
+            )
+        rows.append(
+            {
+                "case_index": expected_index,
+                "case_id": source["case_id"],
+                "source_case_summary_identity": source_identity,
+                "model_case_status": source.get("status"),
+                "downstream_delivery_success": (
+                    source.get("downstream_delivery_success") is True
+                ),
+                "browser_disposition": "executed",
+                "real_browser_executed": audit["real_browser_executed"],
+                "browser_execution_status": audit[
+                    "browser_execution_status"
+                ],
+                "page_spec_conformance_status": audit[
+                    "page_spec_conformance_status"
+                ],
+                "semantic_alignment_status": audit[
+                    "semantic_alignment"
+                ]["status"],
+                "automation_reliable": audit["automation_reliable"],
+                "case_browser_audit_identity": copy.deepcopy(
+                    audit["audit_identity"]
+                ),
+                "failure": None,
+            }
+        )
+    if audits_by_index:
+        raise Phase4BrowserAcceptanceError(
+            "final browser audits include an unknown case"
+        )
+
+    executed = [
+        row for row in rows if row["browser_disposition"] == "executed"
+    ]
+    missing_required = [
+        row
+        for row in rows
+        if row["browser_disposition"]
+        == "not_executed_missing_required_audit"
+    ]
+    browser_failures = [
+        row
+        for row in executed
+        if row["browser_execution_status"] != "pass"
+        or row["page_spec_conformance_status"] != "pass"
+        or row["automation_reliable"] is not True
+    ]
+    if missing_required:
+        status = "browser_audit_incomplete"
+    elif browser_failures:
+        status = "browser_audit_complete_with_failures"
+    elif len(executed) < FINAL_CASE_COUNT:
+        status = "browser_audit_complete_with_non_executable_cases"
+    else:
+        status = "browser_audit_complete_all_cases"
+    counts = {
+        "case_count": FINAL_CASE_COUNT,
+        "real_browser_executed_count": len(executed),
+        "browser_execution_pass_count": sum(
+            row["browser_execution_status"] == "pass"
+            for row in executed
+        ),
+        "page_spec_conformance_pass_count": sum(
+            row["page_spec_conformance_status"] == "pass"
+            for row in executed
+        ),
+        "automation_reliable_count": sum(
+            row["automation_reliable"] is True for row in executed
+        ),
+        "not_executed_no_successful_result_package_count": sum(
+            row["browser_disposition"]
+            == "not_executed_no_successful_result_package"
+            for row in rows
+        ),
+        "not_executed_missing_required_audit_count": len(missing_required),
+        "semantic_alignment_executed_count": 0,
+    }
+    root = {
+        "schema_version": FINAL_BROWSER_SUMMARY_SCHEMA_VERSION,
+        "harness_revision": BROWSER_HARNESS_REVISION,
+        "run_id": run_id,
+        "flow_summary_identity": copy.deepcopy(
+            flow_summary.get("summary_identity")
+        ),
+        "status": status,
+        "counts": counts,
+        "case_rows": rows,
+        "all_executed_browser_checks_pass": not browser_failures,
+        "all_ten_cases_browser_executed": (
+            len(executed) == FINAL_CASE_COUNT
+        ),
+        "semantic_alignment_executed": False,
+        "claim_boundary": (
+            "objective real-browser execution and PageSpec conformance only; "
+            "cases without a successful model ResultPackage remain explicitly "
+            "not executed, and semantic alignment remains unexecuted"
+        ),
+    }
+    return {
+        **root,
+        "summary_identity": _identity(
+            root,
+            revision=FINAL_BROWSER_SUMMARY_SCHEMA_VERSION,
+        ),
+    }
+
+
+def write_browser_final_summary(
+    *,
+    flow_result_root: Path,
+    case_audit_paths: tuple[Path, ...],
+    output_path: Path,
+) -> dict[str, object]:
+    flow_summary = _load_json(
+        Path(flow_result_root).resolve(strict=True) / "flow_summary.json",
+        "canonical flow summary",
+    )
+    audits = tuple(
+        _load_json(path.resolve(strict=True), "browser case audit")
+        for path in case_audit_paths
+    )
+    summary = build_browser_final_summary(
+        flow_summary=flow_summary,
+        case_audits=audits,
+    )
+    _write_once(output_path.resolve(strict=False), _canonical(summary))
+    return summary
+
+
 def build_browser_canary_receipt(
     *,
     flow_result_root: Path,
@@ -1409,10 +1636,13 @@ __all__ = [
     "CANARY_RECEIPT_SCHEMA_VERSION",
     "CASE_AUDIT_SCHEMA_VERSION",
     "EVIDENCE_SCOPES",
+    "FINAL_BROWSER_SUMMARY_SCHEMA_VERSION",
     "Phase4BrowserAcceptanceError",
     "Phase4PlaywrightBrowserBackend",
+    "build_browser_final_summary",
     "build_browser_canary_receipt",
     "run_real_browser_case_audit",
     "validate_browser_canary_receipt",
     "validate_real_browser_case_audit",
+    "write_browser_final_summary",
 ]

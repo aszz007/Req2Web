@@ -7,6 +7,7 @@ import shutil
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -17,6 +18,7 @@ if str(SRC) not in sys.path:
 
 from req2web_runtime.phase4_browser_acceptance import (  # noqa: E402
     Phase4BrowserAcceptanceError,
+    build_browser_final_summary,
     build_browser_canary_receipt,
     run_real_browser_case_audit,
     validate_real_browser_case_audit,
@@ -129,6 +131,93 @@ def _write_json(path: Path, value: object) -> None:
 
 
 class Phase4BrowserAcceptanceTest(unittest.TestCase):
+    def test_final_summary_keeps_non_executable_cases_separate(self) -> None:
+        identity = {
+            "identity_kind": "canonical_json",
+            "sha256": "sha256:" + "a" * 64,
+            "byte_length": 10,
+            "revision": "test.identity.v1",
+        }
+        source_rows = []
+        audits = []
+        executed_indices = {1, 2, 3, 5, 7, 8, 9, 10}
+        for index in range(1, 11):
+            case_id = f"case-{index:02d}"
+            source_rows.append(
+                {
+                    "case_index": index,
+                    "case_id": case_id,
+                    "case_summary_identity": identity,
+                    "status": (
+                        "delivery_terminal_success"
+                        if index in executed_indices
+                        else "failed_closed"
+                    ),
+                    "downstream_delivery_success": (
+                        index in executed_indices
+                    ),
+                    "failure": (
+                        None
+                        if index in executed_indices
+                        else {"failure_stage": "F2"}
+                    ),
+                }
+            )
+            if index in executed_indices:
+                audits.append(
+                    {
+                        "case_index": index,
+                        "case_id": case_id,
+                        "run_id": "run-final",
+                        "evidence_scope": (
+                            "phase4_canonical_canary"
+                            if index <= 3
+                            else "phase4_canonical_full"
+                        ),
+                        "source_case_summary_identity": identity,
+                        "browser_execution_status": "pass",
+                        "page_spec_conformance_status": "pass",
+                        "semantic_alignment": {"status": "not_executed"},
+                        "real_browser_executed": True,
+                        "automation_reliable": True,
+                        "audit_identity": identity,
+                    }
+                )
+        flow_summary = {
+            "schema_version": (
+                "req2web.phase4.canonical_full_flow.v1.summary"
+            ),
+            "run_id": "run-final",
+            "all_cases_complete": True,
+            "completed_case_count": 10,
+            "case_summaries": source_rows,
+            "summary_identity": identity,
+        }
+        with patch(
+            "req2web_runtime.phase4_browser_acceptance."
+            "validate_real_browser_case_audit",
+            side_effect=lambda value: dict(value),
+        ):
+            summary = build_browser_final_summary(
+                flow_summary=flow_summary,
+                case_audits=tuple(audits),
+            )
+        self.assertEqual(
+            summary["status"],
+            "browser_audit_complete_with_non_executable_cases",
+        )
+        self.assertEqual(
+            summary["counts"]["real_browser_executed_count"],
+            8,
+        )
+        self.assertEqual(
+            summary["counts"][
+                "not_executed_no_successful_result_package_count"
+            ],
+            2,
+        )
+        self.assertFalse(summary["all_ten_cases_browser_executed"])
+
     def test_v2_audit_separates_objective_layers_and_freezes_semantic_request(self) -> None:
         root = (
             ROOT

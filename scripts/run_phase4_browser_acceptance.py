@@ -19,6 +19,7 @@ from req2web_runtime.phase4_browser_acceptance import (  # noqa: E402
     Phase4BrowserAcceptanceError,
     build_browser_canary_receipt,
     run_real_browser_case_audit,
+    write_browser_final_summary,
 )
 
 
@@ -68,6 +69,20 @@ def build_parser() -> argparse.ArgumentParser:
         help="Repeat exactly three times in case order.",
     )
     canary.add_argument("--output", required=True, type=Path)
+
+    final = subparsers.add_parser(
+        "final",
+        help="Aggregate the complete ten-case browser table.",
+    )
+    final.add_argument("--flow-result-root", required=True, type=Path)
+    final.add_argument(
+        "--case-audit",
+        required=True,
+        type=Path,
+        action="append",
+        help="Repeat for every case with real-browser evidence.",
+    )
+    final.add_argument("--output", required=True, type=Path)
     return parser
 
 
@@ -119,15 +134,35 @@ def main(argv: list[str] | None = None) -> int:
                 flush=True,
             )
             return 0 if audit["browser_status"] == "pass" else 2
-        receipt = build_browser_canary_receipt(
+        if args.command == "canary":
+            receipt = build_browser_canary_receipt(
+                flow_result_root=args.flow_result_root,
+                case_audit_paths=tuple(args.case_audit),
+                output_path=args.output,
+            )
+            print(
+                "[P4-BROWSER] "
+                f"canary_cases={receipt['canary_case_count']} "
+                "continuation_allowed="
+                f"{str(receipt['continuation_allowed']).lower()}",
+                flush=True,
+            )
+            return 0
+        summary = write_browser_final_summary(
             flow_result_root=args.flow_result_root,
             case_audit_paths=tuple(args.case_audit),
             output_path=args.output,
         )
         print(
             "[P4-BROWSER] "
-            f"canary_cases={receipt['canary_case_count']} "
-            f"continuation_allowed={str(receipt['continuation_allowed']).lower()}",
+            f"status={summary['status']} "
+            "real_browser_executed="
+            f"{summary['counts']['real_browser_executed_count']}/10 "
+            "browser_pass="
+            f"{summary['counts']['browser_execution_pass_count']} "
+            "page_spec_conformance_pass="
+            f"{summary['counts']['page_spec_conformance_pass_count']} "
+            "semantic_alignment_executed=false",
             flush=True,
         )
         return 0
