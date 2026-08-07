@@ -16,7 +16,7 @@ from typing import Mapping
 PROMPT_AUTHORITY_SCHEMA_VERSION = "req2web.agent.f1_f4_prompt_authority.v1"
 PROMPT_SCHEMA_VERSION = "req2web.agent.f1_f4_prompt.v1"
 PROMPT_AUTHORITY_REVISION = (
-    "f3_f4_explicit_actual_state_plan_a07a_direct_english_v4"
+    "f3_f4_explicit_actual_state_plan_a07a_direct_english_v5"
 )
 REGISTRY_REVISION = "req2web.phase4.registry.p4_02a.v1"
 NODE_ORDER = ("F1", "F2", "F3", "F4")
@@ -214,6 +214,22 @@ def _base_instructions() -> list[str]:
     ]
 
 
+def _node_specific_instructions() -> dict[str, list[str]]:
+    return {
+        "F2": [
+            (
+                "For every state, construct visible_component_local_ids only "
+                "by scanning required_f1_component_order from left to right "
+                "and selecting the IDs visible in that state. The emitted "
+                "array must be an exact subsequence of "
+                "required_f1_component_order. Never regroup components by "
+                "section, workflow meaning, or state purpose, and never place "
+                "an earlier component ID after a later component ID."
+            ),
+        ],
+    }
+
+
 def prompt_authority_manifest() -> dict[str, object]:
     root = {
         "schema_version": PROMPT_AUTHORITY_SCHEMA_VERSION,
@@ -221,6 +237,7 @@ def prompt_authority_manifest() -> dict[str, object]:
         "node_order": list(NODE_ORDER),
         "output_contracts": _base_output_contracts(),
         "instructions": _base_instructions(),
+        "node_specific_instructions": _node_specific_instructions(),
         "stage_specific_fields": [
             "input_projection",
             "custody_visibility",
@@ -242,6 +259,45 @@ def prompt_authority_manifest() -> dict[str, object]:
 
 
 PROMPT_AUTHORITY_IDENTITY = prompt_authority_manifest()["authority_identity"]
+
+
+def _required_f1_component_order(
+    input_value: Mapping[str, object],
+) -> list[str]:
+    f1_views: list[Mapping[str, object]] = []
+    for projection_key in (
+        "projection",
+        "same_run_validated_upstream_projection",
+    ):
+        projection = input_value.get(projection_key)
+        if not isinstance(projection, Mapping):
+            continue
+        candidate = projection.get("f1_registered_structure_view")
+        if isinstance(candidate, Mapping):
+            f1_views.append(candidate)
+    if len(f1_views) != 1:
+        raise PromptAuthorityError("F2 registered F1 structure is unavailable")
+    f1_view = f1_views[0]
+    components = f1_view.get("components")
+    if not isinstance(components, list) or not components:
+        raise PromptAuthorityError("F2 registered F1 components are unavailable")
+    order: list[str] = []
+    for component in components:
+        if not isinstance(component, Mapping):
+            raise PromptAuthorityError(
+                "F2 registered F1 component row is invalid"
+            )
+        local_id = component.get("local_id")
+        if not isinstance(local_id, str) or not local_id:
+            raise PromptAuthorityError(
+                "F2 registered F1 component local_id is invalid"
+            )
+        order.append(local_id)
+    if len(order) != len(set(order)):
+        raise PromptAuthorityError(
+            "F2 registered F1 component order contains duplicates"
+        )
+    return order
 
 
 def _validate_plan(
@@ -292,7 +348,10 @@ def build_canonical_f1_f4_prompt(
     else:
         acceptance_plan = None
 
-    instructions = _base_instructions()
+    instructions = [
+        *_base_instructions(),
+        *_node_specific_instructions().get(node_id, []),
+    ]
     payload: dict[str, object] = {
         "schema_version": PROMPT_SCHEMA_VERSION,
         "prompt_revision": PROMPT_AUTHORITY_REVISION,
@@ -313,6 +372,10 @@ def build_canonical_f1_f4_prompt(
         }[node_id],
         "exact_output_contract": _base_output_contracts()[node_id],
     }
+    if node_id == "F2":
+        payload["required_f1_component_order"] = (
+            _required_f1_component_order(input_value)
+        )
     if interaction_plan is not None:
         payload["required_interaction_plan"] = interaction_plan
         payload["instructions"] = [

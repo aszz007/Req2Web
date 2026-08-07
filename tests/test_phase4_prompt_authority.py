@@ -58,6 +58,87 @@ class Phase4PromptAuthorityTest(unittest.TestCase):
             instructions,
         )
         self.assertIn("Do not emit Han characters", instructions)
+        f2_instructions = "\n".join(
+            manifest["node_specific_instructions"]["F2"]
+        )
+        self.assertIn("required_f1_component_order", f2_instructions)
+        self.assertIn("exact subsequence", f2_instructions)
+
+    def test_f2_prompt_exposes_one_required_f1_component_order(self) -> None:
+        input_bytes = _canonical(
+            {
+                "schema_version": "test.input.v1",
+                "node_id": "F2",
+                "projection": {
+                    "f1_registered_structure_view": {
+                        "components": [
+                            {"local_id": "search_input"},
+                            {"local_id": "cart_items"},
+                            {"local_id": "cart_total"},
+                            {"local_id": "delivery_form"},
+                            {"local_id": "submit_order"},
+                        ],
+                    },
+                },
+            }
+        )
+        raw = build_canonical_f1_f4_prompt(
+            node_id="F2",
+            input_bytes=input_bytes,
+        )
+        value = validate_canonical_prompt(
+            raw,
+            node_id="F2",
+            input_bytes=input_bytes,
+        )
+        self.assertEqual(
+            value["required_f1_component_order"],
+            [
+                "search_input",
+                "cart_items",
+                "cart_total",
+                "delivery_form",
+                "submit_order",
+            ],
+        )
+        instructions = "\n".join(value["instructions"])
+        self.assertIn(
+            "scanning required_f1_component_order from left to right",
+            instructions,
+        )
+        self.assertIn(
+            "Never regroup components by section",
+            instructions,
+        )
+        phase5_input_bytes = _canonical(
+            {
+                "schema_version": "test.phase5.input.v1",
+                "node_id": "F2",
+                "same_run_validated_upstream_projection": {
+                    "f1_registered_structure_view": {
+                        "components": [
+                            {"local_id": "search_input"},
+                            {"local_id": "cart_items"},
+                            {"local_id": "cart_total"},
+                            {"local_id": "delivery_form"},
+                            {"local_id": "submit_order"},
+                        ],
+                    },
+                },
+            }
+        )
+        phase5_value = validate_canonical_prompt(
+            build_canonical_f1_f4_prompt(
+                node_id="F2",
+                input_bytes=phase5_input_bytes,
+            ),
+            node_id="F2",
+            input_bytes=phase5_input_bytes,
+        )
+        self.assertEqual(
+            phase5_value["required_f1_component_order"],
+            value["required_f1_component_order"],
+        )
 
     def test_prompt_replays_from_exact_input_and_plan(self) -> None:
         input_bytes = _canonical(
