@@ -20,6 +20,7 @@ from req2web_runtime.phase4_canonical_full_flow import (  # noqa: E402
     Phase4CanonicalFullFlowError,
     _build_upstream,
     _parent_experiment_binding,
+    _progress_checkpoint_path,
     run_phase4_canonical_full_flow,
 )
 from req2web_runtime import (  # noqa: E402
@@ -43,6 +44,22 @@ from req2web_orchestration.phase4_graph import (  # noqa: E402
 
 
 class Phase4CanonicalFullFlowTest(unittest.TestCase):
+    def test_progress_checkpoints_are_write_once_per_case(self) -> None:
+        root = Path("result-root")
+        self.assertEqual(
+            _progress_checkpoint_path(root, 1),
+            root / "progress" / "01.json",
+        )
+        self.assertEqual(
+            _progress_checkpoint_path(root, 2),
+            root / "progress" / "02.json",
+        )
+        with self.assertRaisesRegex(
+            Phase4CanonicalFullFlowError,
+            "progress checkpoint index is invalid",
+        ):
+            _progress_checkpoint_path(root, 0)
+
     def test_only_canonical_full_flow_is_the_active_default(self) -> None:
         self.assertTrue(ACTIVE_DEFAULT_ENTRY)
         self.assertEqual(

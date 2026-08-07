@@ -141,6 +141,12 @@ def _write_json(path: Path, value: object) -> None:
     _fresh._write_fsync(path, _fresh._canonical_bytes(value))
 
 
+def _progress_checkpoint_path(result_root: Path, index: int) -> Path:
+    if index < 1 or index > CASE_COUNT:
+        raise Phase4CanonicalFullFlowError("progress checkpoint index is invalid")
+    return result_root / "progress" / f"{index:02d}.json"
+
+
 def _read_json(path: Path) -> object:
     return _fresh._strict_json(path.read_bytes(), str(path))
 
@@ -651,7 +657,7 @@ def run_phase4_canonical_full_flow(
                 "aggregate model call cap was exceeded"
             )
         _write_json(
-            result_root / "progress.json",
+            _progress_checkpoint_path(result_root, index),
             {
                 "schema_version": f"{FLOW_SCHEMA_VERSION}.progress",
                 "run_id": selected_run_id,
