@@ -87,8 +87,11 @@ P4_05_WORKER_PROTOCOL = f"{P4_05_SCHEMA_PREFIX}.worker.v1"
 P4_05_PARENT_BINDING_SCHEMA_VERSION = (
     f"{P4_05_SCHEMA_PREFIX}.parent_experiment_binding.v1"
 )
-P4_05_STABILITY_PROFILE_BINDING_SCHEMA_VERSION = (
+P4_05_LEGACY_STABILITY_PROFILE_BINDING_SCHEMA_VERSION = (
     "req2web.phase4.p4_05.remote_qwen_stability.profile_binding.v1"
+)
+P4_05_STABILITY_PROFILE_BINDING_SCHEMA_VERSION = (
+    "req2web.phase4.p4_05.remote_qwen_stability.profile_binding.v2"
 )
 P4_05_PILOT_ID = "p4-05-remote-qwen-fresh-integrated-v7"
 P4_05_RUN_PREFIX = "p4-05-remote-qwen-fresh-integrated-run-"
@@ -327,19 +330,58 @@ def _validate_parent_experiment_binding(
     return data
 
 
-def make_stable_profile_binding_identity(
+def _legacy_stable_profile_binding_identity(
     profile: "RemoteFreshIntegratedProfile",
 ) -> dict[str, object]:
-    """Bind invariant runtime facts while retaining live VRAM as run evidence."""
-
     profile.validate()
     stable_profile = profile.to_dict()
     stable_profile.pop("profile_id", None)
     stable_profile.pop("free_vram_bytes_at_preflight", None)
     return _identity(
         stable_profile,
+        revision=P4_05_LEGACY_STABILITY_PROFILE_BINDING_SCHEMA_VERSION,
+    )
+
+
+def make_stable_profile_binding_identity(
+    profile: "RemoteFreshIntegratedProfile",
+) -> dict[str, object]:
+    """Bind clone-stable compatibility facts and retain live hardware evidence."""
+
+    profile.validate()
+    stable_profile = profile.to_dict()
+    stable_profile.pop("profile_id", None)
+    stable_profile.pop("free_vram_bytes_at_preflight", None)
+    stable_profile.pop("device_uuid", None)
+    driver_version = str(stable_profile.pop("driver_version"))
+    stable_profile["driver_compatibility_series"] = driver_version.split(".", 1)[0]
+    return _identity(
+        stable_profile,
         revision=P4_05_STABILITY_PROFILE_BINDING_SCHEMA_VERSION,
     )
+
+
+def migrate_stable_profile_binding_identity(
+    profile: "RemoteFreshIntegratedProfile",
+    recorded_identity: Mapping[str, object],
+) -> dict[str, object]:
+    """Validate a saved v1/v2 identity and return the current v2 identity."""
+
+    recorded = dict(recorded_identity)
+    revision = recorded.get("revision")
+    if revision == P4_05_STABILITY_PROFILE_BINDING_SCHEMA_VERSION:
+        expected = make_stable_profile_binding_identity(profile)
+    elif revision == P4_05_LEGACY_STABILITY_PROFILE_BINDING_SCHEMA_VERSION:
+        expected = _legacy_stable_profile_binding_identity(profile)
+    else:
+        raise Phase4RemoteFreshIntegratedError(
+            "stability profile binding revision is unsupported"
+        )
+    if _canonical_bytes(recorded) != _canonical_bytes(expected):
+        raise Phase4RemoteFreshIntegratedError(
+            "saved stability profile identity drifted"
+        )
+    return make_stable_profile_binding_identity(profile)
 
 
 def _profile_matches_expected_identity(
@@ -348,11 +390,13 @@ def _profile_matches_expected_identity(
     expected_identity: Mapping[str, object],
 ) -> bool:
     expected = dict(expected_identity)
-    if (
-        expected.get("revision")
-        == P4_05_STABILITY_PROFILE_BINDING_SCHEMA_VERSION
-    ):
+    if expected.get("revision") == P4_05_STABILITY_PROFILE_BINDING_SCHEMA_VERSION:
         actual_identity = make_stable_profile_binding_identity(profile)
+    elif (
+        expected.get("revision")
+        == P4_05_LEGACY_STABILITY_PROFILE_BINDING_SCHEMA_VERSION
+    ):
+        actual_identity = _legacy_stable_profile_binding_identity(profile)
     return _canonical_bytes(actual_identity) == _canonical_bytes(expected)
 
 
@@ -4193,6 +4237,7 @@ __all__ = [
     "P4_05_FULL_DIRECT_PROMPT_NODES",
     "P4_05_FULL_DIRECT_PROMPT_REVISION",
     "P4_05_F3_F4_PROMPT_REVISION",
+    "P4_05_LEGACY_STABILITY_PROFILE_BINDING_SCHEMA_VERSION",
     "P4_05_PRE_CALL_SCHEMA_VERSION",
     "P4_05_QUANTIZATION",
     "P4_05_REQUEST_ID",
@@ -4208,6 +4253,7 @@ __all__ = [
     "FreshIntegratedStreamMirror",
     "create_p4_05_policy",
     "make_stable_profile_binding_identity",
+    "migrate_stable_profile_binding_identity",
     "prepare_phase4_remote_qwen_fresh_integrated",
     "run_phase4_remote_qwen_fresh_integrated",
 ]

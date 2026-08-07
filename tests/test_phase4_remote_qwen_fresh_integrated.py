@@ -445,7 +445,7 @@ class Phase4RemoteFreshIntegratedProfileTests(unittest.TestCase):
         with self.assertRaises(remote.Phase4RemoteFreshIntegratedError):
             remote.RemoteFreshIntegratedProfile.from_dict(tampered)
 
-    def test_stability_profile_binding_excludes_only_dynamic_free_vram(self) -> None:
+    def test_stability_profile_binding_allows_clone_hardware_identity_drift(self) -> None:
         profile = remote.RemoteFreshIntegratedProfile.create(
             inventory=_fake_inventory(),
             runtime_facts=_fake_runtime(),
@@ -454,6 +454,10 @@ class Phase4RemoteFreshIntegratedProfileTests(unittest.TestCase):
         stable = profile.to_dict()
         stable.pop("profile_id")
         stable.pop("free_vram_bytes_at_preflight")
+        stable.pop("device_uuid")
+        stable["driver_compatibility_series"] = stable.pop(
+            "driver_version"
+        ).split(".", 1)[0]
         expected = remote._identity(
             stable,
             revision=remote.P4_05_STABILITY_PROFILE_BINDING_SCHEMA_VERSION,
@@ -481,6 +485,41 @@ class Phase4RemoteFreshIntegratedProfileTests(unittest.TestCase):
         self.assertEqual(
             remote.make_stable_profile_binding_identity(profile),
             remote.make_stable_profile_binding_identity(same_runtime),
+        )
+
+        clone_gpu = _fake_gpu()
+        clone_gpu["device_uuid"] = "GPU-clone-p4-05"
+        clone_gpu["driver_version"] = "test-driver.1"
+        clone_profile = remote.RemoteFreshIntegratedProfile.create(
+            inventory=_fake_inventory(),
+            runtime_facts=_fake_runtime(),
+            gpu_facts=clone_gpu,
+        )
+        self.assertEqual(
+            remote.make_stable_profile_binding_identity(profile),
+            remote.make_stable_profile_binding_identity(clone_profile),
+        )
+        legacy = remote._legacy_stable_profile_binding_identity(profile)
+        self.assertEqual(
+            remote.migrate_stable_profile_binding_identity(
+                profile,
+                legacy,
+            ),
+            remote.make_stable_profile_binding_identity(profile),
+        )
+
+        major_driver_drift = _fake_gpu()
+        major_driver_drift["driver_version"] = "other-major-driver"
+        major_driver_profile = remote.RemoteFreshIntegratedProfile.create(
+            inventory=_fake_inventory(),
+            runtime_facts=_fake_runtime(),
+            gpu_facts=major_driver_drift,
+        )
+        self.assertNotEqual(
+            remote.make_stable_profile_binding_identity(profile),
+            remote.make_stable_profile_binding_identity(
+                major_driver_profile
+            ),
         )
 
         tampered = profile.to_dict()

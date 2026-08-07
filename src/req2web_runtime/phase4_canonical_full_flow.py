@@ -555,6 +555,13 @@ def run_phase4_canonical_full_flow(
             policy["profile_identity"],
             "profile identity",
         )
+        saved_profile = _fresh.RemoteFreshIntegratedProfile.from_bytes(
+            (result_root / "profile.json").read_bytes()
+        )
+        profile_identity = _fresh.migrate_stable_profile_binding_identity(
+            saved_profile,
+            profile_identity,
+        )
         inventory_identity = _require_mapping(
             policy["model_inventory_identity"],
             "model inventory identity",
