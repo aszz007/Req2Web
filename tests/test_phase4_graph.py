@@ -17,6 +17,7 @@ sys.path.insert(0, str(ROOT / "src"))
 
 from langgraph.checkpoint.memory import InMemorySaver  # noqa: E402
 
+import req2web_orchestration.phase4_graph as phase4_graph  # noqa: E402
 from req2web_orchestration.phase4_graph import (  # noqa: E402
     GRAPH_NODE_ORDER,
     PauseHandle,
@@ -46,6 +47,29 @@ class Phase4GraphTest(unittest.TestCase):
         self.assertFalse(hasattr(runtime, "graph"))
         self.assertFalse(hasattr(runtime, "checkpointer"))
         self.assertIsInstance(runtime._checkpointer, InMemorySaver)
+
+    def test_f3_rejects_two_actions_on_one_trigger_in_one_state(self) -> None:
+        f1 = phase4_graph._happy_f1({})
+        state = {
+            "node_results": {
+                "F1": {"payload": {"node_output": f1}},
+            }
+        }
+        f2 = phase4_graph._happy_f2(state)
+        state["node_results"]["F2"] = {
+            "payload": {"node_output": f2},
+        }
+        output = phase4_graph._happy_f3({})
+        duplicate = copy.deepcopy(output["interactions"][0])
+        duplicate["local_id"] = "interaction-search-forward"
+        duplicate["target_state_local_id"] = "state-checkout"
+        output["interactions"].append(duplicate)
+
+        with self.assertRaisesRegex(
+            Phase4ContractError,
+            "source state trigger component is ambiguous",
+        ):
+            phase4_graph._validate_f3(output, state)
 
     def test_happy_path_composes_existing_candidate_contract(self) -> None:
         result = Phase4GraphRuntime().invoke(

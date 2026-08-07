@@ -182,6 +182,10 @@ class Phase4PromptAuthorityTest(unittest.TestCase):
             "never represent successful recovery as a self-loop",
             instructions,
         )
+        self.assertIn(
+            "choose distinct visible trigger components",
+            instructions,
+        )
 
     def test_prompt_replays_from_exact_input_and_plan(self) -> None:
         input_bytes = _canonical(

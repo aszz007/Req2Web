@@ -16,7 +16,7 @@ from typing import Mapping
 PROMPT_AUTHORITY_SCHEMA_VERSION = "req2web.agent.f1_f4_prompt_authority.v1"
 PROMPT_SCHEMA_VERSION = "req2web.agent.f1_f4_prompt.v1"
 PROMPT_AUTHORITY_REVISION = (
-    "f3_f4_explicit_actual_state_plan_a07a_direct_english_v7"
+    "f3_f4_explicit_actual_state_plan_a07a_direct_english_v8"
 )
 REGISTRY_REVISION = "req2web.phase4.registry.p4_02a.v1"
 NODE_ORDER = ("F1", "F2", "F3", "F4")
@@ -143,6 +143,7 @@ def _base_output_contracts() -> dict[str, dict[str, object]]:
                 "every same-state interaction must use the same supplied state local ID for source_state_local_id and target_state_local_id",
                 "every forward transition must connect one supplied state directly to the next supplied state in array order; never skip a state",
                 "choose each trigger_component_local_id only from the source state's visible_component_local_ids; never use a component that is visible only in the target state",
+                "within one source state, each trigger_component_local_id may appear in at most one interaction; the same-state work and forward transition from that state must use different trigger components",
                 "the initial state's same-state interaction performs the first canonical use case's in-state work, and each later state's same-state interaction performs that state's main work or validation",
             ],
         },
@@ -250,6 +251,13 @@ def _node_specific_instructions() -> dict[str, list[str]]:
                 "successful recovery must target the later non-error state; "
                 "never represent successful recovery as a self-loop in the "
                 "error state."
+            ),
+            (
+                "Within the same source state, never assign the same "
+                "trigger_component_local_id to both the required same-state "
+                "interaction and the required forward transition. One visible "
+                "control cannot represent two different actions in the same "
+                "state; choose distinct visible trigger components."
             ),
         ],
     }

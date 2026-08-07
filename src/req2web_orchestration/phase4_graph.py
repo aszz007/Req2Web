@@ -1063,6 +1063,7 @@ def _validate_f3(output: object, state: Mapping[str, object]) -> dict[str, objec
     _, component_ids = _f1_ids(state)
     state_ids = _f2_ids(state)
     interaction_ids: list[str] = []
+    source_trigger_pairs: set[tuple[str, str]] = set()
     for raw in data["interactions"]:
         row = _entity_common(
             raw,
@@ -1079,6 +1080,15 @@ def _validate_f3(output: object, state: Mapping[str, object]) -> dict[str, objec
             raise Phase4ContractError("F3 trigger component ref is invalid")
         if row["source_state_local_id"] not in state_ids or row["target_state_local_id"] not in state_ids:
             raise Phase4ContractError("F3 state ref is invalid")
+        source_trigger_pair = (
+            str(row["source_state_local_id"]),
+            str(row["trigger_component_local_id"]),
+        )
+        if source_trigger_pair in source_trigger_pairs:
+            raise Phase4ContractError(
+                "F3 source state trigger component is ambiguous"
+            )
+        source_trigger_pairs.add(source_trigger_pair)
         _text(row["action"], "F3.interaction.action")
         _text(row["user_feedback"], "F3.interaction.user_feedback")
     if len(interaction_ids) != len(set(interaction_ids)):
