@@ -988,7 +988,8 @@ def _has_any_semantic_word(values: tuple[str, ...], expected: set[str]) -> bool:
 def _is_semantic_error_state(state: Any) -> bool:
     name = str(state.name).casefold()
     description = str(state.description).casefold()
-    if _semantic_words(name) & {
+    name_words = _semantic_words(name)
+    if name_words & {
         "denied",
         "error",
         "failed",
@@ -996,6 +997,17 @@ def _is_semantic_error_state(state: Any) -> bool:
         "invalid",
     }:
         return True
+    if name_words & {
+        "complete",
+        "completed",
+        "confirmation",
+        "confirmed",
+        "recovered",
+        "resolved",
+        "success",
+        "successful",
+    }:
+        return False
     return any(
         phrase in description
         for phrase in (
@@ -1049,16 +1061,41 @@ def _semantic_recovery_path(
     initial_state = page_spec.states[0]
     recovery_words = {
         "continue",
+        "continued",
+        "continues",
+        "continuing",
         "correct",
         "corrected",
+        "correcting",
+        "corrects",
         "recover",
         "recovered",
+        "recovering",
+        "recovers",
         "recovery",
         "resubmit",
+        "resubmits",
+        "resubmitted",
+        "resubmitting",
+        "resolve",
+        "resolved",
+        "resolves",
+        "resolving",
         "retry",
+        "retried",
+        "retries",
+        "retrying",
+        "succeed",
+        "succeeded",
+        "succeeding",
+        "succeeds",
         "success",
         "successful",
+        "successfully",
         "valid",
+        "validated",
+        "validates",
+        "validating",
     }
     error_states = [
         state

@@ -607,6 +607,45 @@ class AcceptanceBindingTest(unittest.TestCase):
             error_entry.interaction_id,
         )
 
+    def test_recovery_binding_accepts_inflected_model_recovery_verbs(
+        self,
+    ) -> None:
+        spec = copy.deepcopy(self.spec)
+        error_state = next(item for item in spec.states if item.name == "error")
+        success_state = next(item for item in spec.states if item.name == "success")
+        recovery = next(
+            item
+            for item in spec.interactions
+            if item.interaction_id.endswith("-recovery-input")
+        )
+        error_state.name = "Validation Error"
+        error_state.description = (
+            "Inline validation failed and invalid fields require correction."
+        )
+        success_state.name = "Order Success"
+        success_state.description = (
+            "The order is confirmed after validation errors have been resolved."
+        )
+        recovery.action = "User corrects payment details and resubmits the form."
+        recovery.user_feedback = "Order confirmation displays successfully."
+        spec.validate()
+
+        result = compile_acceptance_binding(
+            self.view,
+            self.plan,
+            spec,
+            self.render(spec),
+        )
+
+        binding = self.binding_for(result, "validation_signal")
+        self.assertEqual(binding.disposition, "bound")
+        refs = dict(binding.target_refs)
+        self.assertEqual(
+            refs["recovery_interaction_id"],
+            recovery.interaction_id,
+        )
+        self.assertFalse(_is_semantic_error_state(success_state))
+
     def test_error_state_classifier_ignores_active_validation_copy(self) -> None:
         normal_state = next(
             item for item in self.spec.states if item.name == "success"
