@@ -22,6 +22,7 @@ from req2web_acceptance import (
     AcceptanceBindingPlan,
     BrowserBackend,
     LazyPlaywrightBrowserBackend,
+    build_semantic_alignment_request,
     compile_acceptance_binding,
     compile_acceptance_plan,
     execute_acceptance_binding_plan,
@@ -46,11 +47,11 @@ from req2web_generation import (
 from req2web_rag import ROLE_ORDER
 
 
-CASE_AUDIT_SCHEMA_VERSION = "req2web.phase4.real_browser_case_audit.v1"
+CASE_AUDIT_SCHEMA_VERSION = "req2web.phase4.real_browser_case_audit.v2"
 CANARY_RECEIPT_SCHEMA_VERSION = (
-    "req2web.phase4.real_browser_canary_receipt.v1"
+    "req2web.phase4.real_browser_canary_receipt.v2"
 )
-BROWSER_HARNESS_REVISION = "phase4_acceptance_plan_playwright_v1"
+BROWSER_HARNESS_REVISION = "phase4_acceptance_plan_playwright_v2"
 CANARY_CASE_COUNT = 3
 CASE_SUMMARY_SCHEMA_VERSION = (
     "req2web.phase4.canonical_full_flow.v1.case_summary"
@@ -96,6 +97,9 @@ _CASE_AUDIT_KEYS = {
     "screenshot_identity",
     "criteria_counts",
     "browser_status",
+    "browser_execution_status",
+    "page_spec_conformance_status",
+    "semantic_alignment",
     "real_browser_executed",
     "automation_reliable",
     "started_at_utc",
@@ -641,6 +645,72 @@ def _backend_facts(backend: BrowserBackend) -> dict[str, object]:
     }
 
 
+def _layered_objective_statuses(
+    *,
+    report: Any,
+    real_browser_executed: bool,
+    screenshot_captured: bool,
+    page_errors: list[object],
+    console_error_count: int,
+) -> tuple[str, str, str]:
+    unknown_steps = any(item.status == "unknown" for item in report.steps)
+    unknown_criteria = any(item.status == "unknown" for item in report.criteria)
+    browser_step_failed = any(
+        item.status == "fail"
+        and item.action_kind
+        in {"load_page", "assert_element_exists", "trigger_interaction"}
+        for item in report.steps
+    )
+    page_spec_step_failed = any(
+        item.status == "fail"
+        and item.action_kind in {"assert_state", "assert_feedback"}
+        for item in report.steps
+    )
+    binding_failed = any(
+        item.status == "fail" and item.terminal_stage is not None
+        for item in report.criteria
+    )
+
+    if (
+        not real_browser_executed
+        or not screenshot_captured
+        or unknown_steps
+        or unknown_criteria
+    ):
+        browser_execution_status = "unknown"
+    elif browser_step_failed or page_errors or console_error_count:
+        browser_execution_status = "fail"
+    else:
+        browser_execution_status = "pass"
+
+    if unknown_steps or unknown_criteria:
+        page_spec_conformance_status = "unknown"
+    elif page_spec_step_failed or binding_failed:
+        page_spec_conformance_status = "fail"
+    elif browser_execution_status != "pass":
+        page_spec_conformance_status = "unknown"
+    else:
+        page_spec_conformance_status = "pass"
+
+    if "unknown" in {
+        browser_execution_status,
+        page_spec_conformance_status,
+    }:
+        browser_status = "unknown"
+    elif "fail" in {
+        browser_execution_status,
+        page_spec_conformance_status,
+    }:
+        browser_status = "fail"
+    else:
+        browser_status = "pass"
+    return (
+        browser_execution_status,
+        page_spec_conformance_status,
+        browser_status,
+    )
+
+
 def run_real_browser_case_audit(
     *,
     package_root: Path,
@@ -752,12 +822,6 @@ def run_real_browser_case_audit(
         isinstance(item, Mapping) and item.get("type") == "error"
         for item in console_messages
     )
-    if counts["unknown"]:
-        browser_status = "unknown"
-    elif counts["fail"] or page_errors or console_error_count:
-        browser_status = "fail"
-    else:
-        browser_status = "pass"
     screenshot_identity = None
     if screenshot_path.is_file():
         screenshot_identity = _identity(
@@ -766,10 +830,38 @@ def run_real_browser_case_audit(
             identity_kind="raw_bytes",
         )
     real_browser_executed = facts.get("browser_started") is True
+    (
+        browser_execution_status,
+        page_spec_conformance_status,
+        browser_status,
+    ) = _layered_objective_statuses(
+        report=report,
+        real_browser_executed=real_browser_executed,
+        screenshot_captured=facts.get("screenshot_captured") is True,
+        page_errors=page_errors,
+        console_error_count=console_error_count,
+    )
     automation_reliable = bool(
         real_browser_executed
         and facts.get("screenshot_captured") is True
         and counts["unknown"] == 0
+    )
+    page_spec_identity = _identity(
+        page_value,
+        revision=str(page_spec.schema_version),
+    )
+    acceptance_plan_identity = _identity(
+        acceptance_plan.to_dict(),
+        revision=acceptance_plan.schema_version,
+    )
+    acceptance_binding_identity = _identity(
+        binding.to_dict(),
+        revision=binding.schema_version,
+    )
+    browser_execution_report_identity = _identity(
+        report.canonical_json_bytes(),
+        revision=report.schema_version,
+        identity_kind="raw_bytes",
     )
     _write_once(
         destination / "requirement_view.json",
@@ -787,6 +879,73 @@ def run_real_browser_case_audit(
         destination / "browser_execution_report.json",
         report.canonical_json_bytes(),
     )
+    semantic_alignment: dict[str, object] = {
+        "status": "not_executed",
+        "disposition": "blocked_by_objective_failure",
+        "review_item_count": 0,
+        "request_identity": None,
+        "model_generate_calls": 0,
+        "automatic_retry_count": 0,
+        "claim_boundary": (
+            "Phase 4 does not invoke a semantic evaluator; objective browser "
+            "or PageSpec-conformance failure cannot be overridden"
+        ),
+    }
+    if browser_status == "pass":
+        if screenshot_identity is None:
+            raise Phase4BrowserAcceptanceError(
+                "passing objective browser audit lacks screenshot evidence"
+            )
+        semantic_request = build_semantic_alignment_request(
+            case_id=selected_case_id,
+            acceptance_plan=acceptance_plan,
+            binding_plan=binding,
+            browser_report=report,
+            page_spec=page_spec,
+            evidence_identities={
+                "acceptance_binding": (
+                    "acceptance_binding",
+                    acceptance_binding_identity,
+                ),
+                "acceptance_plan": (
+                    "acceptance_plan",
+                    acceptance_plan_identity,
+                ),
+                "browser_execution_report": (
+                    "browser_execution_report",
+                    browser_execution_report_identity,
+                ),
+                "browser_screenshot": (
+                    "browser_screenshot",
+                    screenshot_identity,
+                ),
+                "page_spec": ("page_spec", page_spec_identity),
+                "result_package_manifest": (
+                    "result_package_manifest",
+                    package["manifest_identity"],
+                ),
+            },
+        )
+        _write_once(
+            destination / "semantic_alignment_request.json",
+            semantic_request.canonical_json_bytes(),
+        )
+        semantic_alignment = {
+            "status": "not_executed",
+            "disposition": "needs_semantic_review",
+            "review_item_count": len(semantic_request.review_items),
+            "request_identity": _identity(
+                semantic_request.to_dict(),
+                revision=semantic_request.schema_version,
+            ),
+            "model_generate_calls": 0,
+            "automatic_retry_count": 0,
+            "claim_boundary": (
+                "objective browser execution and PageSpec conformance passed; "
+                "abstract requirement alignment remains unexecuted and is not "
+                "counted as semantic success"
+            ),
+        }
     root_value = {
         "schema_version": CASE_AUDIT_SCHEMA_VERSION,
         "harness_revision": BROWSER_HARNESS_REVISION,
@@ -800,27 +959,14 @@ def run_real_browser_case_audit(
             else copy.deepcopy(dict(source_case_summary_identity))
         ),
         "result_package": package,
-        "page_spec_identity": _identity(
-            page_value,
-            revision=str(page_spec.schema_version),
-        ),
+        "page_spec_identity": page_spec_identity,
         "requirement_view_identity": _identity(
             requirement_view.to_dict(),
             revision=requirement_view.schema_version,
         ),
-        "acceptance_plan_identity": _identity(
-            acceptance_plan.to_dict(),
-            revision=acceptance_plan.schema_version,
-        ),
-        "acceptance_binding_identity": _identity(
-            binding.to_dict(),
-            revision=binding.schema_version,
-        ),
-        "browser_execution_report_identity": _identity(
-            report.canonical_json_bytes(),
-            revision=report.schema_version,
-            identity_kind="raw_bytes",
-        ),
+        "acceptance_plan_identity": acceptance_plan_identity,
+        "acceptance_binding_identity": acceptance_binding_identity,
+        "browser_execution_report_identity": browser_execution_report_identity,
         "browser": copy.deepcopy(facts.get("browser")),
         "viewport": copy.deepcopy(viewport),
         "interactions": copy.deepcopy(interactions),
@@ -829,6 +975,9 @@ def run_real_browser_case_audit(
         "screenshot_identity": screenshot_identity,
         "criteria_counts": counts,
         "browser_status": browser_status,
+        "browser_execution_status": browser_execution_status,
+        "page_spec_conformance_status": page_spec_conformance_status,
+        "semantic_alignment": semantic_alignment,
         "real_browser_executed": real_browser_executed,
         "automation_reliable": automation_reliable,
         "started_at_utc": started_at,
@@ -840,7 +989,8 @@ def run_real_browser_case_audit(
             if evidence_scope == "historical_synthetic_canary"
             else (
                 "real browser execution bound to one exact canonical Phase 4 "
-                "case; scripted Acceptance remains separate"
+                "case; browser execution and PageSpec conformance are objective "
+                "evidence, while semantic alignment remains separately pending"
             )
         ),
     }
@@ -870,6 +1020,9 @@ def validate_real_browser_case_audit(value: object) -> dict[str, object]:
         or data["harness_revision"] != BROWSER_HARNESS_REVISION
         or data["evidence_scope"] not in EVIDENCE_SCOPES
         or data["browser_status"] not in {"pass", "fail", "unknown"}
+        or data["browser_execution_status"] not in {"pass", "fail", "unknown"}
+        or data["page_spec_conformance_status"]
+        not in {"pass", "fail", "unknown"}
         or type(data["real_browser_executed"]) is not bool
         or type(data["automation_reliable"]) is not bool
     ):
@@ -928,6 +1081,66 @@ def validate_real_browser_case_audit(value: object) -> dict[str, object]:
     ):
         raise Phase4BrowserAcceptanceError(
             "passing browser audit contains fail or unknown criteria"
+        )
+    layer_statuses = {
+        data["browser_execution_status"],
+        data["page_spec_conformance_status"],
+    }
+    expected_browser_status = (
+        "unknown"
+        if "unknown" in layer_statuses
+        else "fail"
+        if "fail" in layer_statuses
+        else "pass"
+    )
+    if data["browser_status"] != expected_browser_status:
+        raise Phase4BrowserAcceptanceError(
+            "browser aggregate status does not match objective layers"
+        )
+    semantic = data["semantic_alignment"]
+    if (
+        not isinstance(semantic, Mapping)
+        or set(semantic)
+        != {
+            "status",
+            "disposition",
+            "review_item_count",
+            "request_identity",
+            "model_generate_calls",
+            "automatic_retry_count",
+            "claim_boundary",
+        }
+        or semantic.get("status") != "not_executed"
+        or semantic.get("model_generate_calls") != 0
+        or semantic.get("automatic_retry_count") != 0
+        or not isinstance(semantic.get("review_item_count"), int)
+        or isinstance(semantic.get("review_item_count"), bool)
+        or semantic["review_item_count"] < 0
+        or not isinstance(semantic.get("claim_boundary"), str)
+        or not semantic["claim_boundary"].strip()
+    ):
+        raise Phase4BrowserAcceptanceError(
+            "semantic alignment phase boundary drifted"
+        )
+    if data["browser_status"] == "pass":
+        if (
+            semantic.get("disposition") != "needs_semantic_review"
+            or semantic["review_item_count"] <= 0
+        ):
+            raise Phase4BrowserAcceptanceError(
+                "passing objective audit lacks pending semantic review"
+            )
+        _identity_record(
+            semantic.get("request_identity"),
+            "semantic alignment request",
+        )
+    elif (
+        semantic.get("disposition") != "blocked_by_objective_failure"
+        or semantic["review_item_count"] != 0
+        or semantic.get("request_identity") is not None
+    ):
+        raise Phase4BrowserAcceptanceError(
+            "failed objective audit must block semantic review"
         )
     root = {key: item for key, item in data.items() if key != "audit_identity"}
     if data["audit_identity"] != _identity(
@@ -1000,6 +1213,21 @@ def build_browser_canary_receipt(
                 ],
                 "screenshot_identity": audit["screenshot_identity"],
                 "browser_status": audit["browser_status"],
+                "browser_execution_status": audit[
+                    "browser_execution_status"
+                ],
+                "page_spec_conformance_status": audit[
+                    "page_spec_conformance_status"
+                ],
+                "semantic_alignment_status": audit[
+                    "semantic_alignment"
+                ]["status"],
+                "semantic_alignment_disposition": audit[
+                    "semantic_alignment"
+                ]["disposition"],
+                "semantic_alignment_request_identity": audit[
+                    "semantic_alignment"
+                ]["request_identity"],
                 "real_browser_executed": audit["real_browser_executed"],
                 "automation_reliable": audit["automation_reliable"],
             }
@@ -1010,8 +1238,14 @@ def build_browser_canary_receipt(
     automation_reliable = all(
         row["automation_reliable"] is True for row in rows
     )
-    all_canary_browser_pass = all(
-        row["browser_status"] == "pass" for row in rows
+    all_canary_browser_execution_pass = all(
+        row["browser_execution_status"] == "pass" for row in rows
+    )
+    all_canary_page_spec_conformance_pass = all(
+        row["page_spec_conformance_status"] == "pass" for row in rows
+    )
+    semantic_alignment_executed = any(
+        row["semantic_alignment_status"] != "not_executed" for row in rows
     )
     root = {
         "schema_version": CANARY_RECEIPT_SCHEMA_VERSION,
@@ -1022,16 +1256,25 @@ def build_browser_canary_receipt(
         "case_audits": rows,
         "real_browser_executed": real_browser_executed,
         "automation_reliable": automation_reliable,
-        "all_canary_browser_pass": all_canary_browser_pass,
+        "all_canary_browser_execution_pass": (
+            all_canary_browser_execution_pass
+        ),
+        "all_canary_page_spec_conformance_pass": (
+            all_canary_page_spec_conformance_pass
+        ),
+        "semantic_alignment_executed": semantic_alignment_executed,
         "continuation_allowed": bool(
             real_browser_executed
             and automation_reliable
-            and all_canary_browser_pass
+            and all_canary_browser_execution_pass
+            and all_canary_page_spec_conformance_pass
+            and not semantic_alignment_executed
         ),
         "scripted_acceptance_is_browser_evidence": False,
         "claim_boundary": (
-            "three-case real-browser canary for automation and exact package "
-            "binding; not the final ten-case browser evidence"
+            "three-case objective real-browser and PageSpec-conformance "
+            "canary; semantic alignment remains unexecuted and this is not "
+            "the final ten-case browser evidence"
         ),
     }
     receipt = {
@@ -1068,7 +1311,9 @@ def validate_browser_canary_receipt(
         "case_audits",
         "real_browser_executed",
         "automation_reliable",
-        "all_canary_browser_pass",
+        "all_canary_browser_execution_pass",
+        "all_canary_page_spec_conformance_pass",
+        "semantic_alignment_executed",
         "continuation_allowed",
         "scripted_acceptance_is_browser_evidence",
         "claim_boundary",
@@ -1101,6 +1346,11 @@ def validate_browser_canary_receipt(
             or row.get("real_browser_executed") is not True
             or row.get("automation_reliable") is not True
             or row.get("browser_status") != "pass"
+            or row.get("browser_execution_status") != "pass"
+            or row.get("page_spec_conformance_status") != "pass"
+            or row.get("semantic_alignment_status") != "not_executed"
+            or row.get("semantic_alignment_disposition")
+            != "needs_semantic_review"
         ):
             raise Phase4BrowserAcceptanceError(
                 "browser canary case did not pass reliably"
@@ -1113,6 +1363,7 @@ def validate_browser_canary_receipt(
             "acceptance_binding_identity",
             "browser_execution_report_identity",
             "screenshot_identity",
+            "semantic_alignment_request_identity",
         ):
             _identity_record(row.get(key), f"browser canary {key}")
         summary = _load_json(
@@ -1132,7 +1383,9 @@ def validate_browser_canary_receipt(
     if (
         data["real_browser_executed"] is not True
         or data["automation_reliable"] is not True
-        or data["all_canary_browser_pass"] is not True
+        or data["all_canary_browser_execution_pass"] is not True
+        or data["all_canary_page_spec_conformance_pass"] is not True
+        or data["semantic_alignment_executed"] is not False
         or data["continuation_allowed"] is not True
     ):
         raise Phase4BrowserAcceptanceError(

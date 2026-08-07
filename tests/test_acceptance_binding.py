@@ -162,7 +162,11 @@ class AcceptanceBindingTest(unittest.TestCase):
         use_case_criterion = next(
             item for item in self.plan.criteria if item.source_id == "use-case-search"
         )
-        expected_outcome = dict(use_case_criterion.expected_payload)["expected_outcome"]
+        final_interaction = next(
+            item
+            for item in self.spec.interactions
+            if item.interaction_id == "interaction-use-case-search-primary"
+        )
         outcome_steps = [
             item for item in result.steps
             if item.criterion_id == use_case_criterion.criterion_id
@@ -171,11 +175,11 @@ class AcceptanceBindingTest(unittest.TestCase):
         self.assertEqual(len(outcome_steps), 1)
         self.assertEqual(
             dict(outcome_steps[0].expected_payload),
-            {"feedback": expected_outcome},
+            {"feedback": final_interaction.user_feedback},
         )
         self.assertEqual(
             outcome_steps[0].source,
-            "acceptance_plan.criteria.expected_payload.expected_outcome",
+            "page_spec.interactions.user_feedback",
         )
         result.validate_against(self.view, self.plan, self.spec, render)
 
@@ -345,9 +349,14 @@ class AcceptanceBindingTest(unittest.TestCase):
         self.assertEqual(len(feedback_steps), 1)
         self.assertEqual(feedback_steps[0].target_id, "page-state")
         self.assertEqual(feedback_steps[0].selector, "#page-state .state-message")
+        expected_feedback = next(
+            item.user_feedback
+            for item in spec.interactions
+            if item.interaction_id == "interaction-use-case-search-primary"
+        )
         self.assertEqual(
             dict(feedback_steps[0].expected_payload),
-            {"feedback": "a result list is shown"},
+            {"feedback": expected_feedback},
         )
 
     def test_unsupported_requirement_constraint_and_device_are_retained(self) -> None:
@@ -411,7 +420,7 @@ class AcceptanceBindingTest(unittest.TestCase):
                 self.assertEqual(binding.terminal_status, "fail")
                 self.assertEqual(binding.terminal_stage, "render_binding")
 
-    def test_use_case_feedback_step_uses_canonical_expected_payload_even_when_candidate_feedback_differs(self) -> None:
+    def test_use_case_feedback_step_uses_page_spec_feedback_and_keeps_semantic_reference(self) -> None:
         spec = copy.deepcopy(self.spec)
         interaction = next(
             item for item in spec.interactions
@@ -433,11 +442,20 @@ class AcceptanceBindingTest(unittest.TestCase):
         self.assertEqual(len(feedback_steps), 1)
         self.assertEqual(
             dict(feedback_steps[0].expected_payload),
-            {"feedback": "a result list is shown"},
+            {"feedback": "candidate-defined outcome"},
         )
         self.assertEqual(
             feedback_steps[0].source,
-            "acceptance_plan.criteria.expected_payload.expected_outcome",
+            "page_spec.interactions.user_feedback",
+        )
+        refs = dict(binding.target_refs)
+        self.assertEqual(
+            refs["feedback_interaction_id"],
+            "interaction-use-case-search-primary",
+        )
+        self.assertEqual(
+            len(refs["semantic_expected_outcome_sha256"]),
+            64,
         )
 
     def test_recovery_criteria_bind_distinct_stable_scenario_fixtures(self) -> None:

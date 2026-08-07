@@ -26,8 +26,8 @@ from .acceptance_plan import ACCEPTANCE_PLAN_SCHEMA_VERSION, AcceptancePlan, Acc
 from .requirement_view import INTERNAL_REQUIREMENT_VIEW_SCHEMA_VERSION, RequirementView
 
 
-ACCEPTANCE_BINDING_SCHEMA_VERSION = "req2web.acceptance.binding.v1"
-EXECUTABLE_STEP_PLAN_SCHEMA_VERSION = "req2web.acceptance.step_plan.v1"
+ACCEPTANCE_BINDING_SCHEMA_VERSION = "req2web.acceptance.binding.v2"
+EXECUTABLE_STEP_PLAN_SCHEMA_VERSION = "req2web.acceptance.step_plan.v2"
 
 _TERMINAL_STATUSES = {"fail", "not_supported"}
 _TERMINAL_STAGES = {"page_spec_binding", "render_binding", "capability_boundary"}
@@ -908,7 +908,11 @@ def _use_case_binding(criterion: AcceptanceCriterion, page_spec: PageSpec, inspe
     refs: dict[str, str] = {
         "acceptance_check_id": acceptance.check_id,
         "acceptance_state_id": acceptance.state_id,
+        "feedback_interaction_id": final_interaction.interaction_id,
         feedback_target.target_ref_key: feedback_target.target_ref_value,
+        "semantic_expected_outcome_sha256": sha256(
+            expected_outcome.encode("utf-8")
+        ).hexdigest(),
         "use_case_id": use_case_id,
     }
     refs.update({f"section_id:{index}": value for index, value in enumerate(sorted(trace.section_ids))})
@@ -965,8 +969,8 @@ def _use_case_binding(criterion: AcceptanceCriterion, page_spec: PageSpec, inspe
         _blueprint(
             "assert_feedback", feedback_target.target_id,
             feedback_target.selector,
-            {"feedback": expected_outcome},
-            "acceptance_plan.criteria.expected_payload.expected_outcome",
+            {"feedback": final_interaction.user_feedback},
+            "page_spec.interactions.user_feedback",
         )
     )
     return refs, blueprints

@@ -109,7 +109,11 @@ def main(argv: list[str] | None = None) -> int:
             print(
                 "[P4-BROWSER] "
                 f"case={audit['case_id']} "
-                f"status={audit['browser_status']} "
+                f"browser_execution={audit['browser_execution_status']} "
+                f"page_spec_conformance={audit['page_spec_conformance_status']} "
+                "semantic_alignment="
+                f"{audit['semantic_alignment']['status']}/"
+                f"{audit['semantic_alignment']['disposition']} "
                 f"real_browser_executed={str(audit['real_browser_executed']).lower()} "
                 f"automation_reliable={str(audit['automation_reliable']).lower()}",
                 flush=True,

@@ -3,6 +3,7 @@ from __future__ import annotations
 import copy
 import json
 from pathlib import Path
+import shutil
 import sys
 import tempfile
 import unittest
@@ -128,6 +129,54 @@ def _write_json(path: Path, value: object) -> None:
 
 
 class Phase4BrowserAcceptanceTest(unittest.TestCase):
+    def test_v2_audit_separates_objective_layers_and_freezes_semantic_request(self) -> None:
+        root = (
+            ROOT
+            / "tests"
+            / ".tmp_phase4_browser_acceptance"
+            / self._testMethodName
+        )
+        shutil.rmtree(root, ignore_errors=True)
+        try:
+            audit = run_real_browser_case_audit(
+                package_root=PACKAGE_ROOT,
+                output_root=root,
+                run_id="historical-synthetic-browser-canary-v2",
+                case_index=1,
+                case_id="historical-ecommerce-v2",
+                evidence_scope="historical_synthetic_canary",
+                backend_factory=_backend_factory,
+            )
+            self.assertEqual(audit["browser_status"], "pass")
+            self.assertEqual(audit["browser_execution_status"], "pass")
+            self.assertEqual(
+                audit["page_spec_conformance_status"],
+                "pass",
+            )
+            self.assertEqual(
+                audit["semantic_alignment"]["status"],
+                "not_executed",
+            )
+            self.assertEqual(
+                audit["semantic_alignment"]["disposition"],
+                "needs_semantic_review",
+            )
+            self.assertEqual(
+                audit["semantic_alignment"]["model_generate_calls"],
+                0,
+            )
+            request = json.loads(
+                (root / "semantic_alignment_request.json").read_text(
+                    encoding="utf-8"
+                )
+            )
+            self.assertFalse(request["browser_control_allowed"])
+            self.assertEqual(request["model_generate_call_limit"], 1)
+            self.assertEqual(request["automatic_retry_limit"], 0)
+            self.assertTrue(request["review_items"])
+        finally:
+            shutil.rmtree(root, ignore_errors=True)
+
     @unittest.skipIf(
         sys.platform == "win32",
         "Windows managed host denies nested temporary browser-audit directories",
@@ -144,6 +193,12 @@ class Phase4BrowserAcceptanceTest(unittest.TestCase):
                 backend_factory=_backend_factory,
             )
             self.assertEqual(audit["browser_status"], "pass")
+            self.assertEqual(audit["browser_execution_status"], "pass")
+            self.assertEqual(audit["page_spec_conformance_status"], "pass")
+            self.assertEqual(
+                audit["semantic_alignment"]["disposition"],
+                "needs_semantic_review",
+            )
             self.assertTrue(audit["real_browser_executed"])
             self.assertTrue(audit["automation_reliable"])
             self.assertIsNone(audit["source_case_summary_identity"])
@@ -233,6 +288,14 @@ class Phase4BrowserAcceptanceTest(unittest.TestCase):
                 )
                 audit_paths.append(output / "case_browser_audit.json")
                 self.assertEqual(audit["browser_status"], "pass")
+                self.assertEqual(
+                    audit["browser_execution_status"],
+                    "pass",
+                )
+                self.assertEqual(
+                    audit["page_spec_conformance_status"],
+                    "pass",
+                )
             receipt = build_browser_canary_receipt(
                 flow_result_root=flow,
                 case_audit_paths=tuple(audit_paths),
@@ -240,6 +303,13 @@ class Phase4BrowserAcceptanceTest(unittest.TestCase):
             )
             self.assertTrue(receipt["continuation_allowed"])
             self.assertEqual(receipt["canary_case_count"], 3)
+            self.assertTrue(
+                receipt["all_canary_browser_execution_pass"]
+            )
+            self.assertTrue(
+                receipt["all_canary_page_spec_conformance_pass"]
+            )
+            self.assertFalse(receipt["semantic_alignment_executed"])
 
 
 if __name__ == "__main__":

@@ -188,12 +188,32 @@ class AcceptanceEvaluationTest(unittest.TestCase):
         self.assertLess(len({gold_id for _, gold_id in mapping}), len(mapping))
 
         spec = PageSpecBuilder().build(duplicated_bundle)
-        duplicate_interaction = next(item for item in spec.interactions if item.interaction_id == "interaction-use-case-search-duplicate-primary")
-        duplicate_interaction.user_feedback = "incompatible feedback"
-        spec.validate()
         render = DeterministicPageRenderer().render(spec, self.root / "duplicate-page")
         binding = compile_acceptance_binding(view, plan, spec, render)
-        browser = execute_acceptance_binding_plan(binding, render.index_html.resolve().as_uri(), backend=FakeBrowserBackend(binding))
+        duplicate_criterion = next(
+            item
+            for item in plan.criteria
+            if item.source_id == "use-case-search-duplicate"
+        )
+        duplicate_binding = next(
+            item
+            for item in binding.bindings
+            if item.criterion_id == duplicate_criterion.criterion_id
+        )
+        steps_by_id = {item.step_id: item for item in binding.steps}
+        missing_selector = next(
+            steps_by_id[step_id].selector
+            for step_id in duplicate_binding.step_ids
+            if steps_by_id[step_id].action_kind == "assert_element_exists"
+        )
+        browser = execute_acceptance_binding_plan(
+            binding,
+            render.index_html.resolve().as_uri(),
+            backend=FakeBrowserBackend(
+                binding,
+                missing_selectors={missing_selector},
+            ),
+        )
         candidate = normalize_candidate_decisions(self.case_id, spec)
         report = evaluate_acceptance(self.case_id, plan, binding, browser, spec, gold, candidate)
         deduplicated = next(item for item in report.gold_results if len(item.source_criterion_ids) > 1)
