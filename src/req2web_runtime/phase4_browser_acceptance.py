@@ -522,6 +522,14 @@ def _package_binding(package_root: Path) -> dict[str, object]:
     }
 
 
+def validate_result_package_binding(
+    package_root: Path,
+) -> dict[str, object]:
+    """Validate and identify one immutable ResultPackage v1 directory."""
+
+    return _package_binding(package_root)
+
+
 @dataclass
 class Phase4PlaywrightBrowserBackend(LazyPlaywrightBrowserBackend):
     """Playwright backend with Phase 4 viewport and observable audit facts."""
@@ -1644,5 +1652,6 @@ __all__ = [
     "run_real_browser_case_audit",
     "validate_browser_canary_receipt",
     "validate_real_browser_case_audit",
+    "validate_result_package_binding",
     "write_browser_final_summary",
 ]
