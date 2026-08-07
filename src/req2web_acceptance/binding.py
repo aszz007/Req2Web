@@ -1014,23 +1014,39 @@ def _is_semantic_error_state(state: Any) -> bool:
     )
 
 
+def _error_state_matches_scenario(state: Any, scenario_token: str) -> bool:
+    words = _semantic_words(str(state.name), str(state.description))
+    if scenario_token == "permission":
+        return bool(
+            words
+            & {
+                "access",
+                "authorization",
+                "denied",
+                "forbidden",
+                "permission",
+                "unauthorized",
+            }
+        )
+    return bool(
+        words
+        & {
+            "error",
+            "failed",
+            "failure",
+            "input",
+            "invalid",
+            "validation",
+        }
+    )
+
+
 def _semantic_recovery_path(
     page_spec: PageSpec,
     *,
     scenario_token: str,
 ) -> tuple[Any, Any, Any, list[Any]] | None:
     initial_state = page_spec.states[0]
-    entry_words = {
-        "input": {"error", "failed", "failure", "invalid", "validation"},
-        "permission": {
-            "access",
-            "authorization",
-            "denied",
-            "forbidden",
-            "permission",
-            "unauthorized",
-        },
-    }[scenario_token]
     recovery_words = {
         "continue",
         "correct",
@@ -1049,6 +1065,7 @@ def _semantic_recovery_path(
         for state in page_spec.states
         if state.state_id != initial_state.state_id
         and _is_semantic_error_state(state)
+        and _error_state_matches_scenario(state, scenario_token)
     ]
     candidates: list[tuple[Any, Any, Any, list[Any]]] = []
     for error_state in error_states:
@@ -1057,10 +1074,6 @@ def _semantic_recovery_path(
             for interaction in page_spec.interactions
             if interaction.source_state_id != error_state.state_id
             and interaction.target_state_id == error_state.state_id
-            and _has_any_semantic_word(
-                (interaction.action, interaction.user_feedback),
-                entry_words,
-            )
         ]
         recoveries = [
             interaction

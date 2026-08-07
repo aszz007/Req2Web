@@ -579,6 +579,34 @@ class AcceptanceBindingTest(unittest.TestCase):
             ],
         )
 
+    def test_recovery_binding_uses_explicit_error_target_without_repeated_error_copy(
+        self,
+    ) -> None:
+        spec = copy.deepcopy(self.spec)
+        error_entry = next(
+            item
+            for item in spec.interactions
+            if item.interaction_id.endswith("-error-input")
+        )
+        error_entry.action = "Submit the order with the entered details."
+        error_entry.user_feedback = "Order submission initiated."
+        spec.validate()
+
+        result = compile_acceptance_binding(
+            self.view,
+            self.plan,
+            spec,
+            self.render(spec),
+        )
+
+        binding = self.binding_for(result, "validation_signal")
+        self.assertEqual(binding.disposition, "bound")
+        refs = dict(binding.target_refs)
+        self.assertEqual(
+            refs["error_entry_interaction_id"],
+            error_entry.interaction_id,
+        )
+
     def test_error_state_classifier_ignores_active_validation_copy(self) -> None:
         normal_state = next(
             item for item in self.spec.states if item.name == "success"
