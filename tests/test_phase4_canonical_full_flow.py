@@ -21,6 +21,7 @@ from req2web_runtime.phase4_canonical_full_flow import (  # noqa: E402
     _build_upstream,
     _parent_experiment_binding,
     _progress_checkpoint_path,
+    _recover_interrupted_case_summary,
     run_phase4_canonical_full_flow,
 )
 from req2web_runtime import (  # noqa: E402
@@ -280,6 +281,122 @@ class Phase4CanonicalFullFlowTest(unittest.TestCase):
                 result_root=Path("missing-result"),
                 confirm_canonical_full_flow=True,
                 max_cases=4,
+            )
+
+    def test_resume_closes_interrupted_pre_call_without_retry(self) -> None:
+        case = get_case_set()["cases"][5]
+        root = Path("interrupted-result-root")
+        upstream_root = root / "upstream" / "06"
+        child_root = root / "cases" / f"06-{case['case_id']}"
+        upstream_receipt_root = {
+            "schema_version": (
+                "req2web.phase4.canonical_full_flow.v1."
+                "upstream_receipt"
+            ),
+            "case_id": case["case_id"],
+            "request_id": case["request_id"],
+        }
+        upstream_receipt = {
+            **upstream_receipt_root,
+            "receipt_identity": historical_manual._identity(
+                upstream_receipt_root,
+                revision=(
+                    "req2web.phase4.canonical_full_flow.v1."
+                    "upstream_receipt"
+                ),
+            ),
+        }
+        file_values: dict[Path, object] = {
+            upstream_root / "upstream_receipt.json": upstream_receipt,
+        }
+        file_paths = set(file_values)
+        for node_id in ("F1", "F2", "F3"):
+            attempt_root = child_root / "attempts" / node_id
+            attempt = {
+                "node_id": node_id,
+                "case_id": case["case_id"],
+                "request_id": case["request_id"],
+                "generate_started": True,
+                "status": "validated",
+            }
+            file_values[attempt_root / "attempt_result.json"] = attempt
+            file_paths.update(
+                {
+                    attempt_root / "attempt_result.json",
+                    attempt_root / "raw_response.bin",
+                    attempt_root / "validated_node_output.json",
+                }
+            )
+        pre_call_path = (
+            child_root / "attempts" / "F4" / "pre_call_record.json"
+        )
+        file_values[pre_call_path] = {
+            "node_id": "F4",
+            "case_id": case["case_id"],
+            "request_id": case["request_id"],
+        }
+        file_paths.add(pre_call_path)
+        directory_paths = {upstream_root, child_root}
+        writes: dict[Path, object] = {}
+
+        with (
+            patch.object(
+                Path,
+                "exists",
+                autospec=True,
+                side_effect=lambda path: (
+                    path in directory_paths or path in file_paths
+                ),
+            ),
+            patch.object(
+                Path,
+                "is_dir",
+                autospec=True,
+                side_effect=lambda path: path in directory_paths,
+            ),
+            patch.object(
+                Path,
+                "is_file",
+                autospec=True,
+                side_effect=lambda path: path in file_paths,
+            ),
+            patch(
+                "req2web_runtime.phase4_canonical_full_flow._read_json",
+                side_effect=lambda path: file_values[path],
+            ),
+            patch(
+                "req2web_runtime.phase4_canonical_full_flow._write_json",
+                side_effect=lambda path, value: writes.__setitem__(
+                    path,
+                    value,
+                ),
+            ),
+        ):
+            summary = _recover_interrupted_case_summary(
+                index=6,
+                case=case,
+                upstream_root=upstream_root,
+                child_root=child_root,
+            )
+
+            self.assertIsNotNone(summary)
+            assert summary is not None
+            self.assertEqual(
+                summary["per_node_generate_started"],
+                {"F1": 1, "F2": 1, "F3": 1, "F4": 1},
+            )
+            self.assertEqual(
+                summary["per_node_raw_contract_pass"],
+                {"F1": True, "F2": True, "F3": True, "F4": False},
+            )
+            self.assertEqual(
+                summary["failure"]["failure_stage"],
+                "F4",
+            )
+            self.assertFalse(summary["failure"]["retry_allowed"])
+            self.assertIn(
+                child_root / "interruption_recovery_receipt.json",
+                writes,
             )
 
 

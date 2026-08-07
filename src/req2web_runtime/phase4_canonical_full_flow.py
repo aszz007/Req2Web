@@ -47,6 +47,9 @@ POLICY_SCHEMA_VERSION = f"{FLOW_SCHEMA_VERSION}.policy"
 SUMMARY_SCHEMA_VERSION = f"{FLOW_SCHEMA_VERSION}.summary"
 CASE_SUMMARY_SCHEMA_VERSION = f"{FLOW_SCHEMA_VERSION}.case_summary"
 UPSTREAM_RECEIPT_SCHEMA_VERSION = f"{FLOW_SCHEMA_VERSION}.upstream_receipt"
+INTERRUPTION_RECOVERY_SCHEMA_VERSION = (
+    f"{FLOW_SCHEMA_VERSION}.interruption_recovery"
+)
 RUN_PREFIX = "p4-canonical-full-flow-"
 ROOT_MARKER = ".req2web-phase4-canonical-full-flow-root"
 TOTAL_GENERATE_STARTED_CAP = CASE_COUNT * len(NODE_ORDER)
@@ -397,6 +400,212 @@ def _summarize_case(
     }
 
 
+def _recover_interrupted_case_summary(
+    *,
+    index: int,
+    case: Mapping[str, object],
+    upstream_root: Path,
+    child_root: Path,
+) -> dict[str, object] | None:
+    """Close an interrupted case without repeating any possible model call."""
+
+    if not upstream_root.exists() and not child_root.exists():
+        return None
+    if not upstream_root.is_dir():
+        raise Phase4CanonicalFullFlowError(
+            "interrupted case upstream root is invalid"
+        )
+    upstream_receipt = _require_mapping(
+        _read_json(upstream_root / "upstream_receipt.json"),
+        "interrupted upstream receipt",
+    )
+    if (
+        upstream_receipt.get("case_id") != case["case_id"]
+        or upstream_receipt.get("request_id") != case["request_id"]
+    ):
+        raise Phase4CanonicalFullFlowError(
+            "interrupted upstream receipt binding drifted"
+        )
+
+    if (
+        child_root.is_dir()
+        and (child_root / "p4_05_final_result.json").is_file()
+        and (child_root / "langgraph_final_state.json").is_file()
+    ):
+        return _summarize_case(
+            index=index,
+            case=case,
+            upstream_receipt=upstream_receipt,
+            child_root=child_root,
+            final_result=_require_mapping(
+                _read_json(child_root / "p4_05_final_result.json"),
+                "interrupted terminal child result",
+            ),
+        )
+
+    per_node_generate_started: dict[str, int] = {}
+    per_node_raw_contract_pass: dict[str, bool] = {}
+    evidence: dict[str, object] = {}
+    interruption_stage = "upstream_to_model_boundary"
+    if child_root.exists() and not child_root.is_dir():
+        raise Phase4CanonicalFullFlowError(
+            "interrupted case child root is invalid"
+        )
+    if child_root.is_dir():
+        for node_id in NODE_ORDER:
+            attempt_root = child_root / "attempts" / node_id
+            attempt_path = attempt_root / "attempt_result.json"
+            pre_call_path = attempt_root / "pre_call_record.json"
+            if attempt_path.is_file():
+                attempt = _require_mapping(
+                    _read_json(attempt_path),
+                    f"interrupted {node_id} attempt",
+                )
+                if (
+                    attempt.get("node_id") != node_id
+                    or attempt.get("case_id") != case["case_id"]
+                    or attempt.get("request_id") != case["request_id"]
+                ):
+                    raise Phase4CanonicalFullFlowError(
+                        "interrupted attempt binding drifted"
+                    )
+                generate_started = attempt.get("generate_started")
+                status = attempt.get("status")
+                if type(generate_started) is not bool or status not in {
+                    "validated",
+                    "failed_closed",
+                }:
+                    raise Phase4CanonicalFullFlowError(
+                        "interrupted attempt status is invalid"
+                    )
+                if status == "validated" and (
+                    not (attempt_root / "raw_response.bin").is_file()
+                    or not (
+                        attempt_root / "validated_node_output.json"
+                    ).is_file()
+                ):
+                    raise Phase4CanonicalFullFlowError(
+                        "validated interrupted attempt artifacts are incomplete"
+                    )
+                per_node_generate_started[node_id] = int(generate_started)
+                per_node_raw_contract_pass[node_id] = (
+                    status == "validated"
+                )
+                evidence[node_id] = {
+                    "source": "attempt_result",
+                    "identity": _fresh._identity(
+                        attempt,
+                        revision=_fresh.P4_05_ATTEMPT_SCHEMA_VERSION,
+                    ),
+                }
+                if status != "validated":
+                    interruption_stage = node_id
+                    break
+                continue
+            if pre_call_path.is_file():
+                pre_call = _require_mapping(
+                    _read_json(pre_call_path),
+                    f"interrupted {node_id} pre-call",
+                )
+                if (
+                    pre_call.get("node_id") != node_id
+                    or pre_call.get("case_id") != case["case_id"]
+                    or pre_call.get("request_id") != case["request_id"]
+                ):
+                    raise Phase4CanonicalFullFlowError(
+                        "interrupted pre-call binding drifted"
+                    )
+                # The process may have died after the fsynced pre-call boundary
+                # but before its attempt result. Conservatively consume the
+                # call so resume can never duplicate a possible generation.
+                per_node_generate_started[node_id] = 1
+                per_node_raw_contract_pass[node_id] = False
+                evidence[node_id] = {
+                    "source": "pre_call_boundary_consumed",
+                    "identity": _fresh._identity(
+                        pre_call,
+                        revision=_fresh.P4_05_PRE_CALL_SCHEMA_VERSION,
+                    ),
+                }
+                interruption_stage = node_id
+                break
+            per_node_generate_started[node_id] = 0
+            per_node_raw_contract_pass[node_id] = False
+            interruption_stage = node_id
+            break
+
+    receipt_root = {
+        "schema_version": INTERRUPTION_RECOVERY_SCHEMA_VERSION,
+        "case_index": index,
+        "case_id": case["case_id"],
+        "request_id": case["request_id"],
+        "interruption_stage": interruption_stage,
+        "per_node_generate_started": per_node_generate_started,
+        "per_node_raw_contract_pass": per_node_raw_contract_pass,
+        "evidence": evidence,
+        "existing_artifacts_preserved": True,
+        "automatic_retry": False,
+        "recovery_disposition": "terminal_failed_closed_no_retry",
+    }
+    receipt = {
+        **receipt_root,
+        "receipt_identity": _fresh._identity(
+            receipt_root,
+            revision=INTERRUPTION_RECOVERY_SCHEMA_VERSION,
+        ),
+    }
+    recovery_root = child_root if child_root.is_dir() else upstream_root
+    _write_json(
+        recovery_root / "interruption_recovery_receipt.json",
+        receipt,
+    )
+    failure = {
+        "failure_code": "interrupted_attempt_recovered_fail_closed",
+        "failure_stage": interruption_stage,
+        "retry_allowed": False,
+        "fallback_allowed": False,
+        "message_code": "InterruptedCaseCheckpointRecovered",
+    }
+    summary_root = {
+        "schema_version": CASE_SUMMARY_SCHEMA_VERSION,
+        "case_index": index,
+        "case_id": case["case_id"],
+        "request_id": case["request_id"],
+        "child_result_root": str(child_root),
+        "upstream_receipt_identity": copy.deepcopy(
+            upstream_receipt["receipt_identity"]
+        ),
+        "workflow_runtime": REAL_MODEL_GRAPH_REVISION,
+        "prompt_authority_identity": copy.deepcopy(
+            PROMPT_AUTHORITY_IDENTITY
+        ),
+        "status": "failed_closed",
+        "per_node_generate_started": per_node_generate_started,
+        "per_node_raw_contract_pass": per_node_raw_contract_pass,
+        "all_four_nodes_executed": (
+            tuple(per_node_generate_started) == NODE_ORDER
+            and all(per_node_generate_started.values())
+        ),
+        "all_four_nodes_raw_contract_pass": False,
+        "downstream_status": None,
+        "downstream_delivery_success": False,
+        "downstream_first_pass_success": False,
+        "downstream_repair_success": False,
+        "downstream_fallback_success": False,
+        "scripted_acceptance_executed": False,
+        "real_browser_executed": False,
+        "manual_f1_f4_loop_used": False,
+        "failure": failure,
+    }
+    return {
+        **summary_root,
+        "case_summary_identity": _fresh._identity(
+            summary_root,
+            revision=CASE_SUMMARY_SCHEMA_VERSION,
+        ),
+    }
+
+
 def _aggregate(case_summaries: list[dict[str, object]]) -> dict[str, object]:
     per_node_calls = {node_id: 0 for node_id in NODE_ORDER}
     per_node_raw_pass = {node_id: 0 for node_id in NODE_ORDER}
@@ -580,6 +789,44 @@ def run_phase4_canonical_full_flow(
                 )
             )
             continue
+        if resume_existing:
+            case = _require_mapping(
+                case_set["cases"][index - 1],
+                "raw case",
+            )
+            recovered = _recover_interrupted_case_summary(
+                index=index,
+                case=case,
+                upstream_root=result_root / "upstream" / f"{index:02d}",
+                child_root=(
+                    result_root
+                    / "cases"
+                    / f"{index:02d}-{case['case_id']}"
+                ),
+            )
+            if recovered is not None:
+                _write_json(summary_path, recovered)
+                completed.append(recovered)
+                aggregate = _aggregate(completed)
+                if (
+                    aggregate["total_generate_started_count"]
+                    > TOTAL_GENERATE_STARTED_CAP
+                ):
+                    raise Phase4CanonicalFullFlowError(
+                        "aggregate model call cap was exceeded"
+                    )
+                _write_json(
+                    _progress_checkpoint_path(result_root, index),
+                    {
+                        "schema_version": (
+                            f"{FLOW_SCHEMA_VERSION}.progress"
+                        ),
+                        "run_id": selected_run_id,
+                        "last_completed_case_index": index,
+                        "aggregate": aggregate,
+                    },
+                )
+                continue
         break
     if max_cases == CASE_COUNT:
         if len(completed) < CANARY_COUNT:
@@ -738,6 +985,7 @@ __all__ = [
     "CASE_COUNT",
     "FLOW_AUTHORITY_ROLE",
     "FLOW_SCHEMA_VERSION",
+    "INTERRUPTION_RECOVERY_SCHEMA_VERSION",
     "Phase4CanonicalFullFlowError",
     "run_phase4_canonical_full_flow",
 ]
