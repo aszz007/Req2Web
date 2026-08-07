@@ -111,9 +111,10 @@ class Phase4PromptAuthorityTest(unittest.TestCase):
             instructions,
         )
         self.assertIn(
-            "emit at least one separate error/recovery state",
+            "emit both a separate error state",
             instructions,
         )
+        self.assertIn("error state must not be the final state", instructions)
         phase5_input_bytes = _canonical(
             {
                 "schema_version": "test.phase5.input.v1",
@@ -142,6 +143,44 @@ class Phase4PromptAuthorityTest(unittest.TestCase):
         self.assertEqual(
             phase5_value["required_f1_component_order"],
             value["required_f1_component_order"],
+        )
+
+    def test_f3_prompt_requires_recovery_to_leave_error_state(self) -> None:
+        input_bytes = _canonical(
+            {
+                "schema_version": "test.input.v1",
+                "node_id": "F3",
+                "projection": {"test": True},
+            }
+        )
+        value = validate_canonical_prompt(
+            build_canonical_f1_f4_prompt(
+                node_id="F3",
+                input_bytes=input_bytes,
+                required_interaction_plan=[
+                    {
+                        "plan_index": 0,
+                        "transition_kind": "same_state_work",
+                    }
+                ],
+            ),
+            node_id="F3",
+            input_bytes=input_bytes,
+            required_interaction_plan=[
+                {
+                    "plan_index": 0,
+                    "transition_kind": "same_state_work",
+                }
+            ],
+        )
+        instructions = "\n".join(value["instructions"])
+        self.assertIn(
+            "successful recovery must target the later non-error state",
+            instructions,
+        )
+        self.assertIn(
+            "never represent successful recovery as a self-loop",
+            instructions,
         )
 
     def test_prompt_replays_from_exact_input_and_plan(self) -> None:

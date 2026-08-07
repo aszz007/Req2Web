@@ -13,6 +13,7 @@ from hashlib import sha256
 from html.parser import HTMLParser
 import json
 from pathlib import Path
+import re
 from typing import Any, Mapping
 
 from req2web_generation.renderer import (
@@ -976,6 +977,103 @@ def _use_case_binding(criterion: AcceptanceCriterion, page_spec: PageSpec, inspe
     return refs, blueprints
 
 
+def _semantic_words(*values: str) -> set[str]:
+    return set(re.findall(r"[a-z0-9]+", " ".join(values).casefold()))
+
+
+def _has_any_semantic_word(values: tuple[str, ...], expected: set[str]) -> bool:
+    return bool(_semantic_words(*values) & expected)
+
+
+def _semantic_recovery_path(
+    page_spec: PageSpec,
+    *,
+    scenario_token: str,
+) -> tuple[Any, Any, Any, list[Any]] | None:
+    initial_state = page_spec.states[0]
+    error_state_words = {
+        "denied",
+        "error",
+        "failed",
+        "failure",
+        "invalid",
+        "recovery",
+        "retry",
+        "validation",
+    }
+    entry_words = {
+        "input": {"error", "failed", "failure", "invalid", "validation"},
+        "permission": {
+            "access",
+            "authorization",
+            "denied",
+            "forbidden",
+            "permission",
+            "unauthorized",
+        },
+    }[scenario_token]
+    recovery_words = {
+        "continue",
+        "correct",
+        "corrected",
+        "recover",
+        "recovered",
+        "recovery",
+        "resubmit",
+        "retry",
+        "success",
+        "successful",
+        "valid",
+    }
+    error_states = [
+        state
+        for state in page_spec.states
+        if state.state_id != initial_state.state_id
+        and _has_any_semantic_word(
+            (state.name, state.description),
+            error_state_words,
+        )
+    ]
+    candidates: list[tuple[Any, Any, Any, list[Any]]] = []
+    for error_state in error_states:
+        entries = [
+            interaction
+            for interaction in page_spec.interactions
+            if interaction.source_state_id != error_state.state_id
+            and interaction.target_state_id == error_state.state_id
+            and _has_any_semantic_word(
+                (interaction.action, interaction.user_feedback),
+                entry_words,
+            )
+        ]
+        recoveries = [
+            interaction
+            for interaction in page_spec.interactions
+            if interaction.source_state_id == error_state.state_id
+            and interaction.target_state_id != error_state.state_id
+            and _has_any_semantic_word(
+                (interaction.action, interaction.user_feedback),
+                recovery_words,
+            )
+        ]
+        for entry in entries:
+            entry_path = _find_deterministic_path(
+                initial_state.state_id,
+                error_state.state_id,
+                page_spec.interactions,
+                final_interaction_ids={entry.interaction_id},
+            )
+            if entry_path is None:
+                continue
+            for recovery in recoveries:
+                candidates.append(
+                    (error_state, entry, recovery, entry_path)
+                )
+    if len(candidates) != 1:
+        return None
+    return candidates[0]
+
+
 def _recovery_binding(criterion: AcceptanceCriterion, page_spec: PageSpec, inspection: _RenderInspection) -> tuple[dict[str, str], list[tuple[str, str, str, tuple[tuple[str, str], ...], str]]]:
     payload = _mapping_dict(criterion.expected_payload, "expected_payload")
     scenario_contract = {
@@ -988,15 +1086,17 @@ def _recovery_binding(criterion: AcceptanceCriterion, page_spec: PageSpec, inspe
             f"recovery_signal_source_value_mismatch:{criterion.source_id}"
         )
     _, components_by_id, _, states_by_id = _maps(page_spec)
-    initial_state = next((item for item in page_spec.states if item.name == "initial"), None)
-    error_state = next((item for item in page_spec.states if item.name == "error"), None)
-    if initial_state is None or error_state is None:
-        raise _PageSpecBindingError("missing_initial_or_error_state")
+    initial_state = page_spec.states[0]
+    error_state = next(
+        (item for item in page_spec.states if item.name == "error"),
+        None,
+    )
     error_suffix = f"-error-{scenario_token}"
     recovery_suffix = f"-recovery-{scenario_token}"
-    entries = sorted(
+    legacy_entries = sorted(
         (
             item for item in page_spec.interactions
+            if error_state is not None
             if item.source_state_id == initial_state.state_id
             and item.target_state_id == error_state.state_id
             and item.interaction_id.endswith(error_suffix)
@@ -1004,9 +1104,10 @@ def _recovery_binding(criterion: AcceptanceCriterion, page_spec: PageSpec, inspe
         ),
         key=lambda item: item.interaction_id,
     )
-    recoveries = sorted(
+    legacy_recoveries = sorted(
         (
             item for item in page_spec.interactions
+            if error_state is not None
             if item.source_state_id == error_state.state_id
             and item.target_state_id != error_state.state_id
             and item.interaction_id.endswith(recovery_suffix)
@@ -1014,22 +1115,38 @@ def _recovery_binding(criterion: AcceptanceCriterion, page_spec: PageSpec, inspe
         ),
         key=lambda item: item.interaction_id,
     )
-    if not entries:
-        raise _PageSpecBindingError(
-            f"missing_recovery_fixture_error_entry:{scenario_token}"
+    if len(legacy_entries) == 1 and len(legacy_recoveries) == 1:
+        entry = legacy_entries[0]
+        recovery = legacy_recoveries[0]
+        entry_path = [entry]
+    else:
+        semantic_path = _semantic_recovery_path(
+            page_spec,
+            scenario_token=scenario_token,
         )
-    if not recoveries:
-        raise _PageSpecBindingError(
-            f"missing_recovery_fixture_recovery:{scenario_token}"
-        )
-    entry, recovery = entries[0], recoveries[0]
+        if semantic_path is None:
+            if error_state is None:
+                raise _PageSpecBindingError("missing_initial_or_error_state")
+            if not legacy_entries:
+                raise _PageSpecBindingError(
+                    f"missing_recovery_fixture_error_entry:{scenario_token}"
+                )
+            raise _PageSpecBindingError(
+                f"missing_recovery_fixture_recovery:{scenario_token}"
+            )
+        error_state, entry, recovery, entry_path = semantic_path
     target_state = states_by_id.get(recovery.target_state_id)
     error_trigger = components_by_id.get(entry.trigger_component_id)
     recovery_trigger = components_by_id.get(recovery.trigger_component_id)
     if target_state is None or error_trigger is None or recovery_trigger is None:
         raise _PageSpecBindingError("missing_recovery_target_or_trigger")
-    if error_trigger.component_id not in initial_state.visible_component_ids:
-        raise _PageSpecBindingError("error_entry_trigger_not_visible_in_initial_state")
+    entry_source_state = states_by_id.get(entry.source_state_id)
+    if entry_source_state is None:
+        raise _PageSpecBindingError("missing_recovery_entry_source_state")
+    if error_trigger.component_id not in entry_source_state.visible_component_ids:
+        raise _PageSpecBindingError(
+            "error_entry_trigger_not_visible_in_source_state"
+        )
     if recovery_trigger.component_id not in error_state.visible_component_ids:
         raise _PageSpecBindingError("recovery_trigger_not_visible_in_error_state")
     for component in (error_trigger, recovery_trigger):
@@ -1041,10 +1158,19 @@ def _recovery_binding(criterion: AcceptanceCriterion, page_spec: PageSpec, inspe
     recovery_feedback = _feedback_target_for_trigger(
         recovery_trigger.component_id, components_by_id, inspection
     )
-    for state in (initial_state, error_state, target_state):
+    runtime_states = [
+        initial_state,
+        *(states_by_id[item.target_state_id] for item in entry_path),
+        target_state,
+    ]
+    seen_state_ids: set[str] = set()
+    for state in runtime_states:
+        if state.state_id in seen_state_ids:
+            continue
+        seen_state_ids.add(state.state_id)
         if error := _state_runtime_error(state, inspection):
             raise _RenderBindingError(error)
-    for interaction in (entry, recovery):
+    for interaction in (*entry_path, recovery):
         if error := _interaction_runtime_error(interaction, inspection):
             raise _RenderBindingError(error)
         _interaction_selector(interaction, inspection)
@@ -1062,15 +1188,54 @@ def _recovery_binding(criterion: AcceptanceCriterion, page_spec: PageSpec, inspe
     recovery_feedback_selector = recovery_feedback.selector
     blueprints = [
         _blueprint("load_page", page_spec.page_id, "body" + _attribute_selector("data-page-id", page_spec.page_id), {"page_id": page_spec.page_id}, "renderer.index_html.body"),
-        _blueprint("assert_element_exists", error_trigger.component_id, _attribute_selector("data-component-id", error_trigger.component_id), {"stable_id": error_trigger.component_id}, "page_spec.interactions.error_entry.trigger_component_id"),
-        _blueprint("trigger_interaction", entry.interaction_id, _interaction_selector(entry, inspection), {"action": entry.action, "source_state_id": entry.source_state_id, "target_state_id": entry.target_state_id}, "page_spec.interactions.error_entry"),
-        _blueprint("assert_state", error_state.state_id, "#page-state" + _attribute_selector("data-state-id", error_state.state_id), {"state_id": error_state.state_id}, "page_spec.states.error"),
-        _blueprint("assert_feedback", entry_feedback.target_id, entry_feedback_selector, {"feedback": entry.user_feedback}, "page_spec.interactions.error_entry.user_feedback"),
-        _blueprint("assert_element_exists", recovery_trigger.component_id, _attribute_selector("data-component-id", recovery_trigger.component_id), {"stable_id": recovery_trigger.component_id}, "page_spec.interactions.recovery.trigger_component_id"),
-        _blueprint("trigger_interaction", recovery.interaction_id, _interaction_selector(recovery, inspection), {"action": recovery.action, "source_state_id": recovery.source_state_id, "target_state_id": recovery.target_state_id}, "page_spec.interactions.recovery"),
-        _blueprint("assert_state", target_state.state_id, "#page-state" + _attribute_selector("data-state-id", target_state.state_id), {"state_id": target_state.state_id}, "page_spec.states.recovery_target"),
-        _blueprint("assert_feedback", recovery_feedback.target_id, recovery_feedback_selector, {"feedback": recovery.user_feedback}, "page_spec.interactions.recovery.user_feedback"),
     ]
+    for interaction in entry_path:
+        trigger = components_by_id[interaction.trigger_component_id]
+        blueprints.extend(
+            (
+                _blueprint(
+                    "assert_element_exists",
+                    trigger.component_id,
+                    _attribute_selector(
+                        "data-component-id",
+                        trigger.component_id,
+                    ),
+                    {"stable_id": trigger.component_id},
+                    "page_spec.interactions.recovery_entry_path.trigger_component_id",
+                ),
+                _blueprint(
+                    "trigger_interaction",
+                    interaction.interaction_id,
+                    _interaction_selector(interaction, inspection),
+                    {
+                        "action": interaction.action,
+                        "source_state_id": interaction.source_state_id,
+                        "target_state_id": interaction.target_state_id,
+                    },
+                    "page_spec.interactions.recovery_entry_path",
+                ),
+                _blueprint(
+                    "assert_state",
+                    interaction.target_state_id,
+                    "#page-state"
+                    + _attribute_selector(
+                        "data-state-id",
+                        interaction.target_state_id,
+                    ),
+                    {"state_id": interaction.target_state_id},
+                    "page_spec.states.recovery_entry_path",
+                ),
+            )
+        )
+    blueprints.extend(
+        (
+            _blueprint("assert_feedback", entry_feedback.target_id, entry_feedback_selector, {"feedback": entry.user_feedback}, "page_spec.interactions.error_entry.user_feedback"),
+            _blueprint("assert_element_exists", recovery_trigger.component_id, _attribute_selector("data-component-id", recovery_trigger.component_id), {"stable_id": recovery_trigger.component_id}, "page_spec.interactions.recovery.trigger_component_id"),
+            _blueprint("trigger_interaction", recovery.interaction_id, _interaction_selector(recovery, inspection), {"action": recovery.action, "source_state_id": recovery.source_state_id, "target_state_id": recovery.target_state_id}, "page_spec.interactions.recovery"),
+            _blueprint("assert_state", target_state.state_id, "#page-state" + _attribute_selector("data-state-id", target_state.state_id), {"state_id": target_state.state_id}, "page_spec.states.recovery_target"),
+            _blueprint("assert_feedback", recovery_feedback.target_id, recovery_feedback_selector, {"feedback": recovery.user_feedback}, "page_spec.interactions.recovery.user_feedback"),
+        )
+    )
     return refs, blueprints
 
 

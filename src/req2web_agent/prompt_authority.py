@@ -16,7 +16,7 @@ from typing import Mapping
 PROMPT_AUTHORITY_SCHEMA_VERSION = "req2web.agent.f1_f4_prompt_authority.v1"
 PROMPT_SCHEMA_VERSION = "req2web.agent.f1_f4_prompt.v1"
 PROMPT_AUTHORITY_REVISION = (
-    "f3_f4_explicit_actual_state_plan_a07a_direct_english_v6"
+    "f3_f4_explicit_actual_state_plan_a07a_direct_english_v7"
 )
 REGISTRY_REVISION = "req2web.phase4.registry.p4_02a.v1"
 NODE_ORDER = ("F1", "F2", "F3", "F4")
@@ -230,11 +230,26 @@ def _node_specific_instructions() -> dict[str, list[str]]:
                 "Treat the first emitted state as the explicit initial "
                 "workflow state. If any supplied requirement or constraint "
                 "mentions validation, error, failure, recovery, retry, "
-                "preserving valid fields, or error feedback, emit at least "
-                "one separate error/recovery state. Its name or description "
-                "must explicitly use Error, Validation, Recovery, or Retry, "
-                "and its visible components must expose the relevant form, "
-                "feedback, and recovery controls in required F1 order."
+                "preserving valid fields, or error feedback, emit both a "
+                "separate error state and a later recovery or success state. "
+                "The error state's name or description must explicitly use "
+                "Error, Validation, or Failure. The later state's name or "
+                "description must explicitly use Recovery, Retry, Recovered, "
+                "or Success. The error state must not be the final state, and "
+                "both states must expose the relevant form, feedback, and "
+                "recovery controls in required F1 order."
+            ),
+        ],
+        "F3": [
+            (
+                "When the supplied F2 state order contains an error state "
+                "followed by a recovery or success state, make the forward "
+                "transition into the error state describe the invalid input "
+                "or failure and make the next forward transition out of the "
+                "error state describe correction, retry, or recovery. A "
+                "successful recovery must target the later non-error state; "
+                "never represent successful recovery as a self-loop in the "
+                "error state."
             ),
         ],
     }

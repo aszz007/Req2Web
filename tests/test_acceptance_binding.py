@@ -504,6 +504,80 @@ class AcceptanceBindingTest(unittest.TestCase):
             permission_refs["recovery_interaction_id"],
         )
 
+    def test_recovery_binding_accepts_model_semantic_state_and_path_ids(self) -> None:
+        spec = copy.deepcopy(self.spec)
+        initial_state = next(item for item in spec.states if item.name == "initial")
+        error_state = next(item for item in spec.states if item.name == "error")
+        success_state = next(item for item in spec.states if item.name == "success")
+        initial_state.name = "Initial Search"
+        error_state.name = "Validation Error Recovery"
+        error_entry = next(
+            item
+            for item in spec.interactions
+            if item.interaction_id.endswith("-error-input")
+        )
+        recovery = next(
+            item
+            for item in spec.interactions
+            if item.interaction_id.endswith("-recovery-input")
+        )
+        primary = next(
+            item
+            for item in spec.interactions
+            if item.source_state_id == initial_state.state_id
+            and item.target_state_id == success_state.state_id
+        )
+        old_ids = {
+            error_entry.interaction_id: "p4-f3-interaction-entry-a1",
+            recovery.interaction_id: "p4-f3-interaction-recovery-b2",
+        }
+        error_entry.interaction_id = old_ids[error_entry.interaction_id]
+        recovery.interaction_id = old_ids[recovery.interaction_id]
+        error_entry.source_state_id = success_state.state_id
+        if error_entry.trigger_component_id not in success_state.visible_component_ids:
+            success_state.visible_component_ids.append(
+                error_entry.trigger_component_id
+            )
+        for trace in spec.traceability.use_cases:
+            trace.interaction_ids = [
+                old_ids.get(interaction_id, interaction_id)
+                for interaction_id in trace.interaction_ids
+            ]
+        spec.validate()
+
+        result = compile_acceptance_binding(
+            self.view,
+            self.plan,
+            spec,
+            self.render(spec),
+        )
+
+        binding = self.binding_for(result, "validation_signal")
+        self.assertEqual(binding.disposition, "bound")
+        refs = dict(binding.target_refs)
+        self.assertEqual(
+            refs["error_entry_interaction_id"],
+            error_entry.interaction_id,
+        )
+        self.assertEqual(
+            refs["recovery_interaction_id"],
+            recovery.interaction_id,
+        )
+        trigger_targets = [
+            step.target_id
+            for step in result.steps
+            if step.criterion_id == binding.criterion_id
+            and step.action_kind == "trigger_interaction"
+        ]
+        self.assertEqual(
+            trigger_targets,
+            [
+                primary.interaction_id,
+                error_entry.interaction_id,
+                recovery.interaction_id,
+            ],
+        )
+
     def test_supported_recovery_without_matching_stable_fixture_fails(self) -> None:
         bundle = make_bundle(
             original_requirement=(
