@@ -112,8 +112,11 @@ def run_phase4_remote_qwen_langgraph_integrated(
         "prepared model inventory identity",
     )
     if (
-        _fresh._canonical_bytes(prepared_profile_identity)
-        != _fresh._canonical_bytes(dict(expected_profile_identity))
+        not _fresh._profile_matches_expected_identity(
+            profile,
+            prepared_profile_identity,
+            expected_profile_identity,
+        )
         or _fresh._canonical_bytes(prepared_inventory_identity)
         != _fresh._canonical_bytes(dict(expected_model_inventory_identity))
     ):

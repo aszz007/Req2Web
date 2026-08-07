@@ -491,10 +491,7 @@ def run_phase4_canonical_full_flow(
             runtime_facts=runtime_facts,
             gpu_facts=gpu_facts,
         )
-        profile_identity = _fresh._identity(
-            profile.to_dict(),
-            revision=_fresh.P4_05_PROFILE_SCHEMA_VERSION,
-        )
+        profile_identity = _fresh.make_stable_profile_binding_identity(profile)
         inventory_identity = _require_mapping(
             inventory["inventory_identity"],
             "model inventory identity",

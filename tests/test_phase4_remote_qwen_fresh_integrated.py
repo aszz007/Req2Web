@@ -458,6 +458,10 @@ class Phase4RemoteFreshIntegratedProfileTests(unittest.TestCase):
             stable,
             revision=remote.P4_05_STABILITY_PROFILE_BINDING_SCHEMA_VERSION,
         )
+        self.assertEqual(
+            remote.make_stable_profile_binding_identity(profile),
+            expected,
+        )
 
         self.assertTrue(
             remote._profile_matches_expected_identity(
@@ -465,6 +469,18 @@ class Phase4RemoteFreshIntegratedProfileTests(unittest.TestCase):
                 {"full_profile_identity": "intentionally-not-compared"},
                 expected,
             )
+        )
+        changed_gpu = _fake_gpu()
+        changed_gpu["free_vram_bytes"] -= 1024
+        same_runtime = remote.RemoteFreshIntegratedProfile.create(
+            inventory=_fake_inventory(),
+            runtime_facts=_fake_runtime(),
+            gpu_facts=changed_gpu,
+        )
+        self.assertNotEqual(profile.profile_id, same_runtime.profile_id)
+        self.assertEqual(
+            remote.make_stable_profile_binding_identity(profile),
+            remote.make_stable_profile_binding_identity(same_runtime),
         )
 
         tampered = profile.to_dict()

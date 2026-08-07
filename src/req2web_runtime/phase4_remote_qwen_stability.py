@@ -393,13 +393,7 @@ def _validate_case_set_artifact(
 
 
 def _profile_identity(profile: _fresh.RemoteFreshIntegratedProfile) -> dict[str, object]:
-    stable_profile = profile.to_dict()
-    stable_profile.pop("profile_id", None)
-    stable_profile.pop("free_vram_bytes_at_preflight", None)
-    return _fresh._identity(
-        stable_profile,
-        revision=STABILITY_PROFILE_BINDING_SCHEMA_VERSION,
-    )
+    return _fresh.make_stable_profile_binding_identity(profile)
 
 
 def _revision_profile_compatibility_identity(
