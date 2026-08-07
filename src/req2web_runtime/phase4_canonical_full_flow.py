@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import copy
 from dataclasses import asdict
+import os
 from pathlib import Path
 from typing import Iterable, Mapping
 import uuid
@@ -142,6 +143,87 @@ def _require_mapping(value: object, name: str) -> dict[str, object]:
 
 def _write_json(path: Path, value: object) -> None:
     _fresh._write_fsync(path, _fresh._canonical_bytes(value))
+
+
+def _validate_flow_summary_transition(
+    existing: Mapping[str, object],
+    current: Mapping[str, object],
+) -> tuple[int, int]:
+    for key in (
+        "schema_version",
+        "run_id",
+        "case_set_id",
+        "policy_identity",
+        "prompt_authority_identity",
+        "workflow_runtime",
+    ):
+        if _fresh._canonical_bytes(existing.get(key)) != (
+            _fresh._canonical_bytes(current.get(key))
+        ):
+            raise Phase4CanonicalFullFlowError(
+                "flow summary authority binding drifted"
+            )
+    existing_count = existing.get("completed_case_count")
+    current_count = current.get("completed_case_count")
+    if (
+        type(existing_count) is not int
+        or type(current_count) is not int
+        or existing_count < 0
+        or current_count <= existing_count
+        or current_count > CASE_COUNT
+    ):
+        raise Phase4CanonicalFullFlowError(
+            "flow summary completion transition is invalid"
+        )
+    return existing_count, current_count
+
+
+def _write_current_flow_summary(
+    result_root: Path,
+    summary: Mapping[str, object],
+) -> None:
+    """Preserve immutable summary checkpoints while updating the current view."""
+
+    path = result_root / "flow_summary.json"
+    raw = _fresh._canonical_bytes(summary)
+    if not path.exists():
+        _fresh._write_fsync(path, raw)
+        return
+    if path.is_symlink() or not path.is_file():
+        raise Phase4CanonicalFullFlowError(
+            "flow summary path is invalid"
+        )
+    existing = _require_mapping(
+        _read_json(path),
+        "existing flow summary",
+    )
+    if _fresh._canonical_bytes(existing) == raw:
+        return
+    existing_count, current_count = _validate_flow_summary_transition(
+        existing,
+        summary,
+    )
+    checkpoint_root = result_root / "flow-summary-checkpoints"
+    _write_json(
+        checkpoint_root / f"{existing_count:02d}.json",
+        existing,
+    )
+    _write_json(
+        checkpoint_root / f"{current_count:02d}.json",
+        summary,
+    )
+    temporary = path.with_name(
+        f".{path.name}.{uuid.uuid4().hex}.tmp"
+    )
+    try:
+        with temporary.open("xb") as handle:
+            handle.write(raw)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary, path)
+    finally:
+        if temporary.exists():
+            temporary.unlink()
 
 
 def _progress_checkpoint_path(result_root: Path, index: int) -> Path:
@@ -975,7 +1057,7 @@ def run_phase4_canonical_full_flow(
             revision=SUMMARY_SCHEMA_VERSION,
         ),
     }
-    _write_json(result_root / "flow_summary.json", summary)
+    _write_current_flow_summary(result_root, summary)
     return summary
 
 
@@ -987,5 +1069,6 @@ __all__ = [
     "FLOW_SCHEMA_VERSION",
     "INTERRUPTION_RECOVERY_SCHEMA_VERSION",
     "Phase4CanonicalFullFlowError",
+    "_validate_flow_summary_transition",
     "run_phase4_canonical_full_flow",
 ]

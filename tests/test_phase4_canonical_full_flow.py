@@ -22,6 +22,7 @@ from req2web_runtime.phase4_canonical_full_flow import (  # noqa: E402
     _parent_experiment_binding,
     _progress_checkpoint_path,
     _recover_interrupted_case_summary,
+    _validate_flow_summary_transition,
     run_phase4_canonical_full_flow,
 )
 from req2web_runtime import (  # noqa: E402
@@ -60,6 +61,39 @@ class Phase4CanonicalFullFlowTest(unittest.TestCase):
             "progress checkpoint index is invalid",
         ):
             _progress_checkpoint_path(root, 0)
+
+    def test_flow_summary_transition_only_advances_same_authority(self) -> None:
+        identity = {
+            "identity_kind": "canonical_json",
+            "sha256": "sha256:" + "a" * 64,
+            "byte_length": 10,
+            "revision": "test.identity.v1",
+        }
+        existing = {
+            "schema_version": "req2web.phase4.canonical_full_flow.v1.summary",
+            "run_id": "run-one",
+            "case_set_id": "case-set",
+            "policy_identity": identity,
+            "prompt_authority_identity": identity,
+            "workflow_runtime": "graph-v1",
+            "completed_case_count": 3,
+        }
+        current = {
+            **existing,
+            "completed_case_count": 10,
+        }
+        self.assertEqual(
+            _validate_flow_summary_transition(existing, current),
+            (3, 10),
+        )
+        with self.assertRaisesRegex(
+            Phase4CanonicalFullFlowError,
+            "authority binding drifted",
+        ):
+            _validate_flow_summary_transition(
+                existing,
+                {**current, "run_id": "different-run"},
+            )
 
     def test_only_canonical_full_flow_is_the_active_default(self) -> None:
         self.assertTrue(ACTIVE_DEFAULT_ENTRY)
