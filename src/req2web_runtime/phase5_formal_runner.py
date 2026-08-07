@@ -31,6 +31,7 @@ from req2web_agent import (
     PROMPT_AUTHORITY_REVISION,
     PROMPT_SCHEMA_VERSION as SHARED_PROMPT_SCHEMA_VERSION,
     UseCase,
+    build_canonical_f3_interaction_plan,
     build_canonical_f1_f4_prompt,
 )
 from req2web_acceptance import (
@@ -531,52 +532,17 @@ def _dynamic_projection(
 
 
 def _f3_plan(dynamic: Mapping[str, object]) -> list[dict[str, object]]:
+    f1_view = dynamic.get("f1_registered_structure_view")
     state_view = dynamic.get("f2_registered_state_visibility_view")
-    if not isinstance(state_view, Mapping):
-        raise Phase5FormalRunnerError("F3 state view is unavailable")
-    states = state_view.get("states")
-    if not isinstance(states, list) or not states:
-        raise Phase5FormalRunnerError("F3 state order is unavailable")
-    plan: list[dict[str, object]] = []
-    for index, state in enumerate(states):
-        if not isinstance(state, Mapping):
-            raise Phase5FormalRunnerError("F3 state row is invalid")
-        local_id = state.get("local_id")
-        visible = state.get("visible_component_local_ids")
-        if (
-            not isinstance(local_id, str)
-            or not local_id
-            or not isinstance(visible, list)
-            or not visible
-            or any(not isinstance(item, str) or not item for item in visible)
-        ):
-            raise Phase5FormalRunnerError("F3 state visibility binding is invalid")
-        plan.append(
-            {
-                "position": len(plan),
-                "transition_kind": "same_state_work",
-                "source_state_local_id": local_id,
-                "target_state_local_id": local_id,
-                "allowed_trigger_component_local_ids": list(visible),
-            }
+    if not isinstance(f1_view, Mapping) or not isinstance(state_view, Mapping):
+        raise Phase5FormalRunnerError("F3 authority views are unavailable")
+    try:
+        return build_canonical_f3_interaction_plan(
+            f1_registered_structure_view=f1_view,
+            f2_registered_state_visibility_view=state_view,
         )
-        if index + 1 < len(states):
-            next_state = states[index + 1]
-            if not isinstance(next_state, Mapping) or not isinstance(
-                next_state.get("local_id"),
-                str,
-            ):
-                raise Phase5FormalRunnerError("F3 next-state binding is invalid")
-            plan.append(
-                {
-                    "position": len(plan),
-                    "transition_kind": "forward_transition",
-                    "source_state_local_id": local_id,
-                    "target_state_local_id": str(next_state["local_id"]),
-                    "allowed_trigger_component_local_ids": list(visible),
-                }
-            )
-    return plan
+    except ValueError as exc:
+        raise Phase5FormalRunnerError("F3 trigger plan is invalid") from exc
 
 
 def _f4_plan(

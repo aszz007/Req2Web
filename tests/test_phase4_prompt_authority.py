@@ -17,6 +17,7 @@ from req2web_agent import (  # noqa: E402
     PROMPT_AUTHORITY_IDENTITY,
     PROMPT_AUTHORITY_REVISION,
     PromptAuthorityError,
+    build_canonical_f3_interaction_plan,
     build_canonical_f1_f4_prompt,
     prompt_authority_manifest,
     validate_canonical_prompt,
@@ -60,6 +61,17 @@ class Phase4PromptAuthorityTest(unittest.TestCase):
         self.assertIn("Do not emit Han characters", instructions)
         f2_instructions = "\n".join(
             manifest["node_specific_instructions"]["F2"]
+        )
+        f1_instructions = "\n".join(
+            manifest["node_specific_instructions"]["F1"]
+        )
+        self.assertIn(
+            "explicit button or action component",
+            f1_instructions,
+        )
+        self.assertIn(
+            "dedicated advancement control",
+            f1_instructions,
         )
         self.assertIn("required_f1_component_order", f2_instructions)
         self.assertIn("exact subsequence", f2_instructions)
@@ -161,6 +173,7 @@ class Phase4PromptAuthorityTest(unittest.TestCase):
                     {
                         "plan_index": 0,
                         "transition_kind": "same_state_work",
+                        "required_trigger_component_local_id": "search_input",
                     }
                 ],
             ),
@@ -170,6 +183,7 @@ class Phase4PromptAuthorityTest(unittest.TestCase):
                 {
                     "plan_index": 0,
                     "transition_kind": "same_state_work",
+                    "required_trigger_component_local_id": "search_input",
                 }
             ],
         )
@@ -190,6 +204,86 @@ class Phase4PromptAuthorityTest(unittest.TestCase):
             "absent from that exact source-state list",
             instructions,
         )
+        self.assertIn(
+            "required_trigger_component_local_id",
+            instructions,
+        )
+
+    def test_shared_f3_plan_assigns_distinct_exact_triggers(self) -> None:
+        plan = build_canonical_f3_interaction_plan(
+            f1_registered_structure_view={
+                "components": [
+                    {
+                        "local_id": "checkout_form",
+                        "component_type": "form",
+                        "label": "Shipping and Payment Details",
+                        "purpose": "Collect and validate checkout details.",
+                    },
+                    {
+                        "local_id": "order_confirmation",
+                        "component_type": "feedback_message",
+                        "label": "Order Confirmed",
+                        "purpose": "Display final confirmation feedback.",
+                    },
+                ]
+            },
+            f2_registered_state_visibility_view={
+                "states": [
+                    {
+                        "local_id": "state-checkout",
+                        "name": "Checkout",
+                        "description": "Enter shipping and payment details.",
+                        "visible_component_local_ids": [
+                            "checkout_form",
+                            "order_confirmation",
+                        ],
+                    },
+                    {
+                        "local_id": "state-error",
+                        "name": "Validation Error",
+                        "description": "Correct invalid checkout fields.",
+                        "visible_component_local_ids": [
+                            "checkout_form",
+                            "order_confirmation",
+                        ],
+                    },
+                    {
+                        "local_id": "state-success",
+                        "name": "Order Confirmed",
+                        "description": "The order is complete.",
+                        "visible_component_local_ids": [
+                            "checkout_form",
+                            "order_confirmation",
+                        ],
+                    },
+                ]
+            },
+        )
+        self.assertEqual(
+            [
+                row["required_trigger_component_local_id"]
+                for row in plan[:4]
+            ],
+            [
+                "order_confirmation",
+                "checkout_form",
+                "order_confirmation",
+                "checkout_form",
+            ],
+        )
+        for index in (0, 2):
+            self.assertNotEqual(
+                plan[index]["required_trigger_component_local_id"],
+                plan[index + 1]["required_trigger_component_local_id"],
+            )
+            self.assertEqual(
+                plan[index]["allowed_trigger_component_local_ids"],
+                [plan[index]["required_trigger_component_local_id"]],
+            )
+            self.assertEqual(
+                plan[index + 1]["allowed_trigger_component_local_ids"],
+                [plan[index + 1]["required_trigger_component_local_id"]],
+            )
 
     def test_f4_prompt_reconstructs_reference_contract_key_order(self) -> None:
         input_bytes = _canonical(
@@ -251,6 +345,7 @@ class Phase4PromptAuthorityTest(unittest.TestCase):
             {
                 "plan_index": 0,
                 "transition_kind": "same_state_work",
+                "required_trigger_component_local_id": "search_input",
             }
         ]
         raw = build_canonical_f1_f4_prompt(

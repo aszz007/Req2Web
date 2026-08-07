@@ -31,6 +31,7 @@ from req2web_agent import (
     PROMPT_AUTHORITY_IDENTITY,
     PROMPT_AUTHORITY_REVISION,
     PROMPT_SCHEMA_VERSION as SHARED_PROMPT_SCHEMA_VERSION,
+    build_canonical_f3_interaction_plan,
     build_canonical_f1_f4_prompt,
 )
 from req2web_generation import RetrievalGuidance
@@ -492,52 +493,20 @@ def _f3_required_interaction_plan(input_bytes: bytes) -> list[dict[str, object]]
         raise Phase4RemoteFreshIntegratedError(
             "F3 full-direct state order is unavailable"
         )
-
-    plan: list[dict[str, object]] = []
-    for state_index, state in enumerate(states):
-        if not isinstance(state, Mapping):
-            raise Phase4RemoteFreshIntegratedError(
-                "F3 full-direct state row is invalid"
-            )
-        local_id = state.get("local_id")
-        visible = state.get("visible_component_local_ids")
-        if (
-            not isinstance(local_id, str)
-            or not local_id
-            or not isinstance(visible, list)
-            or not visible
-            or any(not isinstance(item, str) or not item for item in visible)
-        ):
-            raise Phase4RemoteFreshIntegratedError(
-                "F3 full-direct state binding is invalid"
-            )
-        plan.append(
-            {
-                "position": len(plan),
-                "transition_kind": "same_state_work",
-                "source_state_local_id": local_id,
-                "target_state_local_id": local_id,
-                "allowed_trigger_component_local_ids": list(visible),
-            }
+    f1_view = projection.get("f1_registered_structure_view")
+    if not isinstance(f1_view, Mapping):
+        raise Phase4RemoteFreshIntegratedError(
+            "F3 full-direct F1 structure is unavailable"
         )
-        if state_index + 1 < len(states):
-            next_state = states[state_index + 1]
-            if not isinstance(next_state, Mapping) or not isinstance(
-                next_state.get("local_id"), str
-            ):
-                raise Phase4RemoteFreshIntegratedError(
-                    "F3 full-direct next-state binding is invalid"
-                )
-            plan.append(
-                {
-                    "position": len(plan),
-                    "transition_kind": "forward_transition",
-                    "source_state_local_id": local_id,
-                    "target_state_local_id": str(next_state["local_id"]),
-                    "allowed_trigger_component_local_ids": list(visible),
-                }
-            )
-    return plan
+    try:
+        return build_canonical_f3_interaction_plan(
+            f1_registered_structure_view=f1_view,
+            f2_registered_state_visibility_view=state_view,
+        )
+    except ValueError as exc:
+        raise Phase4RemoteFreshIntegratedError(
+            "F3 full-direct trigger plan is invalid"
+        ) from exc
 
 
 def _f4_required_acceptance_target_plan(

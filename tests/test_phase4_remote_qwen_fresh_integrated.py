@@ -276,6 +276,23 @@ class Phase4RemoteFreshIntegratedProfileTests(unittest.TestCase):
             ],
             expected_plan,
         )
+        interaction_plan = f3_full_direct["required_interaction_plan"]
+        for row in interaction_plan:
+            self.assertEqual(
+                row["allowed_trigger_component_local_ids"],
+                [row["required_trigger_component_local_id"]],
+            )
+        for index in range(0, len(interaction_plan) - 1, 2):
+            same_state = interaction_plan[index]
+            forward = interaction_plan[index + 1]
+            if (
+                same_state["source_state_local_id"]
+                == forward["source_state_local_id"]
+            ):
+                self.assertNotEqual(
+                    same_state["required_trigger_component_local_id"],
+                    forward["required_trigger_component_local_id"],
+                )
         self.assertEqual(
             f4_full_direct["prompt_revision"],
             remote.P4_05_FULL_DIRECT_PROMPT_REVISION,

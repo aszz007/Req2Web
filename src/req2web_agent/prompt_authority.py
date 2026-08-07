@@ -16,7 +16,7 @@ from typing import Mapping
 PROMPT_AUTHORITY_SCHEMA_VERSION = "req2web.agent.f1_f4_prompt_authority.v1"
 PROMPT_SCHEMA_VERSION = "req2web.agent.f1_f4_prompt.v1"
 PROMPT_AUTHORITY_REVISION = (
-    "f3_f4_explicit_actual_state_plan_a07a_direct_english_v10"
+    "f3_f4_explicit_actual_state_plan_a07a_direct_english_v11"
 )
 REGISTRY_REVISION = "req2web.phase4.registry.p4_02a.v1"
 NODE_ORDER = ("F1", "F2", "F3", "F4")
@@ -217,6 +217,22 @@ def _base_instructions() -> list[str]:
 
 def _node_specific_instructions() -> dict[str, list[str]]:
     return {
+        "F1": [
+            (
+                "When the requirement includes form submission, validation, "
+                "error recovery, retry, or final confirmation, represent data "
+                "entry, submission or retry, and feedback as separate "
+                "components. Include an explicit button or action component "
+                "for submission or retry; never collapse editable fields and "
+                "the advancing action into one generic form component."
+            ),
+            (
+                "For every major workflow step that performs in-state work and "
+                "then advances, include a dedicated advancement control "
+                "distinct from the input, list, summary, or feedback component "
+                "used for the in-state work."
+            ),
+        ],
         "F2": [
             (
                 "For every state, construct visible_component_local_ids only "
@@ -247,6 +263,13 @@ def _node_specific_instructions() -> dict[str, list[str]]:
                 "control for the forward transition to the next state. A "
                 "control that is not visible in the source state cannot be "
                 "used by F3."
+            ),
+            (
+                "When F1 provides a dedicated submit, proceed, retry, or other "
+                "advancement control, keep it visible in the relevant "
+                "non-final state together with a separate work or feedback "
+                "control. Do not count a display-only success message as the "
+                "advancement control."
             ),
         ],
         "F3": [
@@ -362,6 +385,229 @@ def _validate_plan(
     return rows
 
 
+def _f3_text(value: Mapping[str, object]) -> str:
+    return " ".join(
+        str(value.get(key, "")).strip().lower()
+        for key in ("component_type", "label", "purpose", "name", "description")
+    )
+
+
+def _f3_has_any(text: str, words: tuple[str, ...]) -> bool:
+    return any(word in text for word in words)
+
+
+def _f3_forward_score(
+    component: Mapping[str, object],
+    *,
+    source_state: Mapping[str, object],
+    target_state: Mapping[str, object],
+) -> int:
+    text = _f3_text(component)
+    component_type = str(component.get("component_type", "")).lower()
+    source_text = _f3_text(source_state)
+    target_text = _f3_text(target_state)
+    target_is_error = _f3_has_any(
+        target_text,
+        ("error", "validation", "failure", "invalid"),
+    )
+    source_is_error = _f3_has_any(
+        source_text,
+        ("error", "validation", "failure", "invalid"),
+    )
+    target_is_success = _f3_has_any(
+        target_text,
+        ("success", "confirmed", "confirmation", "recovered", "complete"),
+    )
+    is_button = _f3_has_any(component_type, ("button", "action", "control"))
+    is_form = _f3_has_any(
+        component_type,
+        ("form", "input", "field", "select"),
+    )
+    is_feedback = _f3_has_any(
+        component_type,
+        ("alert", "message", "feedback"),
+    )
+    has_submit = _f3_has_any(
+        text,
+        ("submit", "place order", "retry", "resubmit", "confirm order"),
+    )
+    has_advance = _f3_has_any(
+        text,
+        ("proceed", "checkout", "continue", "next", "advance"),
+    )
+
+    score = 0
+    if target_is_error:
+        score += 500 if has_submit else 0
+        score += 320 if is_form else 0
+        score += 180 if is_button else 0
+        score += 40 if has_advance else 0
+    elif source_is_error or target_is_success:
+        score += 520 if has_submit else 0
+        score += 300 if is_form else 0
+        score += 200 if is_button else 0
+        score += 40 if has_advance else 0
+    else:
+        score += 500 if has_advance else 0
+        score += 400 if has_submit else 0
+        score += 240 if is_button else 0
+        score += 100 if is_form else 0
+    if is_feedback:
+        score -= 300
+    return score
+
+
+def _f3_same_state_score(
+    component: Mapping[str, object],
+    *,
+    source_state: Mapping[str, object],
+) -> int:
+    text = _f3_text(component)
+    component_type = str(component.get("component_type", "")).lower()
+    source_is_error = _f3_has_any(
+        _f3_text(source_state),
+        ("error", "validation", "failure", "invalid"),
+    )
+    is_feedback = _f3_has_any(
+        component_type + " " + text,
+        ("alert", "message", "feedback", "error"),
+    )
+    is_work = _f3_has_any(
+        component_type,
+        (
+            "input",
+            "field",
+            "filter",
+            "list",
+            "grid",
+            "summary",
+            "form",
+            "select",
+            "table",
+        ),
+    )
+    score = 0
+    if source_is_error:
+        score += 500 if is_feedback else 0
+        score += 250 if is_work else 0
+    else:
+        score += 400 if is_work else 0
+        score += 100 if is_feedback else 0
+    return score
+
+
+def build_canonical_f3_interaction_plan(
+    *,
+    f1_registered_structure_view: Mapping[str, object],
+    f2_registered_state_visibility_view: Mapping[str, object],
+) -> list[dict[str, object]]:
+    """Build the shared exact-state and exact-trigger plan for F3."""
+
+    components_value = f1_registered_structure_view.get("components")
+    states_value = f2_registered_state_visibility_view.get("states")
+    if not isinstance(components_value, list) or not components_value:
+        raise PromptAuthorityError("F3 registered F1 components are unavailable")
+    if not isinstance(states_value, list) or not states_value:
+        raise PromptAuthorityError("F3 registered F2 states are unavailable")
+
+    components: dict[str, Mapping[str, object]] = {}
+    for item in components_value:
+        if not isinstance(item, Mapping):
+            raise PromptAuthorityError("F3 registered F1 component row is invalid")
+        local_id = item.get("local_id")
+        if not isinstance(local_id, str) or not local_id or local_id in components:
+            raise PromptAuthorityError("F3 registered F1 component ID is invalid")
+        components[local_id] = item
+
+    states: list[Mapping[str, object]] = []
+    for item in states_value:
+        if not isinstance(item, Mapping):
+            raise PromptAuthorityError("F3 registered F2 state row is invalid")
+        local_id = item.get("local_id")
+        visible = item.get("visible_component_local_ids")
+        if (
+            not isinstance(local_id, str)
+            or not local_id
+            or not isinstance(visible, list)
+            or not visible
+            or any(
+                not isinstance(component_id, str)
+                or component_id not in components
+                for component_id in visible
+            )
+        ):
+            raise PromptAuthorityError("F3 registered F2 visibility is invalid")
+        states.append(item)
+
+    plan: list[dict[str, object]] = []
+    for state_index, state in enumerate(states):
+        local_id = str(state["local_id"])
+        visible = [str(item) for item in state["visible_component_local_ids"]]
+        next_state = (
+            states[state_index + 1]
+            if state_index + 1 < len(states)
+            else None
+        )
+        forward_trigger: str | None = None
+        if next_state is not None:
+            if len(visible) < 2:
+                raise PromptAuthorityError(
+                    "F3 non-final state needs two distinct visible triggers"
+                )
+            forward_trigger = max(
+                visible,
+                key=lambda component_id: (
+                    _f3_forward_score(
+                        components[component_id],
+                        source_state=state,
+                        target_state=next_state,
+                    ),
+                    visible.index(component_id),
+                ),
+            )
+        same_candidates = [
+            component_id
+            for component_id in visible
+            if component_id != forward_trigger
+        ]
+        if not same_candidates:
+            raise PromptAuthorityError(
+                "F3 same-state trigger is unavailable"
+            )
+        same_trigger = max(
+            same_candidates,
+            key=lambda component_id: (
+                _f3_same_state_score(
+                    components[component_id],
+                    source_state=state,
+                ),
+                -visible.index(component_id),
+            ),
+        )
+        plan.append(
+            {
+                "position": len(plan),
+                "transition_kind": "same_state_work",
+                "source_state_local_id": local_id,
+                "target_state_local_id": local_id,
+                "allowed_trigger_component_local_ids": [same_trigger],
+                "required_trigger_component_local_id": same_trigger,
+            }
+        )
+        if next_state is not None and forward_trigger is not None:
+            plan.append(
+                {
+                    "position": len(plan),
+                    "transition_kind": "forward_transition",
+                    "source_state_local_id": local_id,
+                    "target_state_local_id": str(next_state["local_id"]),
+                    "allowed_trigger_component_local_ids": [forward_trigger],
+                    "required_trigger_component_local_id": forward_trigger,
+                }
+            )
+    return plan
+
+
 def build_canonical_f1_f4_prompt(
     *,
     node_id: str,
@@ -428,10 +674,12 @@ def build_canonical_f1_f4_prompt(
         payload["instructions"] = [
             *instructions,
             (
-                "Copy every source state, target state, row position, and one "
-                "allowed trigger component from required_interaction_plan. Emit "
+                "Copy every source state, target state, row position, and "
+                "required_trigger_component_local_id from "
+                "required_interaction_plan. Each allowed trigger list is a "
+                "singleton containing that exact required trigger. Emit "
                 "exactly one interaction for every plan row in the same order; "
-                "do not omit, merge, or add rows."
+                "do not substitute a trigger, omit, merge, or add rows."
             ),
         ]
     if acceptance_plan is not None:
@@ -481,6 +729,7 @@ __all__ = [
     "PROMPT_AUTHORITY_SCHEMA_VERSION",
     "PROMPT_SCHEMA_VERSION",
     "PromptAuthorityError",
+    "build_canonical_f3_interaction_plan",
     "build_canonical_f1_f4_prompt",
     "prompt_authority_manifest",
     "validate_canonical_prompt",
