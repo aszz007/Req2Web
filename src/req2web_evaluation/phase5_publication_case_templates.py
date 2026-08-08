@@ -16,6 +16,9 @@ SCHEMA_VERSION = "req2web.phase5.publication_case_templates.v1"
 TEMPLATE_MATRIX_SCHEMA_VERSION = (
     "req2web.phase5.publication_case_template_matrix.v1"
 )
+INTERVENTION_FREEZE_SCHEMA_VERSION = (
+    "req2web.phase5.publication_intervention_freeze.v1"
+)
 _ALLOWED_ROLES = {
     "requirement",
     "ui_reference",
@@ -426,11 +429,114 @@ def build_phase5_publication_template_matrix(
     return validate_phase5_publication_template_matrix(matrix, fixture)
 
 
+def _expected_intervention_freeze_body(
+    fixture: dict[str, object],
+) -> dict[str, object]:
+    rows: list[dict[str, object]] = []
+    for template in fixture["templates"]:
+        irrelevant = str(template["irrelevant_evidence_outline"]).encode("utf-8")
+        criticality = str(template["criticality_basis"]).encode("utf-8")
+        rows.append(
+            {
+                "template_id": template["template_id"],
+                "slot_kind": template["slot_kind"],
+                "irrelevant_evidence_sha256": sha256(irrelevant).hexdigest(),
+                "irrelevant_evidence_byte_length": len(irrelevant),
+                "critical_role_id": template["critical_role_recommendation"],
+                "criticality_basis_sha256": sha256(criticality).hexdigest(),
+                "criticality_basis_byte_length": len(criticality),
+            }
+        )
+    return {
+        "schema_version": INTERVENTION_FREEZE_SCHEMA_VERSION,
+        "status": "intervention_inputs_frozen_no_action",
+        "fixture_id": fixture["fixture_id"],
+        "manager_consensus": "three_prior_managers_accepted_after_core1_correction",
+        "frozen_condition_ids": [
+            "irrelevant_evidence",
+            "remove_critical_role",
+        ],
+        "template_count": 6,
+        "rows": rows,
+        "unfrozen_fields": [
+            "final_case_identity",
+            "final_case_requirement_payload",
+            "gold_content",
+            "numeric_thresholds",
+            "execution_package",
+        ],
+        "action_state": {
+            "real_case_content_frozen": False,
+            "gold_content_present": False,
+            "h1_opened": False,
+            "model_action_authorized": False,
+            "gpu_or_remote_action_authorized": False,
+            "formal_evaluation_authorized": False,
+            "formal_quality_claimed": False,
+        },
+    }
+
+
+def validate_phase5_publication_intervention_freeze(
+    value: object,
+    case_templates: object,
+) -> dict[str, object]:
+    """Validate exact intervention hashes while keeping formal action closed."""
+
+    fixture = validate_phase5_publication_case_templates(case_templates)
+    manifest = _exact(
+        value,
+        (
+            "manifest_id",
+            "schema_version",
+            "status",
+            "fixture_id",
+            "manager_consensus",
+            "frozen_condition_ids",
+            "template_count",
+            "rows",
+            "unfrozen_fields",
+            "action_state",
+        ),
+        "publication intervention freeze",
+    )
+    body = {key: item for key, item in manifest.items() if key != "manifest_id"}
+    expected = _expected_intervention_freeze_body(fixture)
+    if body != expected:
+        raise ValueError("publication intervention freeze content drifted")
+    if manifest["manifest_id"] != _record_id(
+        "phase5-publication-intervention-freeze",
+        body,
+    ):
+        raise ValueError("publication intervention freeze ID drifted")
+    return manifest
+
+
+def build_phase5_publication_intervention_freeze(
+    case_templates: object,
+) -> dict[str, object]:
+    """Freeze the accepted irrelevant texts and critical-role IDs by hash."""
+
+    fixture = validate_phase5_publication_case_templates(case_templates)
+    body = _expected_intervention_freeze_body(fixture)
+    manifest = {
+        "manifest_id": _record_id(
+            "phase5-publication-intervention-freeze",
+            body,
+        ),
+        **body,
+    }
+    return validate_phase5_publication_intervention_freeze(manifest, fixture)
+
+
 __all__ = [
+    "INTERVENTION_FREEZE_SCHEMA_VERSION",
     "SCHEMA_VERSION",
     "TEMPLATE_MATRIX_SCHEMA_VERSION",
     "build_phase5_publication_case_templates_from_json_bytes",
+    "build_phase5_publication_intervention_freeze",
     "build_phase5_publication_template_matrix",
     "validate_phase5_publication_case_templates",
+    "validate_phase5_publication_intervention_freeze",
     "validate_phase5_publication_template_matrix",
 ]

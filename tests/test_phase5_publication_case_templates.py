@@ -12,16 +12,22 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "src"))
 
 from req2web_evaluation.phase5_publication_case_templates import (  # noqa: E402
+    INTERVENTION_FREEZE_SCHEMA_VERSION,
     SCHEMA_VERSION,
     TEMPLATE_MATRIX_SCHEMA_VERSION,
     build_phase5_publication_case_templates_from_json_bytes,
+    build_phase5_publication_intervention_freeze,
     build_phase5_publication_template_matrix,
     validate_phase5_publication_case_templates,
+    validate_phase5_publication_intervention_freeze,
     validate_phase5_publication_template_matrix,
 )
 
 
 FIXTURE = ROOT / "fixtures" / "phase5_publication_case_templates_v1.json"
+FREEZE_FIXTURE = (
+    ROOT / "fixtures" / "phase5_publication_intervention_freeze_v1.json"
+)
 
 
 def _canonical(value: object) -> bytes:
@@ -47,6 +53,11 @@ class Phase5PublicationCaseTemplatesTest(unittest.TestCase):
             FIXTURE.read_bytes()
         )
         self.matrix = build_phase5_publication_template_matrix(self.fixture)
+        self.freeze = build_phase5_publication_intervention_freeze(self.fixture)
+        self.stored_freeze = validate_phase5_publication_intervention_freeze(
+            json.loads(FREEZE_FIXTURE.read_text(encoding="utf-8")),
+            self.fixture,
+        )
 
     def test_fixture_identity_scope_and_language(self) -> None:
         self.assertEqual(self.fixture["schema_version"], SCHEMA_VERSION)
@@ -56,7 +67,7 @@ class Phase5PublicationCaseTemplatesTest(unittest.TestCase):
         self.assertEqual(
             self.fixture["fixture_id"],
             "phase5-publication-templates-"
-            "a8f9386fa4b1dcd01d38feb8437d2a820fbe710d71d20ac161e0803a68650678",
+            "253d78d347b2f3e0ecc3669664a0d839969b803ff452d3c4e4d5f980299f43fc",
         )
 
     def test_core_and_reserve_slots_match_the_approved_recommendation(self) -> None:
@@ -142,6 +153,39 @@ class Phase5PublicationCaseTemplatesTest(unittest.TestCase):
             all(value is False for value in self.matrix["action_state"].values())
         )
 
+    def test_intervention_freeze_binds_exact_texts_and_roles_by_hash(self) -> None:
+        self.assertEqual(self.stored_freeze, self.freeze)
+        self.assertEqual(
+            self.freeze["schema_version"],
+            INTERVENTION_FREEZE_SCHEMA_VERSION,
+        )
+        self.assertEqual(
+            self.freeze["manager_consensus"],
+            "three_prior_managers_accepted_after_core1_correction",
+        )
+        self.assertEqual(
+            self.freeze["frozen_condition_ids"],
+            ["irrelevant_evidence", "remove_critical_role"],
+        )
+        self.assertEqual(self.freeze["template_count"], 6)
+        self.assertEqual(
+            [row["critical_role_id"] for row in self.freeze["rows"]],
+            [
+                "ui_reference",
+                "validation",
+                "interaction_flow",
+                "interaction_flow",
+                "interaction_flow",
+                "implementation",
+            ],
+        )
+        self.assertTrue(
+            all(len(row["irrelevant_evidence_sha256"]) == 64 for row in self.freeze["rows"])
+        )
+        self.assertTrue(
+            all(value is False for value in self.freeze["action_state"].values())
+        )
+
     def test_fixture_contains_no_gold_or_model_output_fields(self) -> None:
         text = _canonical(self.fixture).decode("utf-8")
         self.assertNotIn("gold_label", text)
@@ -208,6 +252,23 @@ class Phase5PublicationCaseTemplatesTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "matrix content drifted"):
             validate_phase5_publication_template_matrix(
                 matrix_drift,
+                self.fixture,
+            )
+
+        freeze_drift = copy.deepcopy(self.freeze)
+        freeze_drift["rows"][0]["critical_role_id"] = "implementation"
+        body = {
+            key: value
+            for key, value in freeze_drift.items()
+            if key != "manifest_id"
+        }
+        freeze_drift["manifest_id"] = (
+            "phase5-publication-intervention-freeze-"
+            + hashlib.sha256(_canonical(body)).hexdigest()
+        )
+        with self.assertRaisesRegex(ValueError, "freeze content drifted"):
+            validate_phase5_publication_intervention_freeze(
+                freeze_drift,
                 self.fixture,
             )
 
