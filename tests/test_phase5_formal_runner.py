@@ -19,10 +19,14 @@ from req2web_agent import (  # noqa: E402
 )
 from req2web_runtime.phase5_formal_runner import (  # noqa: E402
     ACCEPTED_PHASE4_CANONICAL_FULL_FLOW_RUNNER,
+    EXPECTED_PROMPT_AUTHORITY_REVISION,
+    EXPECTED_PROMPT_AUTHORITY_SHA256,
     NODE_ORDER,
+    PHASE4_CLOSURE_AUTHORITY_COMMIT,
     PHASE5_FORMAL_EXECUTION_STATUS,
     Phase5FormalRunnerError,
     SYNTHETIC_VALIDATION_FLOW_ROLE,
+    _validate_inherited_phase4_authority,
     SyntheticPhase5CaseWorker,
     _record_id,
     build_phase5_local_assembly_bindings,
@@ -64,6 +68,38 @@ class Phase5FormalRunnerTest(unittest.TestCase):
     def tearDown(self) -> None:
         shutil.rmtree(self.temp, ignore_errors=True)
 
+    def test_phase4_final_authority_binding_is_current(self) -> None:
+        self.assertEqual(
+            PHASE4_CLOSURE_AUTHORITY_COMMIT,
+            "af09483bb774c9e2e2bd32eaca4cb0c9009da31f",
+        )
+        self.assertEqual(
+            ACCEPTED_PHASE4_CANONICAL_FULL_FLOW_RUNNER,
+            (
+                "scripts/run_phase4_canonical_full_flow.py"
+                "@78b1a12e4814f025cfe4737de196729272941ada"
+            ),
+        )
+        self.assertEqual(
+            PROMPT_AUTHORITY_REVISION,
+            EXPECTED_PROMPT_AUTHORITY_REVISION,
+        )
+        self.assertEqual(
+            PROMPT_AUTHORITY_IDENTITY["sha256"],
+            EXPECTED_PROMPT_AUTHORITY_SHA256,
+        )
+
+    def test_phase4_prompt_authority_drift_fails_closed(self) -> None:
+        with patch(
+            "req2web_runtime.phase5_formal_runner.PROMPT_AUTHORITY_REVISION",
+            "drifted-prompt-revision",
+        ):
+            with self.assertRaisesRegex(
+                Phase5FormalRunnerError,
+                "accepted Phase 4 canonical authority symbols drifted",
+            ):
+                _validate_inherited_phase4_authority()
+
     def test_synthetic_runner_executes_all_rows_raw_first_without_retry(self) -> None:
         result_root = (self.temp / "result").resolve()
         summary = run_phase5_formal_runner(
@@ -103,6 +139,10 @@ class Phase5FormalRunnerTest(unittest.TestCase):
         self.assertEqual(
             manifest["accepted_phase4_canonical_full_flow_runner"],
             ACCEPTED_PHASE4_CANONICAL_FULL_FLOW_RUNNER,
+        )
+        self.assertEqual(
+            manifest["phase4_closure_authority_commit"],
+            PHASE4_CLOSURE_AUTHORITY_COMMIT,
         )
         self.assertFalse(
             manifest["phase5_manual_formal_f1_f4_loop_allowed"]

@@ -95,11 +95,17 @@ PHASE5_FORMAL_EXECUTION_STATUS = (
 )
 PHASE5_FORMAL_MODEL_ACTION_ENABLED = False
 PHASE4_CLOSURE_AUTHORITY_COMMIT = (
-    "87795d0cb6e97f9568f7313bb2a26427652153b4"
+    "af09483bb774c9e2e2bd32eaca4cb0c9009da31f"
 )
 ACCEPTED_PHASE4_CANONICAL_FULL_FLOW_RUNNER = (
     "scripts/run_phase4_canonical_full_flow.py"
-    "@3612ad4d64c7a44d890c6c6f4e022b07e072d3bb"
+    "@78b1a12e4814f025cfe4737de196729272941ada"
+)
+EXPECTED_PROMPT_AUTHORITY_REVISION = (
+    "f3_f4_explicit_actual_state_plan_a07a_direct_english_v13"
+)
+EXPECTED_PROMPT_AUTHORITY_SHA256 = (
+    "sha256:94c337157e652a4e1e7315e06e33a59466985e3a8e15e36c58d7b231d1f3c4a1"
 )
 SYNTHETIC_VALIDATION_FLOW_ROLE = (
     "shared_phase4_langgraph_synthetic_no_model_validation_only"
@@ -157,6 +163,9 @@ def _validate_inherited_phase4_authority() -> None:
         != "req2web_agent.prompt_authority"
         or Phase4RealModelGraphRuntime.__module__
         != "req2web_orchestration.phase4_graph"
+        or PROMPT_AUTHORITY_REVISION != EXPECTED_PROMPT_AUTHORITY_REVISION
+        or PROMPT_AUTHORITY_IDENTITY.get("sha256")
+        != EXPECTED_PROMPT_AUTHORITY_SHA256
     ):
         raise Phase5FormalRunnerError(
             "accepted Phase 4 canonical authority symbols drifted"
@@ -711,67 +720,6 @@ def _output_contract(node_id: str) -> dict[str, object]:
         },
     }
     return copy.deepcopy(contracts[node_id])
-
-
-def _historical_phase5_node_prompt(node_id: str, input_bytes: bytes) -> bytes:
-    input_value = _strict_json(input_bytes, f"{node_id} formal input")
-    if not isinstance(input_value, Mapping):
-        raise Phase5FormalRunnerError(f"{node_id} formal input is invalid")
-    dynamic = input_value["same_run_validated_upstream_projection"]
-    static_keys = [
-        key
-        for key in ("path1_static_projection", "path2_static_projection")
-        if key in input_value
-    ]
-    if len(static_keys) != 1:
-        raise Phase5FormalRunnerError(
-            f"{node_id} formal static projection route is invalid"
-        )
-    static = input_value[static_keys[0]]
-    if not isinstance(dynamic, Mapping) or not isinstance(static, Mapping):
-        raise Phase5FormalRunnerError(f"{node_id} formal projections are invalid")
-    instructions = [
-        "Return exactly one complete RFC 8259 JSON object and no prose.",
-        "Use exactly the keys and nesting in exact_output_contract.",
-        "Every refs field is mandatory and must be the empty array [].",
-        "Use only IDs and facts present in the supplied input and pre-call plan.",
-        "Do not emit gold, scores, verdicts, group hints, source paths, URIs, or prose outside JSON.",
-        "Do not abbreviate, truncate, omit, split, repair, or post-edit the object.",
-    ]
-    value: dict[str, object] = {
-        "schema_version": NODE_PROMPT_SCHEMA_VERSION,
-        "prompt_revision": (
-            PATH2_PROMPT_REVISION
-            if static_keys[0] == "path2_static_projection"
-            else PROMPT_REVISION
-        ),
-        "node_id": node_id,
-        "input_identity": _identity(input_bytes),
-        "output_format": "one_complete_canonical_json_object",
-        "instructions": instructions,
-        "exact_output_contract": _output_contract(node_id),
-    }
-    if node_id == "F3":
-        value["required_interaction_plan"] = _f3_plan(dynamic)
-        value["instructions"] = [
-            *instructions,
-            (
-                "Emit exactly one interaction for every required_interaction_plan "
-                "row in order. Copy source/target state IDs and choose one listed "
-                "trigger visible in the source state."
-            ),
-        ]
-    if node_id == "F4":
-        value["required_acceptance_target_plan"] = _f4_plan(static, dynamic)
-        value["instructions"] = [
-            *instructions,
-            (
-                "Emit exactly one acceptance check for every "
-                "required_acceptance_target_plan row in order and copy its "
-                "use_case_ref and state_ref exactly."
-            ),
-        ]
-    return _canonical(value)
 
 
 def _node_prompt(node_id: str, input_bytes: bytes) -> bytes:
