@@ -9,10 +9,35 @@ import json
 import os
 from pathlib import Path
 import tarfile
-from typing import Mapping, Sequence
+from typing import Literal, Mapping, Sequence, TypedDict
 
 
-SCHEMA_VERSION = "req2web.phase5.result_return_manifest.v1"
+SCHEMA_VERSION = "req2web.phase5.result_return_manifest.v2"
+LEGACY_SCHEMA_VERSION = "req2web.phase5.result_return_manifest.v1"
+SOURCE_BINDING_SCHEMA_VERSION = "req2web.phase5.result_return.source_binding.v1"
+SEMANTIC_SUMMARY_SCHEMA_VERSIONS = frozenset(
+    {
+        "req2web.phase5.semantic_run_summary.v1",
+        "req2web.phase5.semantic_run_summary.v2",
+    }
+)
+
+
+class FormalResultSourceBinding(TypedDict):
+    schema_version: str
+    source_kind: Literal["formal_run"]
+    run_id: str
+    package_sha256: str
+
+
+class SemanticResultSourceBinding(TypedDict):
+    schema_version: str
+    source_kind: Literal["semantic_evaluator_case"]
+    case_id: str
+    semantic_summary_schema_version: str
+
+
+ResultSourceBinding = FormalResultSourceBinding | SemanticResultSourceBinding
 
 
 def _canonical(value: object) -> bytes:
@@ -78,35 +103,106 @@ def _validate_inventory(value: object) -> list[dict[str, object]]:
     return rows
 
 
+def _validate_source_binding(value: object) -> dict[str, object]:
+    if not isinstance(value, Mapping):
+        raise ValueError("result return source binding is invalid")
+    source_kind = value.get("source_kind")
+    if source_kind == "formal_run":
+        binding = _exact(
+            value,
+            ("schema_version", "source_kind", "run_id", "package_sha256"),
+            "formal result return source binding",
+        )
+        if binding["schema_version"] != SOURCE_BINDING_SCHEMA_VERSION:
+            raise ValueError("formal result return source binding schema drifted")
+        if not isinstance(binding["run_id"], str) or not binding["run_id"]:
+            raise ValueError("formal result return source run ID is invalid")
+        _digest(binding["package_sha256"], "formal result return package hash")
+        return binding
+    if source_kind == "semantic_evaluator_case":
+        binding = _exact(
+            value,
+            (
+                "schema_version",
+                "source_kind",
+                "case_id",
+                "semantic_summary_schema_version",
+            ),
+            "semantic result return source binding",
+        )
+        if binding["schema_version"] != SOURCE_BINDING_SCHEMA_VERSION:
+            raise ValueError(
+                "semantic result return source binding schema drifted"
+            )
+        if not isinstance(binding["case_id"], str) or not binding["case_id"]:
+            raise ValueError("semantic result return case ID is invalid")
+        if (
+            not isinstance(binding["semantic_summary_schema_version"], str)
+            or binding["semantic_summary_schema_version"]
+            not in SEMANTIC_SUMMARY_SCHEMA_VERSIONS
+        ):
+            raise ValueError("semantic result return summary schema is invalid")
+        return binding
+    raise ValueError("result return source kind is unsupported")
+
+
 def _validate_payload(value: object) -> dict[str, object]:
-    manifest = _exact(
-        value,
-        (
-            "manifest_id",
-            "schema_version",
-            "status",
-            "run_id",
-            "package_sha256",
-            "run_summary_sha256",
-            "tar_filename",
-            "tar_sha256",
-            "tar_byte_length",
-            "file_count",
-            "total_file_bytes",
-            "inventory",
-            "archive_policy",
-            "action_state",
-        ),
-        "result return manifest",
-    )
-    if manifest["schema_version"] != SCHEMA_VERSION:
+    if not isinstance(value, Mapping):
+        raise ValueError("result return manifest is invalid")
+    schema_version = value.get("schema_version")
+    if schema_version == LEGACY_SCHEMA_VERSION:
+        manifest = _exact(
+            value,
+            (
+                "manifest_id",
+                "schema_version",
+                "status",
+                "run_id",
+                "package_sha256",
+                "run_summary_sha256",
+                "tar_filename",
+                "tar_sha256",
+                "tar_byte_length",
+                "file_count",
+                "total_file_bytes",
+                "inventory",
+                "archive_policy",
+                "action_state",
+            ),
+            "legacy result return manifest",
+        )
+    elif schema_version == SCHEMA_VERSION:
+        manifest = _exact(
+            value,
+            (
+                "manifest_id",
+                "schema_version",
+                "status",
+                "source_binding",
+                "run_summary_sha256",
+                "tar_filename",
+                "tar_sha256",
+                "tar_byte_length",
+                "file_count",
+                "total_file_bytes",
+                "inventory",
+                "archive_policy",
+                "action_state",
+            ),
+            "result return manifest",
+        )
+    else:
         raise ValueError("result return manifest schema drifted")
     if manifest["status"] != "deterministic_owner_custody_return_ready":
         raise ValueError("result return manifest status drifted")
-    if not isinstance(manifest["run_id"], str) or not manifest["run_id"]:
-        raise ValueError("result return run ID is invalid")
-    for key in ("package_sha256", "run_summary_sha256", "tar_sha256"):
-        _digest(manifest[key], f"result return {key}")
+    if schema_version == LEGACY_SCHEMA_VERSION:
+        if not isinstance(manifest["run_id"], str) or not manifest["run_id"]:
+            raise ValueError("result return run ID is invalid")
+        _digest(manifest["package_sha256"], "result return package hash")
+    else:
+        _validate_source_binding(manifest["source_binding"])
+    _digest(manifest["run_summary_sha256"], "result return run summary hash")
+    _digest(manifest["tar_sha256"], "result return tar hash")
     if (
         not isinstance(manifest["tar_filename"], str)
         or not manifest["tar_filename"].endswith(".tar")
@@ -253,6 +349,37 @@ def _source_inventory(result_root: Path) -> list[tuple[str, bytes]]:
     return rows
 
 
+def _source_binding_from_summary(summary: Mapping[str, object]) -> ResultSourceBinding:
+    if "run_id" in summary or "package_sha256" in summary:
+        run_id = summary.get("run_id")
+        package_sha256 = summary.get("package_sha256")
+        if not isinstance(run_id, str) or not run_id:
+            raise ValueError("result return formal summary run ID is invalid")
+        _digest(package_sha256, "result return formal summary package hash")
+        binding: FormalResultSourceBinding = {
+            "schema_version": SOURCE_BINDING_SCHEMA_VERSION,
+            "source_kind": "formal_run",
+            "run_id": run_id,
+            "package_sha256": package_sha256,
+        }
+        return binding
+    schema_version = summary.get("schema_version")
+    case_id = summary.get("case_id")
+    if (
+        not isinstance(case_id, str)
+        or not case_id
+        or schema_version not in SEMANTIC_SUMMARY_SCHEMA_VERSIONS
+    ):
+        raise ValueError("result return source summary is unsupported")
+    binding: SemanticResultSourceBinding = {
+        "schema_version": SOURCE_BINDING_SCHEMA_VERSION,
+        "source_kind": "semantic_evaluator_case",
+        "case_id": case_id,
+        "semantic_summary_schema_version": schema_version,
+    }
+    return binding
+
+
 def create_phase5_result_return(
     *,
     result_root: Path,
@@ -276,6 +403,7 @@ def create_phase5_result_return(
     summary = json.loads(summary_raw.decode("utf-8"))
     if not isinstance(summary, Mapping):
         raise ValueError("result return summary is invalid")
+    source_binding = _source_binding_from_summary(summary)
     try:
         with tar_path.open("xb") as raw_stream:
             with tarfile.open(
@@ -307,8 +435,7 @@ def create_phase5_result_return(
         body = {
             "schema_version": SCHEMA_VERSION,
             "status": "deterministic_owner_custody_return_ready",
-            "run_id": summary["run_id"],
-            "package_sha256": summary["package_sha256"],
+            "source_binding": source_binding,
             "run_summary_sha256": sha256(summary_raw).hexdigest(),
             "tar_filename": tar_path.name,
             "tar_sha256": sha256(tar_raw).hexdigest(),

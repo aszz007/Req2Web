@@ -226,7 +226,55 @@ class Phase5SemanticEvaluatorTest(unittest.TestCase):
             prompt["request_sha256"],
             self.request.sha256(),
         )
+        self.assertEqual(
+            prompt["required_output_contract"],
+            {
+                "top_level_keys_in_order": [
+                    "schema_version",
+                    "verdicts",
+                ],
+                "required_schema_version_literal": (
+                    SEMANTIC_ALIGNMENT_RESULT_SCHEMA_VERSION
+                ),
+                "json_only": True,
+                "markdown_fences_allowed": False,
+                "leading_or_trailing_text_allowed": False,
+                "missing_schema_version_is_invalid": True,
+            },
+        )
+        self.assertTrue(
+            any(
+                "A response beginning with verdicts is invalid."
+                in instruction
+                for instruction in prompt["instructions"]
+            )
+        )
         self.assertNotIn("path", json.dumps(prompt).lower())
+
+    def test_parser_rejects_model_output_without_schema_version(self) -> None:
+        raw = _canonical(
+            {
+                "verdicts": [
+                    {
+                        "criterion_id": "criterion-001",
+                        "verdict": "supported",
+                        "evidence_ids": sorted(self.payloads),
+                        "reason_summary": "Observed behavior matches the goal.",
+                        "limitations": "This covers the frozen case only.",
+                    }
+                ],
+            }
+        )
+        with self.assertRaisesRegex(
+            Phase5SemanticEvaluatorError,
+            "exact keys drifted",
+        ):
+            parse_phase5_semantic_evaluator_raw_response(
+                request=self.request,
+                raw_response=raw,
+                evaluator_model_identity="same-model",
+                generator_model_identity="same-model",
+            )
 
     def test_strict_parser_builds_one_call_no_retry_result(self) -> None:
         raw = _canonical(

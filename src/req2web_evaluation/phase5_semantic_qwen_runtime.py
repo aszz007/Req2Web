@@ -38,9 +38,12 @@ from req2web_evaluation.phase5_semantic_evaluator import (
 )
 
 
-RUNTIME_SCHEMA_VERSION = "req2web.phase5.semantic_qwen_runtime.v2"
-PROFILE_SCHEMA_VERSION = "req2web.phase5.semantic_qwen_profile.v2"
-MODEL_INPUT_SCHEMA_VERSION = "req2web.phase5.semantic_model_input.v2"
+RUNTIME_SCHEMA_VERSION = "req2web.phase5.semantic_qwen_runtime.v3"
+PROFILE_SCHEMA_VERSION = "req2web.phase5.semantic_qwen_profile.v3"
+MODEL_INPUT_SCHEMA_VERSION = "req2web.phase5.semantic_model_input.v3"
+MODEL_INPUT_METRICS_SCHEMA_VERSION = (
+    "req2web.phase5.semantic_model_input_metrics.v1"
+)
 PRE_CALL_SCHEMA_VERSION = "req2web.phase5.semantic_pre_call.v1"
 GENERATION_STARTED_SCHEMA_VERSION = (
     "req2web.phase5.semantic_generation_started.v1"
@@ -122,10 +125,12 @@ class SemanticQwenRuntimeProfile:
     compute_dtype: str
     cpu_offload: bool
     min_total_vram_bytes: int
+    max_input_tokens: int
     max_new_tokens: int
     timeout_seconds: int
     formal_quality_eligible: bool
     evidence_projection: str
+    cuda_allocator_config: str
 
     def validate(self) -> None:
         if self.profile_name not in {LOW_GPU_PROFILE, HIGH_GPU_PROFILE}:
@@ -138,10 +143,13 @@ class SemanticQwenRuntimeProfile:
             or self.cpu_offload is not False
             or type(self.min_total_vram_bytes) is not int
             or self.min_total_vram_bytes < 8_000_000_000
+            or type(self.max_input_tokens) is not int
+            or self.max_input_tokens < 4_096
             or type(self.max_new_tokens) is not int
             or self.max_new_tokens < 512
             or type(self.timeout_seconds) is not int
             or self.timeout_seconds < 60
+            or self.cuda_allocator_config != "expandable_segments:True"
         ):
             raise Phase5SemanticQwenRuntimeError(
                 "semantic runtime profile boundary drifted"
@@ -160,7 +168,8 @@ class SemanticQwenRuntimeProfile:
             self.quantization != "none"
             or self.min_total_vram_bytes < 30_000_000_000
             or self.formal_quality_eligible is not True
-            or self.evidence_projection != "full_frozen_evidence"
+            or self.evidence_projection
+            != "criterion_scoped_frozen_evidence_v1"
         ):
             raise Phase5SemanticQwenRuntimeError(
                 "high-GPU semantic profile drifted"
@@ -179,6 +188,7 @@ class SemanticQwenRuntimeProfile:
             "cpu_offload": self.cpu_offload,
             "device_index": 0,
             "min_total_vram_bytes": self.min_total_vram_bytes,
+            "max_input_tokens": self.max_input_tokens,
             "max_new_tokens": self.max_new_tokens,
             "timeout_seconds": self.timeout_seconds,
             "local_files_only": True,
@@ -190,6 +200,7 @@ class SemanticQwenRuntimeProfile:
             "fresh_evidence_only_context": True,
             "formal_quality_eligible": self.formal_quality_eligible,
             "evidence_projection": self.evidence_projection,
+            "cuda_allocator_config": self.cuda_allocator_config,
         }
 
 
@@ -204,12 +215,14 @@ def semantic_qwen_runtime_profile(
             compute_dtype="bfloat16",
             cpu_offload=False,
             min_total_vram_bytes=8_000_000_000,
+            max_input_tokens=8_192,
             max_new_tokens=2048,
             timeout_seconds=1200,
             formal_quality_eligible=False,
             evidence_projection=(
                 "validated_identities_review_items_and_screenshot"
             ),
+            cuda_allocator_config="expandable_segments:True",
         )
     elif profile_name == HIGH_GPU_PROFILE:
         profile = SemanticQwenRuntimeProfile(
@@ -219,10 +232,12 @@ def semantic_qwen_runtime_profile(
             compute_dtype="bfloat16",
             cpu_offload=False,
             min_total_vram_bytes=30_000_000_000,
-            max_new_tokens=4096,
+            max_input_tokens=32_768,
+            max_new_tokens=2048,
             timeout_seconds=1200,
             formal_quality_eligible=True,
-            evidence_projection="full_frozen_evidence",
+            evidence_projection="criterion_scoped_frozen_evidence_v1",
+            cuda_allocator_config="expandable_segments:True",
         )
     else:
         raise Phase5SemanticQwenRuntimeError(
@@ -239,6 +254,240 @@ def _canonical_json_file(path: Path, name: str) -> bytes:
     except (UnicodeDecodeError, json.JSONDecodeError) as exc:
         raise Phase5SemanticQwenRuntimeError(f"{name} is not JSON") from exc
     return _canonical(value)
+
+
+def _json_object(raw: bytes, name: str) -> dict[str, object]:
+    try:
+        value = json.loads(raw.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise Phase5SemanticQwenRuntimeError(
+            f"{name} is not JSON"
+        ) from exc
+    if not isinstance(value, Mapping):
+        raise Phase5SemanticQwenRuntimeError(
+            f"{name} is not a JSON object"
+        )
+    return copy.deepcopy(dict(value))
+
+
+def _rows_by_id(
+    *,
+    value: Mapping[str, object],
+    field: str,
+    id_field: str,
+    expected_ids: set[str],
+    name: str,
+) -> list[dict[str, object]]:
+    rows = value.get(field)
+    if not isinstance(rows, list):
+        raise Phase5SemanticQwenRuntimeError(
+            f"{name}.{field} is not an array"
+        )
+    selected: list[dict[str, object]] = []
+    observed: list[str] = []
+    for row in rows:
+        if not isinstance(row, Mapping):
+            raise Phase5SemanticQwenRuntimeError(
+                f"{name}.{field} contains an invalid row"
+            )
+        row_id = row.get(id_field)
+        if isinstance(row_id, str) and row_id in expected_ids:
+            selected.append(copy.deepcopy(dict(row)))
+            observed.append(row_id)
+    if set(observed) != expected_ids or len(observed) != len(expected_ids):
+        raise Phase5SemanticQwenRuntimeError(
+            f"{name}.{field} criterion binding drifted"
+        )
+    return selected
+
+
+def _criterion_scoped_evidence_projection(
+    *,
+    request: object,
+    validated: Mapping[str, bytes],
+) -> dict[str, object]:
+    review_items = request.review_items  # type: ignore[union-attr]
+    criterion_ids = {item.criterion_id for item in review_items}
+    if len(criterion_ids) != len(review_items) or not criterion_ids:
+        raise Phase5SemanticQwenRuntimeError(
+            "semantic review-item criterion IDs drifted"
+        )
+    plan = _json_object(validated["acceptance_plan"], "acceptance_plan")
+    binding = _json_object(
+        validated["acceptance_binding"],
+        "acceptance_binding",
+    )
+    browser = _json_object(
+        validated["browser_execution_report"],
+        "browser_execution_report",
+    )
+    page_spec = _json_object(validated["page_spec"], "page_spec")
+    package_manifest = _json_object(
+        validated["result_package_manifest"],
+        "result_package_manifest",
+    )
+    selected_plan_criteria = _rows_by_id(
+        value=plan,
+        field="criteria",
+        id_field="criterion_id",
+        expected_ids=criterion_ids,
+        name="acceptance_plan",
+    )
+    selected_bindings = _rows_by_id(
+        value=binding,
+        field="bindings",
+        id_field="criterion_id",
+        expected_ids=criterion_ids,
+        name="acceptance_binding",
+    )
+    selected_browser_criteria = _rows_by_id(
+        value=browser,
+        field="criteria",
+        id_field="criterion_id",
+        expected_ids=criterion_ids,
+        name="browser_execution_report",
+    )
+    if any(
+        row.get("disposition") != "bound"
+        for row in selected_bindings
+    ) or any(
+        row.get("status") != "pass"
+        for row in selected_browser_criteria
+    ):
+        raise Phase5SemanticQwenRuntimeError(
+            "semantic criterion is not objectively eligible"
+        )
+    compact_bindings: list[dict[str, object]] = []
+    for row in selected_bindings:
+        target_refs = row.get("target_refs")
+        if not isinstance(target_refs, Mapping):
+            target_refs = {}
+        compact_refs = {
+            str(key): copy.deepcopy(value)
+            for key, value in target_refs.items()
+            if str(key)
+            in {
+                "acceptance_check_id",
+                "acceptance_state_id",
+                "feedback_interaction_id",
+                "feedback_target_id",
+                "semantic_expected_outcome_sha256",
+                "use_case_id",
+            }
+            or str(key).startswith("interaction_id:")
+        }
+        compact_bindings.append(
+            {
+                key: copy.deepcopy(value)
+                for key, value in row.items()
+                if key not in {"step_ids", "target_refs"}
+            }
+            | {
+                "objective_step_count": len(row["step_ids"]),
+                "target_refs": compact_refs,
+            }
+        )
+    compact_browser_criteria = [
+        {
+            key: copy.deepcopy(value)
+            for key, value in row.items()
+            if key in {"binding_id", "criterion_id", "evidence", "status"}
+        }
+        for row in selected_browser_criteria
+    ]
+    use_case_ids = {item.use_case_id for item in review_items}
+    interaction_ids = {item.interaction_id for item in review_items}
+    selected_use_cases = _rows_by_id(
+        value=page_spec,
+        field="use_cases",
+        id_field="use_case_id",
+        expected_ids=use_case_ids,
+        name="page_spec",
+    )
+    selected_interactions = _rows_by_id(
+        value=page_spec,
+        field="interactions",
+        id_field="interaction_id",
+        expected_ids=interaction_ids,
+        name="page_spec",
+    )
+    compact_page_spec = {
+        key: copy.deepcopy(value)
+        for key, value in page_spec.items()
+        if key
+        in {
+            "page_id",
+            "page_type",
+            "schema_version",
+            "summary",
+            "target_device",
+            "title",
+        }
+    } | {
+        "use_cases": selected_use_cases,
+        "interactions": selected_interactions,
+    }
+    compact_package_manifest = {
+        key: copy.deepcopy(value)
+        for key, value in package_manifest.items()
+        if key
+        in {
+            "entrypoint",
+            "package_id",
+            "page_id",
+            "result_summary",
+            "schema_version",
+        }
+    }
+    files = package_manifest.get("files")
+    if not isinstance(files, list):
+        raise Phase5SemanticQwenRuntimeError(
+            "result_package_manifest.files is not an array"
+        )
+    compact_package_manifest["file_count"] = len(files)
+    return {
+        "projection_schema_version": (
+            "req2web.phase5.semantic_criterion_evidence_projection.v1"
+        ),
+        "projection_boundary": (
+            "All six frozen evidence payloads were validated before this "
+            "deterministic projection. Only rows bound to the requested "
+            "semantic criteria are included; the screenshot remains attached "
+            "as its original frozen bytes."
+        ),
+        "validated_evidence_identities": [
+            item.to_dict() for item in request.evidence  # type: ignore[union-attr]
+        ],
+        "review_items": [
+            item.to_dict() for item in review_items
+        ],
+        "acceptance_plan": {
+            **{
+                key: copy.deepcopy(value)
+                for key, value in plan.items()
+                if key != "criteria"
+            },
+            "criteria": selected_plan_criteria,
+        },
+        "acceptance_binding": {
+            **{
+                key: copy.deepcopy(value)
+                for key, value in binding.items()
+                if key not in {"bindings", "steps"}
+            },
+            "bindings": compact_bindings,
+        },
+        "browser_execution_report": {
+            **{
+                key: copy.deepcopy(value)
+                for key, value in browser.items()
+                if key not in {"criteria", "steps"}
+            },
+            "criteria": compact_browser_criteria,
+        },
+        "page_spec": compact_page_spec,
+        "result_package_manifest": compact_package_manifest,
+    }
 
 
 def prepare_phase5_semantic_case(
@@ -286,17 +535,14 @@ def prepare_phase5_semantic_case(
         evidence_payloads=validated,
         generator_model_identity=generator_model_identity,
     )
-    text_evidence: dict[str, object] = {}
-    if profile.evidence_projection == "full_frozen_evidence":
-        for evidence_id, raw in validated.items():
-            if evidence_id == "browser_screenshot":
-                continue
-            try:
-                text_evidence[evidence_id] = json.loads(raw.decode("utf-8"))
-            except (UnicodeDecodeError, json.JSONDecodeError) as exc:
-                raise Phase5SemanticQwenRuntimeError(
-                    f"text evidence is not JSON: {evidence_id}"
-                ) from exc
+    if (
+        profile.evidence_projection
+        == "criterion_scoped_frozen_evidence_v1"
+    ):
+        text_evidence = _criterion_scoped_evidence_projection(
+            request=request,
+            validated=validated,
+        )
     else:
         text_evidence = {
             "validated_evidence_identities": [
@@ -322,8 +568,10 @@ def prepare_phase5_semantic_case(
             "evidence_projection": profile.evidence_projection,
             "instructions": (
                 "Use the attached screenshot and frozen evidence. Return only "
-                "one JSON object matching required_output_shape. Do not use "
-                "Markdown fences or text outside the JSON object."
+                "one JSON object matching required_output_shape. The first "
+                "top-level key must be schema_version with the exact required "
+                "literal, followed by verdicts. Do not use Markdown fences or "
+                "text outside the JSON object."
             ),
         }
     )
@@ -405,6 +653,7 @@ def _worker_execute(
     model_input_path: Path,
     screenshot_path: Path,
     screenshot_sha256: str,
+    input_metrics_path: Path,
     generation_started_path: Path,
     raw_output_path: Path,
 ) -> dict[str, object]:
@@ -501,6 +750,24 @@ def _worker_execute(
         if hasattr(value, "to")
     }
     input_length = int(encoded["input_ids"].shape[1])
+    _write_once(
+        input_metrics_path,
+        _canonical(
+            {
+                "schema_version": MODEL_INPUT_METRICS_SCHEMA_VERSION,
+                "input_token_length": input_length,
+                "input_token_cap": profile.max_input_tokens,
+                "max_new_tokens": profile.max_new_tokens,
+                "screenshot_width": int(image.size[0]),
+                "screenshot_height": int(image.size[1]),
+                "cuda_allocator_config": profile.cuda_allocator_config,
+            }
+        ),
+    )
+    if input_length > profile.max_input_tokens:
+        raise Phase5SemanticQwenRuntimeError(
+            "semantic model input exceeds the frozen token cap"
+        )
     tokenizer = getattr(processor, "tokenizer", processor)
     stopping = transformers.StoppingCriteriaList(
         [
@@ -558,6 +825,7 @@ def _worker_execute(
             "total_vram_bytes": total_vram,
         },
         "input_token_length": input_length,
+        "input_token_cap": profile.max_input_tokens,
         "raw_response_identity": _identity(raw),
         "automatic_retry_count": 0,
     }
@@ -692,6 +960,7 @@ def run_phase5_semantic_qwen(
     }
     _write_once(result_root / "pre_call_record.json", _canonical(pre_call))
     generation_started_path = result_root / "generation_started.json"
+    input_metrics_path = result_root / "model_input_metrics.json"
     raw_output_path = result_root / "raw_response.bin"
     command = [
         sys.executable,
@@ -708,6 +977,8 @@ def run_phase5_semantic_qwen(
         str(screenshot_path),
         "--screenshot-sha256",
         _sha(screenshot_raw),
+        "--input-metrics-path",
+        str(input_metrics_path),
         "--generation-started-path",
         str(generation_started_path),
         "--raw-output-path",
@@ -729,6 +1000,7 @@ def run_phase5_semantic_qwen(
             "HF_HUB_OFFLINE": "1",
             "TRANSFORMERS_OFFLINE": "1",
             "CUDA_VISIBLE_DEVICES": "0",
+            "PYTORCH_CUDA_ALLOC_CONF": profile.cuda_allocator_config,
         },
         start_new_session=(os.name != "nt"),
         creationflags=creationflags,
@@ -1068,6 +1340,7 @@ def _worker_parser() -> argparse.ArgumentParser:
     parser.add_argument("--model-input-path", type=Path)
     parser.add_argument("--screenshot-path", type=Path)
     parser.add_argument("--screenshot-sha256")
+    parser.add_argument("--input-metrics-path", type=Path)
     parser.add_argument("--generation-started-path", type=Path)
     parser.add_argument("--raw-output-path", type=Path)
     return parser
@@ -1084,6 +1357,7 @@ def _worker_entry(argv: Sequence[str]) -> int:
             model_input_path=args.model_input_path,
             screenshot_path=args.screenshot_path,
             screenshot_sha256=args.screenshot_sha256,
+            input_metrics_path=args.input_metrics_path,
             generation_started_path=args.generation_started_path,
             raw_output_path=args.raw_output_path,
         )

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from hashlib import sha256
 from pathlib import Path
 import shutil
 import sys
@@ -11,36 +12,31 @@ import uuid
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "src"))
 
-from req2web_runtime.phase5_formal_runner import (  # noqa: E402
-    run_phase5_formal_runner,
-    synthetic_phase5_worker_factory,
-)
 from req2web_runtime.phase5_result_return import (  # noqa: E402
     Phase5ResultReturnManifest,
     create_phase5_result_return,
     validate_phase5_result_return,
 )
-from req2web_runtime.phase5_sealed_action_package import (  # noqa: E402
-    create_phase5_sealed_action_package,
-)
-
-
-FIXTURE = ROOT / "fixtures" / "phase5_sealed_action_package_synthetic_v1.json"
 
 
 class Phase5ResultReturnTest(unittest.TestCase):
     def setUp(self) -> None:
         self.temp = ROOT / f".phase5-result-return-test-{uuid.uuid4().hex}"
         self.temp.mkdir()
-        package = create_phase5_sealed_action_package(
-            json.loads(FIXTURE.read_text(encoding="utf-8"))
-        )
         self.result_root = (self.temp / "result").resolve()
-        run_phase5_formal_runner(
-            package=package,
-            result_root=self.result_root,
-            worker_factory=synthetic_phase5_worker_factory,
-            allow_synthetic_validation_only=True,
+        self.result_root.mkdir()
+        (self.result_root / "artifact.json").write_bytes(
+            self._canonical({"status": "synthetic_component_result"})
+        )
+        (self.result_root / "run_summary.json").write_bytes(
+            self._canonical(
+                {
+                    "schema_version": "synthetic.phase5.run_summary.v1",
+                    "run_id": "synthetic-phase5-result-return-run",
+                    "package_sha256": "a" * 64,
+                    "status": "terminal_synthetic_component_result",
+                }
+            )
         )
         self.return_root = self.temp / "return"
         self.return_root.mkdir()
@@ -51,6 +47,108 @@ class Phase5ResultReturnTest(unittest.TestCase):
 
     def tearDown(self) -> None:
         shutil.rmtree(self.temp, ignore_errors=True)
+
+    @staticmethod
+    def _canonical(value: object) -> bytes:
+        return json.dumps(
+            value,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+
+    def _semantic_result_root(self) -> Path:
+        result_root = (self.temp / "semantic-result").resolve()
+        result_root.mkdir()
+        (result_root / "raw_response.bin").write_bytes(b"semantic raw response")
+        summary = {
+            "schema_version": "req2web.phase5.semantic_run_summary.v2",
+            "runtime_schema_version": "req2web.phase5.semantic_qwen_runtime.v3",
+            "status": "failed_closed",
+            "case_id": "p4-full-flow-02-apparel",
+            "formal_quality_claimed": False,
+        }
+        (result_root / "run_summary.json").write_bytes(
+            self._canonical(summary)
+        )
+        return result_root
+
+    def test_semantic_case_summary_uses_typed_source_binding(self) -> None:
+        result_root = self._semantic_result_root()
+        tar_path = (self.return_root / "semantic-return.tar").resolve()
+        manifest_path = (
+            self.return_root / "semantic-return.manifest.json"
+        ).resolve()
+        manifest = create_phase5_result_return(
+            result_root=result_root,
+            tar_path=tar_path,
+            manifest_path=manifest_path,
+        )
+        payload = manifest.to_dict()
+        self.assertEqual(
+            payload["source_binding"],
+            {
+                "case_id": "p4-full-flow-02-apparel",
+                "schema_version": (
+                    "req2web.phase5.result_return.source_binding.v1"
+                ),
+                "semantic_summary_schema_version": (
+                    "req2web.phase5.semantic_run_summary.v2"
+                ),
+                "source_kind": "semantic_evaluator_case",
+            },
+        )
+        self.assertNotIn("package_sha256", payload)
+        self.assertNotIn("package_sha256", payload["source_binding"])
+        self.assertEqual(
+            validate_phase5_result_return(
+                tar_path=tar_path,
+                manifest_path=manifest_path,
+            ),
+            manifest,
+        )
+
+    def test_existing_v1_formal_manifest_replays(self) -> None:
+        manifest = create_phase5_result_return(
+            result_root=self.result_root,
+            tar_path=self.tar_path,
+            manifest_path=self.manifest_path,
+        )
+        current = manifest.to_dict()
+        source = current["source_binding"]
+        legacy_body = {
+            "schema_version": "req2web.phase5.result_return_manifest.v1",
+            "status": current["status"],
+            "run_id": source["run_id"],
+            "package_sha256": source["package_sha256"],
+            "run_summary_sha256": current["run_summary_sha256"],
+            "tar_filename": current["tar_filename"],
+            "tar_sha256": current["tar_sha256"],
+            "tar_byte_length": current["tar_byte_length"],
+            "file_count": current["file_count"],
+            "total_file_bytes": current["total_file_bytes"],
+            "inventory": current["inventory"],
+            "archive_policy": current["archive_policy"],
+            "action_state": current["action_state"],
+        }
+        legacy_payload = {
+            "manifest_id": (
+                "phase5-result-return-"
+                + sha256(self._canonical(legacy_body)).hexdigest()
+            ),
+            **legacy_body,
+        }
+        legacy_path = (self.return_root / "legacy.manifest.json").resolve()
+        legacy_path.write_bytes(self._canonical(legacy_payload))
+        replayed = validate_phase5_result_return(
+            tar_path=self.tar_path,
+            manifest_path=legacy_path,
+        )
+        self.assertEqual(
+            replayed.to_dict()["schema_version"],
+            "req2web.phase5.result_return_manifest.v1",
+        )
+        self.assertEqual(replayed.to_dict()["run_id"], source["run_id"])
 
     def test_deterministic_return_round_trip_and_exact_inventory(self) -> None:
         manifest = create_phase5_result_return(
@@ -63,6 +161,10 @@ class Phase5ResultReturnTest(unittest.TestCase):
         self.assertEqual(
             payload["file_count"],
             len(payload["inventory"]),
+        )
+        self.assertEqual(
+            payload["source_binding"]["source_kind"],
+            "formal_run",
         )
         self.assertFalse(payload["action_state"]["local_return_validated"])
         self.assertFalse(payload["action_state"]["instance_released"])

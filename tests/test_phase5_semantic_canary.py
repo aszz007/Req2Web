@@ -89,19 +89,122 @@ def _build_case(
     )
     payloads: dict[str, bytes] = {}
     evidence: list[SemanticAlignmentEvidence] = []
+    artifact_values: dict[str, object] = {
+        "acceptance_binding": {
+            "schema_version": "synthetic.acceptance_binding.v1",
+            "case_id": case_id,
+            "language": "English",
+            "bindings": [
+                {
+                    "binding_id": "binding-001",
+                    "criterion_id": "criterion-001",
+                    "disposition": "bound",
+                    "step_ids": ["step-001"],
+                }
+            ],
+            "steps": [
+                {
+                    "action_kind": "assert_feedback",
+                    "binding_id": "binding-001",
+                    "criterion_id": "criterion-001",
+                    "step_id": "step-001",
+                    "expected_payload": {
+                        "text": "The page reports a completed task."
+                    },
+                }
+            ],
+        },
+        "acceptance_plan": {
+            "schema_version": "synthetic.acceptance_plan.v1",
+            "case_id": case_id,
+            "language": "English",
+            "criteria": [
+                {
+                    "criterion_id": "criterion-001",
+                    "expected_payload": {
+                        "use_case_id": "UC-01",
+                        "expected_outcome": (
+                            "The user can complete the intended task."
+                        ),
+                    },
+                }
+            ],
+        },
+        "browser_execution_report": {
+            "schema_version": "synthetic.browser_execution_report.v1",
+            "case_id": case_id,
+            "language": "English",
+            "criteria": [
+                {
+                    "binding_id": "binding-001",
+                    "criterion_id": "criterion-001",
+                    "status": "pass",
+                    "step_ids": ["step-001"],
+                }
+            ],
+            "steps": [
+                {
+                    "action_kind": "assert_feedback",
+                    "binding_id": "binding-001",
+                    "criterion_id": "criterion-001",
+                    "step_id": "step-001",
+                    "status": "pass",
+                    "actual_payload": {
+                        "feedback": "The page reports a completed task."
+                    },
+                }
+            ],
+        },
+        "page_spec": {
+            "schema_version": "synthetic.page_spec.v1",
+            "case_id": case_id,
+            "language": "English",
+            "use_cases": [
+                {
+                    "use_case_id": "UC-01",
+                    "expected_outcome": (
+                        "The user can complete the intended task."
+                    ),
+                }
+            ],
+            "interactions": [
+                {
+                    "interaction_id": "interaction-001",
+                    "source_state_id": "state-001",
+                    "target_state_id": "state-002",
+                    "trigger_component_id": "component-001",
+                    "use_case_ids": ["UC-01"],
+                    "user_feedback": (
+                        "The page reports a completed task."
+                    ),
+                }
+            ],
+            "states": [
+                {"state_id": "state-001", "name": "Ready"},
+                {"state_id": "state-002", "name": "Completed"},
+            ],
+            "components": [
+                {
+                    "component_id": "component-001",
+                    "label": "Complete task",
+                }
+            ],
+        },
+        "result_package_manifest": {
+            "schema_version": "synthetic.result_package_manifest.v1",
+            "case_id": case_id,
+            "language": "English",
+            "package_id": f"package-{case_order}",
+            "entrypoint": "page/index.html",
+            "files": [],
+        },
+    }
     for role in roles:
         if role == "browser_screenshot":
             raw = b"synthetic-browser-screenshot"
             identity_kind = "raw_bytes"
         else:
-            raw = _canonical(
-                {
-                    "artifact_role": role,
-                    "case_id": case_id,
-                    "language": "English",
-                    "schema_version": f"synthetic.{role}.v1",
-                }
-            )
+            raw = _canonical(artifact_values[role])
             identity_kind = "canonical_json"
         payloads[role] = raw
         evidence.append(

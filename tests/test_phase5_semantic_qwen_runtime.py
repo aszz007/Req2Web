@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 import sys
 import unittest
@@ -38,6 +39,25 @@ PACKAGE_ROOT = (
     / "case01"
     / "result_package_v1"
 )
+ENGLISH_AUDIT_ROOT = (
+    ROOT
+    / "outputs"
+    / "phase4_english_browser_audit_v13_03"
+    / "canary"
+    / "audits"
+    / "case01"
+)
+ENGLISH_PACKAGE_ROOT = (
+    ROOT
+    / "outputs"
+    / "phase4_english_fresh_return_v13_03"
+    / "final10_remote_result"
+    / "p4-canonical-english-fresh-v13-03"
+    / "cases"
+    / "01-p4-full-flow-01-grocery"
+    / "delivery"
+    / "result_package_v1"
+)
 
 
 class Phase5SemanticQwenRuntimeTest(unittest.TestCase):
@@ -48,6 +68,8 @@ class Phase5SemanticQwenRuntimeTest(unittest.TestCase):
         self.assertEqual(low["model_id"], MODEL_ID)
         self.assertEqual(low["quantization"], "nf4")
         self.assertFalse(low["formal_quality_eligible"])
+        self.assertEqual(low["max_input_tokens"], 8192)
+        self.assertEqual(low["max_new_tokens"], 2048)
         self.assertEqual(
             low["evidence_projection"],
             "validated_identities_review_items_and_screenshot",
@@ -55,10 +77,71 @@ class Phase5SemanticQwenRuntimeTest(unittest.TestCase):
         self.assertEqual(high["quantization"], "none")
         self.assertTrue(high["formal_quality_eligible"])
         self.assertFalse(high["cpu_offload"])
+        self.assertEqual(high["max_input_tokens"], 32768)
+        self.assertEqual(high["max_new_tokens"], 2048)
+        self.assertEqual(
+            high["cuda_allocator_config"],
+            "expandable_segments:True",
+        )
         self.assertEqual(
             high["evidence_projection"],
-            "full_frozen_evidence",
+            "criterion_scoped_frozen_evidence_v1",
         )
+
+    def test_high_profile_projects_only_requested_criteria(self) -> None:
+        if (
+            not ENGLISH_AUDIT_ROOT.is_dir()
+            or not ENGLISH_PACKAGE_ROOT.is_dir()
+        ):
+            self.skipTest("English Phase 4 browser evidence is unavailable")
+        prepared = prepare_phase5_semantic_case(
+            audit_root=ENGLISH_AUDIT_ROOT,
+            result_package_root=ENGLISH_PACKAGE_ROOT,
+            generator_model_identity="Qwen/Qwen3.5-9B@test",
+            profile_name=HIGH_GPU_PROFILE,
+        )
+        request = prepared["request"]
+        model_input_raw = prepared["model_input_raw"]
+        evidence_payloads = prepared["evidence_payloads"]
+        self.assertIsInstance(model_input_raw, bytes)
+        self.assertIsInstance(evidence_payloads, dict)
+        model_input = json.loads(model_input_raw)
+        projection = model_input["frozen_text_evidence"]
+        expected_criteria = {
+            item.criterion_id for item in request.review_items
+        }
+        self.assertEqual(
+            projection["projection_schema_version"],
+            "req2web.phase5.semantic_criterion_evidence_projection.v1",
+        )
+        self.assertEqual(
+            {
+                row["criterion_id"]
+                for row in projection["acceptance_plan"]["criteria"]
+            },
+            expected_criteria,
+        )
+        self.assertEqual(
+            {
+                row["criterion_id"]
+                for row in projection["acceptance_binding"]["bindings"]
+            },
+            expected_criteria,
+        )
+        self.assertEqual(
+            {
+                row["criterion_id"]
+                for row in projection["browser_execution_report"]["criteria"]
+            },
+            expected_criteria,
+        )
+        full_text_bytes = sum(
+            len(raw)
+            for evidence_id, raw in evidence_payloads.items()
+            if evidence_id != "browser_screenshot"
+        )
+        self.assertLess(len(model_input_raw), full_text_bytes)
+        self.assertLess(len(model_input_raw), 25_000)
 
     def test_mixed_historical_phase4_case_is_rejected(self) -> None:
         if not AUDIT_ROOT.is_dir() or not PACKAGE_ROOT.is_dir():

@@ -79,9 +79,21 @@ def main(argv: list[str] | None = None) -> int:
         print(f"[Phase 5] failed closed: {exc}", file=sys.stderr, flush=True)
         return 2
     payload = manifest.to_dict()
+    if payload["schema_version"] == "req2web.phase5.result_return_manifest.v1":
+        source_kind = "formal_run"
+        source_id = payload["run_id"]
+    else:
+        source = payload["source_binding"]
+        source_kind = source["source_kind"]
+        source_id = (
+            source["run_id"]
+            if source_kind == "formal_run"
+            else source["case_id"]
+        )
     print(
         "[Phase 5] "
-        f"run_id={payload['run_id']} "
+        f"source_kind={source_kind} "
+        f"source_id={source_id} "
         f"tar_sha256={payload['tar_sha256']} "
         f"file_count={payload['file_count']}",
         flush=True,

@@ -36,7 +36,7 @@ SEMANTIC_EVALUATOR_PROMPT_SCHEMA_VERSION = (
     "req2web.phase5.semantic_evaluator_prompt.v1"
 )
 SEMANTIC_EVALUATOR_PROMPT_REVISION = (
-    "frozen_evidence_single_call_no_browser_control_v2"
+    "frozen_evidence_single_call_exact_schema_first_v3"
 )
 SEMANTIC_EVALUATOR_NO_ACTION_SCHEMA_VERSION = (
     "req2web.phase5.semantic_evaluator_no_action.v1"
@@ -383,6 +383,19 @@ def build_phase5_semantic_evaluator_prompt(
                     }
                 ],
             },
+            "required_output_contract": {
+                "top_level_keys_in_order": [
+                    "schema_version",
+                    "verdicts",
+                ],
+                "required_schema_version_literal": (
+                    SEMANTIC_ALIGNMENT_RESULT_SCHEMA_VERSION
+                ),
+                "json_only": True,
+                "markdown_fences_allowed": False,
+                "leading_or_trailing_text_allowed": False,
+                "missing_schema_version_is_invalid": True,
+            },
             "instructions": [
                 (
                     "Judge only whether each abstract expected outcome is "
@@ -399,6 +412,21 @@ def build_phase5_semantic_evaluator_prompt(
                 (
                     "Do not operate a browser, propose a repair, rewrite the "
                     "requirement/PageSpec, or override an objective failure."
+                ),
+                (
+                    "Return exactly one JSON object with exactly two top-level "
+                    "keys in this order: schema_version, then verdicts."
+                ),
+                (
+                    "The first top-level key/value must be copied literally as "
+                    "\"schema_version\":\""
+                    + SEMANTIC_ALIGNMENT_RESULT_SCHEMA_VERSION
+                    + "\". A response beginning with verdicts is invalid."
+                ),
+                (
+                    "Do not omit schema_version even when every verdict is "
+                    "supported. Do not use Markdown fences or any text before "
+                    "or after the JSON object."
                 ),
             ],
             "review_items": [
