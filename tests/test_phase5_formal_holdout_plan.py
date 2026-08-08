@@ -301,7 +301,7 @@ class Phase5PublicationScopeDescriptorTest(unittest.TestCase):
             [
                 "information_retrieval",
                 "structured_form_transaction",
-                "media_async_processing",
+                "background_async_processing",
                 "stateful_recovery_responsive",
             ],
         )

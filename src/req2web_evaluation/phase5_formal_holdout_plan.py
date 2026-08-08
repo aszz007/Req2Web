@@ -991,12 +991,14 @@ def _publication_case_selection_contract() -> dict[str, object]:
                 ],
             },
             {
-                "slot_id": "media_async_processing",
-                "primary_dimension": "upload_progress_result_or_failure",
+                "slot_id": "background_async_processing",
+                "primary_dimension": (
+                    "queued_processing_completion_cancel_or_failure"
+                ),
                 "required_observables": [
-                    "media_or_file_input",
-                    "processing_state",
-                    "result_or_failure_feedback",
+                    "job_configuration_input",
+                    "queued_or_processing_state",
+                    "completion_cancel_or_failure_feedback",
                 ],
             },
             {

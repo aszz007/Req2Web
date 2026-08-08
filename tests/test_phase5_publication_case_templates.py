@@ -67,7 +67,7 @@ class Phase5PublicationCaseTemplatesTest(unittest.TestCase):
         self.assertEqual(
             self.fixture["fixture_id"],
             "phase5-publication-templates-"
-            "253d78d347b2f3e0ecc3669664a0d839969b803ff452d3c4e4d5f980299f43fc",
+            "240fffe8e86b173471f80c1a3c0d2c0e31485bba8a065bc038deabe51efa1b10",
         )
 
     def test_core_and_reserve_slots_match_the_approved_recommendation(self) -> None:
@@ -77,7 +77,7 @@ class Phase5PublicationCaseTemplatesTest(unittest.TestCase):
             [
                 "information_retrieval",
                 "structured_form_transaction",
-                "media_async_processing",
+                "background_async_processing",
                 "stateful_recovery_responsive",
             ],
         )

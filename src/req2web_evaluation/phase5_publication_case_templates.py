@@ -29,7 +29,7 @@ _ALLOWED_ROLES = {
 _EXPECTED_CORE_SLOTS = (
     "information_retrieval",
     "structured_form_transaction",
-    "media_async_processing",
+    "background_async_processing",
     "stateful_recovery_responsive",
 )
 _EXPECTED_RESERVE_SLOTS = (
