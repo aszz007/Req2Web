@@ -27,6 +27,12 @@ BUDGET_PLAN_SCHEMA_VERSION = "req2web.phase5.formal_holdout.budget_plan.v1"
 RESULT_INVENTORY_SCHEMA_VERSION = "req2web.phase5.formal_holdout.result_inventory.v1"
 OPENING_GATE_SCHEMA_VERSION = "req2web.phase5.formal_holdout.opening_gate.v1"
 FORMAL_REPLAY_SCHEMA_VERSION = "req2web.phase5.formal_holdout.replay.v1"
+PUBLICATION_SCOPE_DESCRIPTOR_SCHEMA_VERSION = (
+    "req2web.phase5.formal_holdout.publication_scope_descriptor.v1"
+)
+PUBLICATION_SCOPE_DESCRIPTOR_REVISION = (
+    "req2web.phase5.publication_scope_candidate.no_action.v1"
+)
 
 P5_01_FOUNDATION_BUNDLE_SHA256 = "72086f9984ccbe892e32218b8170cb3f5196e6390ed94bd2c5690fb9ecbc203d"
 P5_01_FOUNDATION_BUNDLE_ID = "phase5-no-action-bundle-5acf48bdbbac1d661f596034bfdacbe3c6703a2c10c9581cce957783e1cb26df"
@@ -58,6 +64,9 @@ _REQUIRED_CORE_COVERAGE = frozenset(
     }
 )
 _INTERVENTIONS = ("none", "irrelevant_evidence", "remove_critical_role")
+_PUBLICATION_CONDITION_SET_REVISION = (
+    "req2web.phase5.publication_condition_ids.not_semantically_frozen.v1"
+)
 _GROUP_ORDER = {"G0": 0, "G1": 1, "G2": 2}
 _TERMINAL_RESULT_STATUSES = (
     "first_pass_success",
@@ -957,3 +966,276 @@ def build_phase5_formal_no_action_plan_from_json_bytes(
     except (UnicodeDecodeError, json.JSONDecodeError) as exc:
         raise ValueError("opaque fixture is invalid") from exc
     return build_phase5_formal_no_action_plan(foundation, fixture)
+
+
+def validate_phase5_publication_scope_descriptor(
+    value: object,
+) -> dict[str, object]:
+    """Validate the scope-only publication candidate without opening H1."""
+
+    descriptor = _exact(
+        value,
+        (
+            "descriptor_id",
+            "schema_version",
+            "revision",
+            "status",
+            "phase4_exit_commit",
+            "historical_plan_binding",
+            "publication_scope",
+            "reserve_policy",
+            "sealed_content_state",
+            "action_gates",
+        ),
+        "publication_scope_descriptor",
+    )
+    _exact_text(
+        descriptor["schema_version"],
+        PUBLICATION_SCOPE_DESCRIPTOR_SCHEMA_VERSION,
+        "publication_scope_descriptor.schema_version",
+    )
+    _exact_text(
+        descriptor["revision"],
+        PUBLICATION_SCOPE_DESCRIPTOR_REVISION,
+        "publication_scope_descriptor.revision",
+    )
+    _exact_text(
+        descriptor["status"],
+        "candidate_scope_only_no_action",
+        "publication_scope_descriptor.status",
+    )
+    _exact_text(
+        descriptor["phase4_exit_commit"],
+        PHASE4_EXIT_COMMIT,
+        "publication_scope_descriptor.phase4_exit_commit",
+    )
+
+    historical = _exact(
+        descriptor["historical_plan_binding"],
+        (
+            "schema_version",
+            "core_case_count",
+            "reserve_case_count",
+            "deep_label_case_count",
+            "main_matrix_row_count",
+            "node_generate_call_cap",
+            "unchanged",
+        ),
+        "publication_scope_descriptor.historical_plan_binding",
+    )
+    _exact_text(
+        historical["schema_version"],
+        FORMAL_NO_ACTION_PLAN_SCHEMA_VERSION,
+        "publication_scope_descriptor.historical_plan_binding.schema_version",
+    )
+    expected_historical = {
+        "core_case_count": 12,
+        "reserve_case_count": 8,
+        "deep_label_case_count": 4,
+        "main_matrix_row_count": 140,
+        "node_generate_call_cap": 240,
+    }
+    for key, expected in expected_historical.items():
+        if (
+            _integer(
+                historical[key],
+                f"publication_scope_descriptor.historical_plan_binding.{key}",
+            )
+            != expected
+        ):
+            raise ValueError(f"historical formal-plan {key} drifted")
+    _true(
+        historical["unchanged"],
+        "publication_scope_descriptor.historical_plan_binding.unchanged",
+    )
+
+    scope = _exact(
+        descriptor["publication_scope"],
+        (
+            "case_material",
+            "core_case_count",
+            "condition_set_revision",
+            "condition_ids",
+            "condition_count",
+            "model_node_ids",
+            "model_node_count",
+            "runtime_row_count",
+            "node_generate_call_cap",
+            "condition_semantics_status",
+        ),
+        "publication_scope_descriptor.publication_scope",
+    )
+    _exact_text(
+        scope["case_material"],
+        "new_project_authored_sealed_cases",
+        "publication_scope_descriptor.publication_scope.case_material",
+    )
+    _exact_text(
+        scope["condition_set_revision"],
+        _PUBLICATION_CONDITION_SET_REVISION,
+        "publication_scope_descriptor.publication_scope.condition_set_revision",
+    )
+    condition_ids = _array(
+        scope["condition_ids"],
+        "publication_scope_descriptor.publication_scope.condition_ids",
+    )
+    if condition_ids != list(_INTERVENTIONS):
+        raise ValueError("publication condition IDs drifted")
+    model_node_ids = _array(
+        scope["model_node_ids"],
+        "publication_scope_descriptor.publication_scope.model_node_ids",
+    )
+    if model_node_ids != list(_MODEL_NODES):
+        raise ValueError("publication model-node IDs drifted")
+    expected_scope_counts = {
+        "core_case_count": 4,
+        "condition_count": 3,
+        "model_node_count": 4,
+        "runtime_row_count": 12,
+        "node_generate_call_cap": 48,
+    }
+    for key, expected in expected_scope_counts.items():
+        if (
+            _integer(
+                scope[key],
+                f"publication_scope_descriptor.publication_scope.{key}",
+            )
+            != expected
+        ):
+            raise ValueError(f"publication scope {key} drifted")
+    if scope["runtime_row_count"] != scope["core_case_count"] * scope["condition_count"]:
+        raise ValueError("publication runtime-row formula drifted")
+    if scope["node_generate_call_cap"] != scope["runtime_row_count"] * len(_MODEL_NODES):
+        raise ValueError("publication node-call formula drifted")
+    _exact_text(
+        scope["condition_semantics_status"],
+        "ids_recorded_semantics_not_frozen",
+        "publication_scope_descriptor.publication_scope.condition_semantics_status",
+    )
+
+    reserve = _exact(
+        descriptor["reserve_policy"],
+        (
+            "reserve_case_cap",
+            "replacement_only",
+            "invalidity_declared_before_opening",
+            "adds_success_sample",
+            "adds_runtime_rows",
+            "adds_generate_calls",
+        ),
+        "publication_scope_descriptor.reserve_policy",
+    )
+    if _integer(
+        reserve["reserve_case_cap"],
+        "publication_scope_descriptor.reserve_policy.reserve_case_cap",
+    ) != 2:
+        raise ValueError("publication reserve-case cap drifted")
+    _true(
+        reserve["replacement_only"],
+        "publication_scope_descriptor.reserve_policy.replacement_only",
+    )
+    _true(
+        reserve["invalidity_declared_before_opening"],
+        "publication_scope_descriptor.reserve_policy.invalidity_declared_before_opening",
+    )
+    for key in ("adds_success_sample", "adds_runtime_rows", "adds_generate_calls"):
+        _false(reserve[key], f"publication_scope_descriptor.reserve_policy.{key}")
+
+    sealed = _exact(
+        descriptor["sealed_content_state"],
+        (
+            "real_case_content_present",
+            "gold_content_present",
+            "case_identities_frozen",
+            "condition_semantics_frozen",
+            "metric_rules_frozen",
+            "execution_package_frozen",
+        ),
+        "publication_scope_descriptor.sealed_content_state",
+    )
+    for key, item in sealed.items():
+        _false(item, f"publication_scope_descriptor.sealed_content_state.{key}")
+
+    gates = _exact(
+        descriptor["action_gates"],
+        (
+            "h1_opened",
+            "model_action_authorized",
+            "gpu_action_authorized",
+            "remote_action_authorized",
+            "formal_evaluation_authorized",
+            "formal_quality_claimed",
+        ),
+        "publication_scope_descriptor.action_gates",
+    )
+    for key, item in gates.items():
+        _false(item, f"publication_scope_descriptor.action_gates.{key}")
+
+    body = {
+        key: item for key, item in descriptor.items() if key != "descriptor_id"
+    }
+    expected_id = _record_id("phase5-publication-scope", body)
+    if descriptor["descriptor_id"] != expected_id:
+        raise ValueError("publication scope descriptor ID drifted")
+    return descriptor
+
+
+def build_phase5_publication_scope_descriptor() -> dict[str, object]:
+    """Build the bounded publication candidate as no-action scope metadata."""
+
+    body = {
+        "schema_version": PUBLICATION_SCOPE_DESCRIPTOR_SCHEMA_VERSION,
+        "revision": PUBLICATION_SCOPE_DESCRIPTOR_REVISION,
+        "status": "candidate_scope_only_no_action",
+        "phase4_exit_commit": PHASE4_EXIT_COMMIT,
+        "historical_plan_binding": {
+            "schema_version": FORMAL_NO_ACTION_PLAN_SCHEMA_VERSION,
+            "core_case_count": 12,
+            "reserve_case_count": 8,
+            "deep_label_case_count": 4,
+            "main_matrix_row_count": 140,
+            "node_generate_call_cap": 240,
+            "unchanged": True,
+        },
+        "publication_scope": {
+            "case_material": "new_project_authored_sealed_cases",
+            "core_case_count": 4,
+            "condition_set_revision": _PUBLICATION_CONDITION_SET_REVISION,
+            "condition_ids": list(_INTERVENTIONS),
+            "condition_count": len(_INTERVENTIONS),
+            "model_node_ids": list(_MODEL_NODES),
+            "model_node_count": len(_MODEL_NODES),
+            "runtime_row_count": 4 * len(_INTERVENTIONS),
+            "node_generate_call_cap": 4 * len(_INTERVENTIONS) * len(_MODEL_NODES),
+            "condition_semantics_status": "ids_recorded_semantics_not_frozen",
+        },
+        "reserve_policy": {
+            "reserve_case_cap": 2,
+            "replacement_only": True,
+            "invalidity_declared_before_opening": True,
+            "adds_success_sample": False,
+            "adds_runtime_rows": False,
+            "adds_generate_calls": False,
+        },
+        "sealed_content_state": {
+            "real_case_content_present": False,
+            "gold_content_present": False,
+            "case_identities_frozen": False,
+            "condition_semantics_frozen": False,
+            "metric_rules_frozen": False,
+            "execution_package_frozen": False,
+        },
+        "action_gates": {
+            "h1_opened": False,
+            "model_action_authorized": False,
+            "gpu_action_authorized": False,
+            "remote_action_authorized": False,
+            "formal_evaluation_authorized": False,
+            "formal_quality_claimed": False,
+        },
+    }
+    descriptor = {
+        "descriptor_id": _record_id("phase5-publication-scope", body),
+        **body,
+    }
+    return validate_phase5_publication_scope_descriptor(descriptor)

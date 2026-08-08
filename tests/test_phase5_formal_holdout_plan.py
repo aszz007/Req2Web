@@ -13,9 +13,12 @@ sys.path.insert(0, str(ROOT / "src"))
 
 from req2web_evaluation.phase5_formal_holdout_plan import (  # noqa: E402
     P5_01_FOUNDATION_BUNDLE_SHA256,
+    PUBLICATION_SCOPE_DESCRIPTOR_SCHEMA_VERSION,
     Phase5FormalNoActionPlan,
     build_phase5_formal_no_action_plan,
     build_phase5_formal_no_action_plan_from_json_bytes,
+    build_phase5_publication_scope_descriptor,
+    validate_phase5_publication_scope_descriptor,
 )
 from req2web_evaluation.phase5_holdout_no_action import (  # noqa: E402
     build_synthetic_phase5_no_action_bundle_from_json_bytes,
@@ -266,6 +269,77 @@ class Phase5FormalHoldoutPlanTest(unittest.TestCase):
         self.assertNotIn("gold_label", text)
         self.assertNotIn("provider_raw_response", text)
         self.assertNotIn("real_h1_content", text)
+
+
+class Phase5PublicationScopeDescriptorTest(unittest.TestCase):
+    def setUp(self) -> None:
+        self.descriptor = build_phase5_publication_scope_descriptor()
+
+    def test_scope_records_four_cases_three_conditions_and_forty_eight_calls(self) -> None:
+        self.assertEqual(
+            self.descriptor["schema_version"],
+            PUBLICATION_SCOPE_DESCRIPTOR_SCHEMA_VERSION,
+        )
+        scope = self.descriptor["publication_scope"]
+        self.assertEqual(scope["core_case_count"], 4)
+        self.assertEqual(
+            scope["condition_ids"],
+            ["none", "irrelevant_evidence", "remove_critical_role"],
+        )
+        self.assertEqual(scope["model_node_ids"], ["F1", "F2", "F3", "F4"])
+        self.assertEqual(scope["runtime_row_count"], 12)
+        self.assertEqual(scope["node_generate_call_cap"], 48)
+        self.assertEqual(
+            scope["condition_semantics_status"],
+            "ids_recorded_semantics_not_frozen",
+        )
+
+    def test_historical_full_plan_remains_unchanged(self) -> None:
+        historical = self.descriptor["historical_plan_binding"]
+        self.assertEqual(historical["core_case_count"], 12)
+        self.assertEqual(historical["reserve_case_count"], 8)
+        self.assertEqual(historical["deep_label_case_count"], 4)
+        self.assertEqual(historical["main_matrix_row_count"], 140)
+        self.assertEqual(historical["node_generate_call_cap"], 240)
+        self.assertTrue(historical["unchanged"])
+
+    def test_reserve_replaces_only_preopening_invalid_cases(self) -> None:
+        reserve = self.descriptor["reserve_policy"]
+        self.assertEqual(reserve["reserve_case_cap"], 2)
+        self.assertTrue(reserve["replacement_only"])
+        self.assertTrue(reserve["invalidity_declared_before_opening"])
+        self.assertFalse(reserve["adds_success_sample"])
+        self.assertFalse(reserve["adds_runtime_rows"])
+        self.assertFalse(reserve["adds_generate_calls"])
+
+    def test_real_content_and_every_action_gate_remain_closed(self) -> None:
+        self.assertTrue(
+            all(value is False for value in self.descriptor["sealed_content_state"].values())
+        )
+        self.assertTrue(
+            all(value is False for value in self.descriptor["action_gates"].values())
+        )
+        canonical = _canonical(self.descriptor).decode("utf-8")
+        self.assertNotIn("requirement_text", canonical)
+        self.assertNotIn("gold_label", canonical)
+        self.assertNotIn("provider_raw_response", canonical)
+
+    def test_scope_or_authority_tampering_is_rejected(self) -> None:
+        wrong_scope = copy.deepcopy(self.descriptor)
+        wrong_scope["publication_scope"]["node_generate_call_cap"] = 49
+        body = {
+            key: value for key, value in wrong_scope.items() if key != "descriptor_id"
+        }
+        wrong_scope["descriptor_id"] = _record_id("phase5-publication-scope", body)
+        with self.assertRaisesRegex(ValueError, "node_generate_call_cap drifted"):
+            validate_phase5_publication_scope_descriptor(wrong_scope)
+
+        opened = copy.deepcopy(self.descriptor)
+        opened["action_gates"]["h1_opened"] = True
+        body = {key: value for key, value in opened.items() if key != "descriptor_id"}
+        opened["descriptor_id"] = _record_id("phase5-publication-scope", body)
+        with self.assertRaisesRegex(ValueError, "must remain false"):
+            validate_phase5_publication_scope_descriptor(opened)
 
 
 if __name__ == "__main__":
