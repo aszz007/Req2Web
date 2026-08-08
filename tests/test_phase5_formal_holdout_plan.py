@@ -291,7 +291,75 @@ class Phase5PublicationScopeDescriptorTest(unittest.TestCase):
         self.assertEqual(scope["node_generate_call_cap"], 48)
         self.assertEqual(
             scope["condition_semantics_status"],
-            "ids_recorded_semantics_not_frozen",
+            "operator_semantics_frozen_payloads_pending",
+        )
+
+    def test_case_slots_are_structurally_complementary_and_selected_preoutput(self) -> None:
+        contract = self.descriptor["case_selection_contract"]
+        self.assertEqual(
+            [slot["slot_id"] for slot in contract["slots"]],
+            [
+                "information_retrieval",
+                "structured_form_transaction",
+                "media_async_processing",
+                "stateful_recovery_responsive",
+            ],
+        )
+        self.assertIn(
+            "selection_before_any_candidate_output",
+            contract["selection_rules"],
+        )
+        self.assertIn(
+            "no_selection_by_prior_model_success_or_expected_gain",
+            contract["selection_rules"],
+        )
+        self.assertIn(
+            "project_authored_english_only",
+            contract["selection_rules"],
+        )
+
+    def test_condition_operators_freeze_operations_but_not_payloads(self) -> None:
+        contract = self.descriptor["condition_operator_contract"]
+        operators = {
+            item["condition_id"]: item for item in contract["operators"]
+        }
+        self.assertEqual(
+            operators["none"]["operation"],
+            "no_evidence_intervention",
+        )
+        self.assertEqual(
+            operators["irrelevant_evidence"]["operation"],
+            "append_one_preregistered_schema_valid_irrelevant_evidence_item",
+        )
+        self.assertEqual(
+            operators["remove_critical_role"]["operation"],
+            "remove_one_preregistered_critical_evidence_role",
+        )
+        self.assertFalse(
+            operators["irrelevant_evidence"]["actual_payload_frozen"]
+        )
+        self.assertFalse(
+            operators["remove_critical_role"]["actual_role_frozen"]
+        )
+        self.assertIn(
+            "no_result_driven_operator_change",
+            contract["shared_rules"],
+        )
+
+    def test_accounting_inherits_definitions_but_not_numeric_thresholds(self) -> None:
+        contract = self.descriptor["accounting_and_stop_contract"]
+        self.assertTrue(contract["metric_definitions_frozen"])
+        self.assertFalse(contract["numeric_minimum_gain_thresholds_frozen"])
+        self.assertEqual(
+            contract["numeric_threshold_status"],
+            "pending_owner_decision",
+        )
+        self.assertTrue(contract["generate_start_consumes_call"])
+        self.assertFalse(contract["automatic_retry_allowed"])
+        self.assertFalse(contract["budget_reset_allowed"])
+        self.assertIn(
+            "result_driven_case_condition_prompt_schema_metric_or_threshold_change",
+            contract["stop_rules"],
         )
 
     def test_historical_full_plan_remains_unchanged(self) -> None:
@@ -313,9 +381,22 @@ class Phase5PublicationScopeDescriptorTest(unittest.TestCase):
         self.assertFalse(reserve["adds_generate_calls"])
 
     def test_real_content_and_every_action_gate_remain_closed(self) -> None:
+        sealed = self.descriptor["sealed_content_state"]
         self.assertTrue(
-            all(value is False for value in self.descriptor["sealed_content_state"].values())
+            all(
+                sealed[key] is False
+                for key in (
+                    "real_case_content_present",
+                    "gold_content_present",
+                    "case_identities_frozen",
+                    "condition_payloads_frozen",
+                    "critical_role_ids_frozen",
+                    "numeric_thresholds_frozen",
+                    "execution_package_frozen",
+                )
+            )
         )
+        self.assertTrue(sealed["metric_definitions_frozen"])
         self.assertTrue(
             all(value is False for value in self.descriptor["action_gates"].values())
         )
@@ -340,6 +421,22 @@ class Phase5PublicationScopeDescriptorTest(unittest.TestCase):
         opened["descriptor_id"] = _record_id("phase5-publication-scope", body)
         with self.assertRaisesRegex(ValueError, "must remain false"):
             validate_phase5_publication_scope_descriptor(opened)
+
+        operator_drift = copy.deepcopy(self.descriptor)
+        operator_drift["condition_operator_contract"]["operators"][1][
+            "item_count"
+        ] = 2
+        body = {
+            key: value
+            for key, value in operator_drift.items()
+            if key != "descriptor_id"
+        }
+        operator_drift["descriptor_id"] = _record_id(
+            "phase5-publication-scope",
+            body,
+        )
+        with self.assertRaisesRegex(ValueError, "condition-operator contract drifted"):
+            validate_phase5_publication_scope_descriptor(operator_drift)
 
 
 if __name__ == "__main__":

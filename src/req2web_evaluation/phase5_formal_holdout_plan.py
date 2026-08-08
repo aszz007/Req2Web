@@ -28,10 +28,10 @@ RESULT_INVENTORY_SCHEMA_VERSION = "req2web.phase5.formal_holdout.result_inventor
 OPENING_GATE_SCHEMA_VERSION = "req2web.phase5.formal_holdout.opening_gate.v1"
 FORMAL_REPLAY_SCHEMA_VERSION = "req2web.phase5.formal_holdout.replay.v1"
 PUBLICATION_SCOPE_DESCRIPTOR_SCHEMA_VERSION = (
-    "req2web.phase5.formal_holdout.publication_scope_descriptor.v1"
+    "req2web.phase5.formal_holdout.publication_scope_descriptor.v2"
 )
 PUBLICATION_SCOPE_DESCRIPTOR_REVISION = (
-    "req2web.phase5.publication_scope_candidate.no_action.v1"
+    "req2web.phase5.publication_scope_candidate.no_action.v2"
 )
 
 P5_01_FOUNDATION_BUNDLE_SHA256 = "72086f9984ccbe892e32218b8170cb3f5196e6390ed94bd2c5690fb9ecbc203d"
@@ -65,7 +65,7 @@ _REQUIRED_CORE_COVERAGE = frozenset(
 )
 _INTERVENTIONS = ("none", "irrelevant_evidence", "remove_critical_role")
 _PUBLICATION_CONDITION_SET_REVISION = (
-    "req2web.phase5.publication_condition_ids.not_semantically_frozen.v1"
+    "req2web.phase5.publication_condition_operators.payloads_pending.v2"
 )
 _GROUP_ORDER = {"G0": 0, "G1": 1, "G2": 2}
 _TERMINAL_RESULT_STATUSES = (
@@ -968,6 +968,147 @@ def build_phase5_formal_no_action_plan_from_json_bytes(
     return build_phase5_formal_no_action_plan(foundation, fixture)
 
 
+def _publication_case_selection_contract() -> dict[str, object]:
+    return {
+        "revision": "req2web.phase5.publication_case_selection.v1",
+        "slots": [
+            {
+                "slot_id": "information_retrieval",
+                "primary_dimension": "search_filter_list_detail",
+                "required_observables": [
+                    "query_or_filter_input",
+                    "result_set_change",
+                    "visible_result_feedback",
+                ],
+            },
+            {
+                "slot_id": "structured_form_transaction",
+                "primary_dimension": "multi_field_validation_submit_recovery",
+                "required_observables": [
+                    "field_input",
+                    "validation_feedback",
+                    "submit_or_confirm_transition",
+                ],
+            },
+            {
+                "slot_id": "media_async_processing",
+                "primary_dimension": "upload_progress_result_or_failure",
+                "required_observables": [
+                    "media_or_file_input",
+                    "processing_state",
+                    "result_or_failure_feedback",
+                ],
+            },
+            {
+                "slot_id": "stateful_recovery_responsive",
+                "primary_dimension": "multi_state_empty_permission_or_error_recovery",
+                "required_observables": [
+                    "failure_or_empty_state",
+                    "recovery_action",
+                    "responsive_or_mobile_state_change",
+                ],
+            },
+        ],
+        "selection_rules": [
+            "exactly_one_case_per_slot",
+            "at_least_two_use_cases_per_case",
+            "at_least_one_observable_state_change_per_case",
+            "at_least_one_executable_acceptance_target_per_case",
+            "full_canonical_flow_required",
+            "condition_applicability_precheck_required",
+            "project_authored_english_only",
+            "no_real_h1_or_gold",
+            "no_external_service_dependency",
+            "no_exact_or_near_duplicate_case",
+            "selection_before_any_candidate_output",
+            "no_selection_by_prior_model_success_or_expected_gain",
+        ],
+    }
+
+
+def _publication_condition_operator_contract() -> dict[str, object]:
+    return {
+        "revision": _PUBLICATION_CONDITION_SET_REVISION,
+        "status": "operator_semantics_frozen_payloads_pending",
+        "operators": [
+            {
+                "condition_id": "none",
+                "operation": "no_evidence_intervention",
+                "base_evidence_preserved": True,
+                "requirement_and_canonical_inputs_unchanged": True,
+                "prompt_runtime_and_decode_unchanged": True,
+                "actual_payload_frozen": False,
+            },
+            {
+                "condition_id": "irrelevant_evidence",
+                "operation": (
+                    "append_one_preregistered_schema_valid_irrelevant_evidence_item"
+                ),
+                "item_count": 1,
+                "serializer_position": "fixed_dedicated_intervention_slot",
+                "length_policy": "fixed_predeclared_bounded_range",
+                "base_evidence_preserved": True,
+                "requirement_and_canonical_inputs_unchanged": True,
+                "critical_evidence_changed": False,
+                "semantic_overlap_with_case_allowed": False,
+                "actual_payload_frozen": False,
+            },
+            {
+                "condition_id": "remove_critical_role",
+                "operation": "remove_one_preregistered_critical_evidence_role",
+                "removed_role_count": 1,
+                "replacement_allowed": False,
+                "criticality_basis_required": True,
+                "criticality_committed_before_candidate_output": True,
+                "missing_valid_critical_role_invalidates_case_before_opening": True,
+                "requirement_and_canonical_inputs_unchanged": True,
+                "actual_role_frozen": False,
+            },
+        ],
+        "shared_rules": [
+            "same_case_identity_across_conditions",
+            "same_prompt_model_runtime_decode_and_seed",
+            "same_nonintervened_provider_fields",
+            "deterministic_operator_application",
+            "operator_receipt_hash_and_order_required",
+            "no_result_driven_operator_change",
+            "invalid_operator_fails_closed_before_opening",
+        ],
+    }
+
+
+def _publication_accounting_and_stop_contract() -> dict[str, object]:
+    return {
+        "revision": "req2web.phase5.publication_accounting_and_stop.v1",
+        "metric_contract_schema_version": (
+            "req2web.phase5.single_owner.metric_claim_contract.v1"
+        ),
+        "metric_definitions_frozen": True,
+        "numeric_minimum_gain_thresholds_frozen": False,
+        "numeric_threshold_status": "pending_owner_decision",
+        "case_macro_first": True,
+        "criterion_statuses": ["fail", "not_supported", "pass", "unknown"],
+        "unknown_and_not_supported_retained_in_applicable_denominator": True,
+        "missing_runtime_row_status": "incomplete_experiment",
+        "generate_start_consumes_call": True,
+        "automatic_retry_allowed": False,
+        "budget_reset_allowed": False,
+        "stop_rules": [
+            "missing_runtime_row",
+            "case_condition_or_authority_identity_drift",
+            "raw_not_saved_before_parse",
+            "unauthorized_retry_or_budget_reset",
+            "unauthorized_normalization_repair_or_fallback",
+            "result_driven_case_condition_prompt_schema_metric_or_threshold_change",
+            "call_time_cost_or_storage_cap_reached",
+            "h1_or_gold_visibility_boundary_breached",
+            "objective_browser_failure_cannot_be_overridden_by_semantic_evaluator",
+            "partial_or_unknown_cannot_be_automatic_pass",
+            "nonterminal_row_cannot_support_formal_conclusion",
+        ],
+    }
+
+
 def validate_phase5_publication_scope_descriptor(
     value: object,
 ) -> dict[str, object]:
@@ -983,6 +1124,9 @@ def validate_phase5_publication_scope_descriptor(
             "phase4_exit_commit",
             "historical_plan_binding",
             "publication_scope",
+            "case_selection_contract",
+            "condition_operator_contract",
+            "accounting_and_stop_contract",
             "reserve_policy",
             "sealed_content_state",
             "action_gates",
@@ -1109,9 +1253,21 @@ def validate_phase5_publication_scope_descriptor(
         raise ValueError("publication node-call formula drifted")
     _exact_text(
         scope["condition_semantics_status"],
-        "ids_recorded_semantics_not_frozen",
+        "operator_semantics_frozen_payloads_pending",
         "publication_scope_descriptor.publication_scope.condition_semantics_status",
     )
+    if descriptor["case_selection_contract"] != _publication_case_selection_contract():
+        raise ValueError("publication case-selection contract drifted")
+    if (
+        descriptor["condition_operator_contract"]
+        != _publication_condition_operator_contract()
+    ):
+        raise ValueError("publication condition-operator contract drifted")
+    if (
+        descriptor["accounting_and_stop_contract"]
+        != _publication_accounting_and_stop_contract()
+    ):
+        raise ValueError("publication accounting/stop contract drifted")
 
     reserve = _exact(
         descriptor["reserve_policy"],
@@ -1147,14 +1303,31 @@ def validate_phase5_publication_scope_descriptor(
             "real_case_content_present",
             "gold_content_present",
             "case_identities_frozen",
-            "condition_semantics_frozen",
-            "metric_rules_frozen",
+            "condition_payloads_frozen",
+            "critical_role_ids_frozen",
+            "metric_definitions_frozen",
+            "numeric_thresholds_frozen",
             "execution_package_frozen",
         ),
         "publication_scope_descriptor.sealed_content_state",
     )
-    for key, item in sealed.items():
-        _false(item, f"publication_scope_descriptor.sealed_content_state.{key}")
+    for key in (
+        "real_case_content_present",
+        "gold_content_present",
+        "case_identities_frozen",
+        "condition_payloads_frozen",
+        "critical_role_ids_frozen",
+        "numeric_thresholds_frozen",
+        "execution_package_frozen",
+    ):
+        _false(
+            sealed[key],
+            f"publication_scope_descriptor.sealed_content_state.{key}",
+        )
+    _true(
+        sealed["metric_definitions_frozen"],
+        "publication_scope_descriptor.sealed_content_state.metric_definitions_frozen",
+    )
 
     gates = _exact(
         descriptor["action_gates"],
@@ -1207,8 +1380,13 @@ def build_phase5_publication_scope_descriptor() -> dict[str, object]:
             "model_node_count": len(_MODEL_NODES),
             "runtime_row_count": 4 * len(_INTERVENTIONS),
             "node_generate_call_cap": 4 * len(_INTERVENTIONS) * len(_MODEL_NODES),
-            "condition_semantics_status": "ids_recorded_semantics_not_frozen",
+            "condition_semantics_status": (
+                "operator_semantics_frozen_payloads_pending"
+            ),
         },
+        "case_selection_contract": _publication_case_selection_contract(),
+        "condition_operator_contract": _publication_condition_operator_contract(),
+        "accounting_and_stop_contract": _publication_accounting_and_stop_contract(),
         "reserve_policy": {
             "reserve_case_cap": 2,
             "replacement_only": True,
@@ -1221,8 +1399,10 @@ def build_phase5_publication_scope_descriptor() -> dict[str, object]:
             "real_case_content_present": False,
             "gold_content_present": False,
             "case_identities_frozen": False,
-            "condition_semantics_frozen": False,
-            "metric_rules_frozen": False,
+            "condition_payloads_frozen": False,
+            "critical_role_ids_frozen": False,
+            "metric_definitions_frozen": True,
+            "numeric_thresholds_frozen": False,
             "execution_package_frozen": False,
         },
         "action_gates": {
