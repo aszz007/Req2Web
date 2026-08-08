@@ -23,12 +23,12 @@ class Phase5SingleOwnerProtocolTest(unittest.TestCase):
     def test_identity_is_frozen(self) -> None:
         self.assertEqual(
             self.contract.sha256(),
-            "0b6168ae7a5db7a34bdbcf407fed75f2e024aaa38a97b861d29dfee5040c1fe6",
+            "75ba7c7f6922471431ce85bfdd1319e397de84239d1999294a2b900351c4ccf9",
         )
         self.assertEqual(
             self.payload["contract_id"],
             "phase5-single-owner-protocol-"
-            "ed5383ac6a09149dc41a7aa6a9f4a93dcaa56eda3ffecb29afadebf2258d09e9",
+            "60392cb753750dbe2acfd5f4b2a20ff98c7b87c7820e74039af6cee77dcba814",
         )
 
     def test_single_evaluator_limitation_is_explicit(self) -> None:

@@ -34,8 +34,8 @@ PUBLICATION_SCOPE_DESCRIPTOR_REVISION = (
     "req2web.phase5.publication_scope_candidate.no_action.v2"
 )
 
-P5_01_FOUNDATION_BUNDLE_SHA256 = "72086f9984ccbe892e32218b8170cb3f5196e6390ed94bd2c5690fb9ecbc203d"
-P5_01_FOUNDATION_BUNDLE_ID = "phase5-no-action-bundle-5acf48bdbbac1d661f596034bfdacbe3c6703a2c10c9581cce957783e1cb26df"
+P5_01_FOUNDATION_BUNDLE_SHA256 = "643b032c70b38cdfa193f4ebcb095c09306315c6c78d5263c9b01ac3f6ef66d6"
+P5_01_FOUNDATION_BUNDLE_ID = "phase5-no-action-bundle-88cc9f6d82fe30d58ac403ffa93e470456203583a4c28da53fcdfc9efe587984"
 
 _FIXTURE_ID = "phase5-formal-holdout-opaque-slots-v1"
 _FIXTURE_KIND = "synthetic_opaque_slots_only_no_real_h1"

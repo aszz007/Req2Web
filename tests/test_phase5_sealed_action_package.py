@@ -32,12 +32,12 @@ class Phase5SealedActionPackageTest(unittest.TestCase):
     def test_identity_and_budget_are_frozen(self) -> None:
         self.assertEqual(
             self.package.sha256(),
-            "48abb7b0c16aec8bb4f5d47278f937d0882552deb0c81313dfff3d38acb0c3c2",
+            "9ab19a2ce8df7bbdf6f2be022d056eab40274859eae6e153e9e9c54f8b68945a",
         )
         self.assertEqual(
             self.payload["package_id"],
             "phase5-sealed-action-package-"
-            "6f33d5949a02f51629415133b6e9bf65a42408e213a5981fb539a39727077beb",
+            "567c7d1925399005613153ae44cbc1412c76b71e7af7871645d5f9ad19acec47",
         )
         budget = self.payload["budget"]
         self.assertEqual(budget["independent_case_count"], 1)

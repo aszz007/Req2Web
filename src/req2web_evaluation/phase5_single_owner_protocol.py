@@ -15,10 +15,10 @@ from typing import Mapping, Sequence
 
 SCHEMA_VERSION = "req2web.phase5.single_owner.metric_claim_contract.v1"
 FORMAL_AUTHORITY_SHA256 = (
-    "60ea4aabd352ae5ac863a963a9963cf576ca2334354f8708a43771038861eb87"
+    "d97461ba2d6e76b954081a336c972c878829bddd195379227b27d10a147bca23"
 )
 FORMAL_PLAN_SHA256 = (
-    "3f71e4b1b7178ac3b619b0c79d8d61ad9c0ca7c81c2ce6082f47b86fa3c6cd0b"
+    "d37a0cd7a21031295380ba0ed7dcfe7977d8f05a544915c2ae625dff88b9faf3"
 )
 
 
