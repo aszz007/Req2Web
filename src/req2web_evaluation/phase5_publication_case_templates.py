@@ -62,6 +62,24 @@ def _text(value: object, name: str) -> str:
     return value
 
 
+def _project_authored_evidence_text(value: object, name: str) -> str:
+    text = _text(value, name)
+    lowered = text.lower()
+    if any(
+        marker in lowered
+        for marker in (
+            "http://",
+            "https://",
+            "file://",
+            "/root/",
+            "../",
+            "d:\\",
+        )
+    ):
+        raise ValueError(f"{name} must not contain a URI or source path")
+    return text
+
+
 def _texts(
     value: object,
     name: str,
@@ -101,8 +119,10 @@ def _validate_template(value: object, index: int) -> dict[str, object]:
             "target_device",
             "task_type",
             "use_case_outlines",
+            "constraint_outlines",
             "required_state_patterns",
             "acceptance_observables",
+            "evidence_role_outlines",
             "critical_role_recommendation",
             "criticality_basis",
             "irrelevant_evidence_outline",
@@ -137,6 +157,12 @@ def _validate_template(value: object, index: int) -> dict[str, object]:
         maximum=4,
     )
     _texts(
+        template["constraint_outlines"],
+        f"templates[{index}].constraint_outlines",
+        minimum=2,
+        maximum=6,
+    )
+    _texts(
         template["required_state_patterns"],
         f"templates[{index}].required_state_patterns",
         minimum=2,
@@ -152,6 +178,20 @@ def _validate_template(value: object, index: int) -> dict[str, object]:
     )
     if role not in _ALLOWED_ROLES:
         raise ValueError(f"templates[{index}].critical role is invalid")
+    evidence = _exact(
+        template["evidence_role_outlines"],
+        tuple(sorted(_ALLOWED_ROLES)),
+        f"templates[{index}].evidence_role_outlines",
+    )
+    for evidence_role, outline in evidence.items():
+        _project_authored_evidence_text(
+            outline,
+            f"templates[{index}].evidence_role_outlines.{evidence_role}",
+        )
+    _project_authored_evidence_text(
+        template["irrelevant_evidence_outline"],
+        f"templates[{index}].irrelevant_evidence_outline",
+    )
     _false(template["real_h1_or_gold"], f"templates[{index}].real_h1_or_gold")
     return template
 

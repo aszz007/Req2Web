@@ -56,7 +56,7 @@ class Phase5PublicationCaseTemplatesTest(unittest.TestCase):
         self.assertEqual(
             self.fixture["fixture_id"],
             "phase5-publication-templates-"
-            "44971434d7aca43afcb32094c2a09d9805a914f94a8eaaa135d6685e2a1c1415",
+            "a8f9386fa4b1dcd01d38feb8437d2a820fbe710d71d20ac161e0803a68650678",
         )
 
     def test_core_and_reserve_slots_match_the_approved_recommendation(self) -> None:
@@ -79,6 +79,22 @@ class Phase5PublicationCaseTemplatesTest(unittest.TestCase):
         )
         self.assertTrue(
             all(len(item["acceptance_observables"]) >= 2 for item in templates)
+        )
+        self.assertTrue(
+            all(len(item["constraint_outlines"]) >= 2 for item in templates)
+        )
+        self.assertTrue(
+            all(
+                set(item["evidence_role_outlines"])
+                == {
+                    "requirement",
+                    "ui_reference",
+                    "interaction_flow",
+                    "implementation",
+                    "validation",
+                }
+                for item in templates
+            )
         )
 
     def test_condition_payloads_and_real_actions_remain_unfrozen(self) -> None:
@@ -155,6 +171,22 @@ class Phase5PublicationCaseTemplatesTest(unittest.TestCase):
         _rebind_fixture_id(wrong_role)
         with self.assertRaisesRegex(ValueError, "critical role is invalid"):
             validate_phase5_publication_case_templates(wrong_role)
+
+        missing_evidence_role = copy.deepcopy(self.fixture)
+        del missing_evidence_role["templates"][0]["evidence_role_outlines"][
+            "validation"
+        ]
+        _rebind_fixture_id(missing_evidence_role)
+        with self.assertRaisesRegex(ValueError, "invalid keys"):
+            validate_phase5_publication_case_templates(missing_evidence_role)
+
+        source_path = copy.deepcopy(self.fixture)
+        source_path["templates"][0]["evidence_role_outlines"][
+            "implementation"
+        ] = "Read the implementation from https://example.invalid/reference."
+        _rebind_fixture_id(source_path)
+        with self.assertRaisesRegex(ValueError, "URI or source path"):
+            validate_phase5_publication_case_templates(source_path)
 
         opened = copy.deepcopy(self.fixture)
         opened["action_state"]["model_action_authorized"] = True
