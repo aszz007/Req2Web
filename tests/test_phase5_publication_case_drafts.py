@@ -12,8 +12,11 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "src"))
 
 from req2web_evaluation.phase5_publication_case_drafts import (  # noqa: E402
+    MATRIX_SCHEMA_VERSION,
     SCHEMA_VERSION,
+    build_phase5_publication_candidate_matrix_from_json_bytes,
     build_phase5_publication_case_drafts_from_json_bytes,
+    validate_phase5_publication_candidate_matrix,
     validate_phase5_publication_case_drafts,
 )
 from req2web_evaluation.phase5_publication_case_templates import (  # noqa: E402
@@ -25,6 +28,7 @@ from req2web_evaluation.phase5_publication_case_templates import (  # noqa: E402
 TEMPLATES = ROOT / "fixtures" / "phase5_publication_case_templates_v1.json"
 FREEZE = ROOT / "fixtures" / "phase5_publication_intervention_freeze_v1.json"
 DRAFTS = ROOT / "fixtures" / "phase5_publication_case_drafts_v1.json"
+MATRIX = ROOT / "fixtures" / "phase5_publication_candidate_matrix_v1.json"
 
 
 def _canonical(value: object) -> bytes:
@@ -55,6 +59,12 @@ class Phase5PublicationCaseDraftsTest(unittest.TestCase):
         )
         self.drafts = build_phase5_publication_case_drafts_from_json_bytes(
             DRAFTS.read_bytes(),
+            self.templates,
+            self.freeze,
+        )
+        self.matrix = build_phase5_publication_candidate_matrix_from_json_bytes(
+            MATRIX.read_bytes(),
+            self.drafts,
             self.templates,
             self.freeze,
         )
@@ -149,6 +159,60 @@ class Phase5PublicationCaseDraftsTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "must remain false"):
             validate_phase5_publication_case_drafts(
                 opened,
+                self.templates,
+                self.freeze,
+            )
+
+    def test_exact_candidate_matrix_binds_all_twelve_rows(self) -> None:
+        self.assertEqual(self.matrix["schema_version"], MATRIX_SCHEMA_VERSION)
+        self.assertEqual(
+            self.matrix["matrix_id"],
+            "phase5-publication-candidate-matrix-"
+            "8146644ed5aa50e533b21c19a82e37164e52c9e98c23a8229a050818100ff9e3",
+        )
+        self.assertEqual(self.matrix["active_core_case_count"], 4)
+        self.assertEqual(self.matrix["active_reserve_case_count"], 0)
+        self.assertEqual(self.matrix["runtime_row_count"], 12)
+        self.assertEqual(self.matrix["node_generate_call_cap"], 48)
+        self.assertEqual(
+            [row["condition_id"] for row in self.matrix["rows"][:3]],
+            ["none", "irrelevant_evidence", "remove_critical_role"],
+        )
+        self.assertEqual(
+            {row["case_ref"] for row in self.matrix["rows"]},
+            {case["case_ref"] for case in self.drafts["cases"]},
+        )
+
+    def test_candidate_matrix_binds_condition_inputs_without_execution(self) -> None:
+        for offset in range(0, len(self.matrix["rows"]), 3):
+            none, irrelevant, removed = self.matrix["rows"][offset : offset + 3]
+            case = self.drafts["cases"][offset // 3]
+            self.assertEqual(none["condition_binding"]["kind"], "none")
+            self.assertEqual(
+                irrelevant["condition_binding"]["irrelevant_evidence_sha256"],
+                case["intervention_binding"]["irrelevant_evidence_sha256"],
+            )
+            self.assertEqual(
+                removed["condition_binding"]["removed_critical_role_id"],
+                case["intervention_binding"]["critical_role_id"],
+            )
+        self.assertFalse(self.matrix["action_state"]["execution_order_frozen"])
+        self.assertTrue(
+            all(
+                value is False
+                for value in self.matrix["action_state"].values()
+            )
+        )
+
+    def test_candidate_matrix_tampering_fails_closed(self) -> None:
+        tampered = copy.deepcopy(self.matrix)
+        tampered["rows"][1]["condition_binding"][
+            "irrelevant_evidence_sha256"
+        ] = "0" * 64
+        with self.assertRaisesRegex(ValueError, "content drifted"):
+            validate_phase5_publication_candidate_matrix(
+                tampered,
+                self.drafts,
                 self.templates,
                 self.freeze,
             )

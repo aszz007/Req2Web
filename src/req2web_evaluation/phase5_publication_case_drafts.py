@@ -14,6 +14,9 @@ from req2web_generation.publication_language import contains_cjk_text
 
 
 SCHEMA_VERSION = "req2web.phase5.publication_case_drafts.v1"
+MATRIX_SCHEMA_VERSION = "req2web.phase5.publication_candidate_matrix.v1"
+_CONDITION_IDS = ("none", "irrelevant_evidence", "remove_critical_role")
+_MODEL_NODE_IDS = ("F1", "F2", "F3", "F4")
 
 
 def _canonical(value: object) -> bytes:
@@ -249,8 +252,177 @@ def build_phase5_publication_case_drafts_from_json_bytes(
     )
 
 
+def _expected_candidate_matrix_body(
+    case_drafts: dict[str, object],
+    intervention_freeze: dict[str, object],
+) -> dict[str, object]:
+    freeze_by_template = {
+        row["template_id"]: row
+        for row in intervention_freeze["rows"]
+        if row["slot_kind"] == "core"
+    }
+    rows: list[dict[str, object]] = []
+    for case in case_drafts["cases"]:
+        freeze_row = freeze_by_template[case["template_id"]]
+        for condition_id in _CONDITION_IDS:
+            if condition_id == "none":
+                condition_binding = {
+                    "kind": "none",
+                    "irrelevant_evidence_sha256": None,
+                    "removed_critical_role_id": None,
+                }
+            elif condition_id == "irrelevant_evidence":
+                condition_binding = {
+                    "kind": "append_one_frozen_irrelevant_evidence_item",
+                    "irrelevant_evidence_sha256": (
+                        freeze_row["irrelevant_evidence_sha256"]
+                    ),
+                    "removed_critical_role_id": None,
+                }
+            else:
+                condition_binding = {
+                    "kind": "remove_one_frozen_critical_role_without_replacement",
+                    "irrelevant_evidence_sha256": None,
+                    "removed_critical_role_id": freeze_row["critical_role_id"],
+                }
+            row_body = {
+                "case_ref": case["case_ref"],
+                "template_id": case["template_id"],
+                "condition_id": condition_id,
+                "condition_binding": condition_binding,
+                "model_node_ids": list(_MODEL_NODE_IDS),
+                "generate_call_cap": 4,
+                "status": "not_executed_candidate_matrix_only",
+                "terminal_status": None,
+            }
+            rows.append(
+                {
+                    "row_id": _record_id(
+                        "phase5-publication-candidate-row",
+                        row_body,
+                    ),
+                    **row_body,
+                }
+            )
+    return {
+        "schema_version": MATRIX_SCHEMA_VERSION,
+        "status": "exact_candidate_matrix_no_action",
+        "case_draft_id": case_drafts["draft_id"],
+        "template_fixture_id": case_drafts["template_fixture_id"],
+        "intervention_freeze_manifest_id": (
+            case_drafts["intervention_freeze_manifest_id"]
+        ),
+        "canonical_storage_order": "case_fixture_order_then_condition_order",
+        "execution_order_status": "not_frozen_no_action",
+        "condition_ids": list(_CONDITION_IDS),
+        "model_node_ids": list(_MODEL_NODE_IDS),
+        "active_core_case_count": 4,
+        "active_reserve_case_count": 0,
+        "condition_count": 3,
+        "runtime_row_count": 12,
+        "node_generate_call_cap": 48,
+        "rows": rows,
+        "action_state": {
+            "execution_order_frozen": False,
+            "h1_opened": False,
+            "model_action_authorized": False,
+            "gpu_or_remote_action_authorized": False,
+            "formal_evaluation_authorized": False,
+            "formal_quality_claimed": False,
+        },
+    }
+
+
+def validate_phase5_publication_candidate_matrix(
+    value: object,
+    case_drafts: object,
+    case_templates: object,
+    intervention_freeze: object,
+) -> dict[str, object]:
+    """Validate the exact 12-row candidate matrix without authorizing execution."""
+
+    drafts = validate_phase5_publication_case_drafts(
+        case_drafts,
+        case_templates,
+        intervention_freeze,
+    )
+    freeze = validate_phase5_publication_intervention_freeze(
+        intervention_freeze,
+        case_templates,
+    )
+    matrix = _exact(
+        value,
+        ("matrix_id", *_expected_candidate_matrix_body(drafts, freeze).keys()),
+        "publication candidate matrix",
+    )
+    body = {key: item for key, item in matrix.items() if key != "matrix_id"}
+    if body != _expected_candidate_matrix_body(drafts, freeze):
+        raise ValueError("publication candidate matrix content drifted")
+    if matrix["matrix_id"] != _record_id(
+        "phase5-publication-candidate-matrix",
+        body,
+    ):
+        raise ValueError("publication candidate matrix ID drifted")
+    return matrix
+
+
+def build_phase5_publication_candidate_matrix(
+    case_drafts: object,
+    case_templates: object,
+    intervention_freeze: object,
+) -> dict[str, object]:
+    """Build the exact 12-row no-action matrix from validated active drafts."""
+
+    drafts = validate_phase5_publication_case_drafts(
+        case_drafts,
+        case_templates,
+        intervention_freeze,
+    )
+    freeze = validate_phase5_publication_intervention_freeze(
+        intervention_freeze,
+        case_templates,
+    )
+    body = _expected_candidate_matrix_body(drafts, freeze)
+    matrix = {
+        "matrix_id": _record_id("phase5-publication-candidate-matrix", body),
+        **body,
+    }
+    return validate_phase5_publication_candidate_matrix(
+        matrix,
+        drafts,
+        case_templates,
+        freeze,
+    )
+
+
+def build_phase5_publication_candidate_matrix_from_json_bytes(
+    value: bytes,
+    case_drafts: object,
+    case_templates: object,
+    intervention_freeze: object,
+) -> dict[str, object]:
+    """Parse and validate the exact candidate matrix from canonical JSON bytes."""
+
+    if not isinstance(value, bytes) or not value:
+        raise ValueError("publication candidate-matrix JSON must be non-empty bytes")
+    try:
+        parsed = json.loads(value.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise ValueError("publication candidate-matrix JSON is invalid") from exc
+    return validate_phase5_publication_candidate_matrix(
+        parsed,
+        case_drafts,
+        case_templates,
+        intervention_freeze,
+    )
+
+
 __all__ = [
+    "MATRIX_SCHEMA_VERSION",
     "SCHEMA_VERSION",
+    "build_phase5_publication_candidate_matrix",
+    "build_phase5_publication_candidate_matrix_from_json_bytes",
     "build_phase5_publication_case_drafts_from_json_bytes",
+    "validate_phase5_publication_candidate_matrix",
     "validate_phase5_publication_case_drafts",
 ]
