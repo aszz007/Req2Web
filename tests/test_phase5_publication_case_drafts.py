@@ -168,7 +168,7 @@ class Phase5PublicationCaseDraftsTest(unittest.TestCase):
         self.assertEqual(
             self.matrix["matrix_id"],
             "phase5-publication-candidate-matrix-"
-            "8146644ed5aa50e533b21c19a82e37164e52c9e98c23a8229a050818100ff9e3",
+            "2d47d0466951fa2202b8bdcf6c2af4edf117c993b1d5a233c6bc3c1b8178a4a2",
         )
         self.assertEqual(self.matrix["active_core_case_count"], 4)
         self.assertEqual(self.matrix["active_reserve_case_count"], 0)
@@ -181,6 +181,22 @@ class Phase5PublicationCaseDraftsTest(unittest.TestCase):
         self.assertEqual(
             {row["case_ref"] for row in self.matrix["rows"]},
             {case["case_ref"] for case in self.drafts["cases"]},
+        )
+        self.assertEqual(
+            self.matrix["execution_order_algorithm"],
+            "sha256_seeded_row_permutation_v1",
+        )
+        self.assertEqual(
+            self.matrix["execution_order_seed"],
+            "phase5-publication-execution-order-v1",
+        )
+        self.assertEqual(
+            self.matrix["execution_order_sha256"],
+            "abf2bf189d05bdb48aa7d1d57e23a8e06499553bc19bd03e329abb5a7e6833de",
+        )
+        self.assertEqual(
+            set(self.matrix["execution_order"]),
+            {row["row_id"] for row in self.matrix["rows"]},
         )
 
     def test_candidate_matrix_binds_condition_inputs_without_execution(self) -> None:
@@ -196,12 +212,22 @@ class Phase5PublicationCaseDraftsTest(unittest.TestCase):
                 removed["condition_binding"]["removed_critical_role_id"],
                 case["intervention_binding"]["critical_role_id"],
             )
-        self.assertFalse(self.matrix["action_state"]["execution_order_frozen"])
+        self.assertTrue(self.matrix["action_state"]["execution_order_frozen"])
         self.assertTrue(
             all(
                 value is False
-                for value in self.matrix["action_state"].values()
+                for key, value in self.matrix["action_state"].items()
+                if key != "execution_order_frozen"
             )
+        )
+        self.assertEqual(
+            self.matrix["worker_policy"],
+            {
+                "isolation_scope": "one_worker_per_runtime_row",
+                "model_loads_per_worker": 1,
+                "node_order": ["F1", "F2", "F3", "F4"],
+                "automatic_retry_allowed": False,
+            },
         )
 
     def test_candidate_matrix_tampering_fails_closed(self) -> None:

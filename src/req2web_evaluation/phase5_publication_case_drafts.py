@@ -17,6 +17,7 @@ SCHEMA_VERSION = "req2web.phase5.publication_case_drafts.v1"
 MATRIX_SCHEMA_VERSION = "req2web.phase5.publication_candidate_matrix.v1"
 _CONDITION_IDS = ("none", "irrelevant_evidence", "remove_critical_role")
 _MODEL_NODE_IDS = ("F1", "F2", "F3", "F4")
+_EXECUTION_ORDER_SEED = "phase5-publication-execution-order-v1"
 
 
 def _canonical(value: object) -> bytes:
@@ -304,6 +305,14 @@ def _expected_candidate_matrix_body(
                     **row_body,
                 }
             )
+    row_ids = [row["row_id"] for row in rows]
+    execution_order = sorted(
+        row_ids,
+        key=lambda row_id: (
+            sha256(f"{_EXECUTION_ORDER_SEED}:{row_id}".encode("utf-8")).hexdigest(),
+            row_id,
+        ),
+    )
     return {
         "schema_version": MATRIX_SCHEMA_VERSION,
         "status": "exact_candidate_matrix_no_action",
@@ -313,7 +322,17 @@ def _expected_candidate_matrix_body(
             case_drafts["intervention_freeze_manifest_id"]
         ),
         "canonical_storage_order": "case_fixture_order_then_condition_order",
-        "execution_order_status": "not_frozen_no_action",
+        "execution_order_status": "frozen_no_action",
+        "execution_order_algorithm": "sha256_seeded_row_permutation_v1",
+        "execution_order_seed": _EXECUTION_ORDER_SEED,
+        "execution_order": execution_order,
+        "execution_order_sha256": sha256(_canonical(execution_order)).hexdigest(),
+        "worker_policy": {
+            "isolation_scope": "one_worker_per_runtime_row",
+            "model_loads_per_worker": 1,
+            "node_order": list(_MODEL_NODE_IDS),
+            "automatic_retry_allowed": False,
+        },
         "condition_ids": list(_CONDITION_IDS),
         "model_node_ids": list(_MODEL_NODE_IDS),
         "active_core_case_count": 4,
@@ -323,7 +342,7 @@ def _expected_candidate_matrix_body(
         "node_generate_call_cap": 48,
         "rows": rows,
         "action_state": {
-            "execution_order_frozen": False,
+            "execution_order_frozen": True,
             "h1_opened": False,
             "model_action_authorized": False,
             "gpu_or_remote_action_authorized": False,
