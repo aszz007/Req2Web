@@ -1081,13 +1081,19 @@ def _publication_condition_operator_contract() -> dict[str, object]:
 
 def _publication_accounting_and_stop_contract() -> dict[str, object]:
     return {
-        "revision": "req2web.phase5.publication_accounting_and_stop.v1",
+        "revision": "req2web.phase5.publication_accounting_and_stop.v2",
         "metric_contract_schema_version": (
             "req2web.phase5.single_owner.metric_claim_contract.v1"
         ),
         "metric_definitions_frozen": True,
-        "numeric_minimum_gain_thresholds_frozen": False,
-        "numeric_threshold_status": "pending_owner_decision",
+        "numeric_minimum_gain_thresholds_frozen": True,
+        "numeric_minimum_gain_thresholds": [],
+        "numeric_threshold_status": (
+            "owner_approved_not_used_descriptive_case_level_reporting"
+        ),
+        "reporting_mode": "descriptive_case_level_all_runtime_rows",
+        "aggregate_pass_score_defined": False,
+        "formal_result_may_define_or_tune_threshold": False,
         "case_macro_first": True,
         "criterion_statuses": ["fail", "not_supported", "pass", "unknown"],
         "unknown_and_not_supported_retained_in_applicable_denominator": True,
@@ -1319,7 +1325,6 @@ def validate_phase5_publication_scope_descriptor(
         "case_identities_frozen",
         "condition_payloads_frozen",
         "critical_role_ids_frozen",
-        "numeric_thresholds_frozen",
         "execution_package_frozen",
     ):
         _false(
@@ -1329,6 +1334,10 @@ def validate_phase5_publication_scope_descriptor(
     _true(
         sealed["metric_definitions_frozen"],
         "publication_scope_descriptor.sealed_content_state.metric_definitions_frozen",
+    )
+    _true(
+        sealed["numeric_thresholds_frozen"],
+        "publication_scope_descriptor.sealed_content_state.numeric_thresholds_frozen",
     )
 
     gates = _exact(
@@ -1404,7 +1413,7 @@ def build_phase5_publication_scope_descriptor() -> dict[str, object]:
             "condition_payloads_frozen": False,
             "critical_role_ids_frozen": False,
             "metric_definitions_frozen": True,
-            "numeric_thresholds_frozen": False,
+            "numeric_thresholds_frozen": True,
             "execution_package_frozen": False,
         },
         "action_gates": {

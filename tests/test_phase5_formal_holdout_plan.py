@@ -346,14 +346,21 @@ class Phase5PublicationScopeDescriptorTest(unittest.TestCase):
             contract["shared_rules"],
         )
 
-    def test_accounting_inherits_definitions_but_not_numeric_thresholds(self) -> None:
+    def test_accounting_uses_owner_approved_descriptive_reporting(self) -> None:
         contract = self.descriptor["accounting_and_stop_contract"]
         self.assertTrue(contract["metric_definitions_frozen"])
-        self.assertFalse(contract["numeric_minimum_gain_thresholds_frozen"])
+        self.assertTrue(contract["numeric_minimum_gain_thresholds_frozen"])
+        self.assertEqual(contract["numeric_minimum_gain_thresholds"], [])
         self.assertEqual(
             contract["numeric_threshold_status"],
-            "pending_owner_decision",
+            "owner_approved_not_used_descriptive_case_level_reporting",
         )
+        self.assertEqual(
+            contract["reporting_mode"],
+            "descriptive_case_level_all_runtime_rows",
+        )
+        self.assertFalse(contract["aggregate_pass_score_defined"])
+        self.assertFalse(contract["formal_result_may_define_or_tune_threshold"])
         self.assertTrue(contract["generate_start_consumes_call"])
         self.assertFalse(contract["automatic_retry_allowed"])
         self.assertFalse(contract["budget_reset_allowed"])
@@ -391,12 +398,12 @@ class Phase5PublicationScopeDescriptorTest(unittest.TestCase):
                     "case_identities_frozen",
                     "condition_payloads_frozen",
                     "critical_role_ids_frozen",
-                    "numeric_thresholds_frozen",
                     "execution_package_frozen",
                 )
             )
         )
         self.assertTrue(sealed["metric_definitions_frozen"])
+        self.assertTrue(sealed["numeric_thresholds_frozen"])
         self.assertTrue(
             all(value is False for value in self.descriptor["action_gates"].values())
         )
