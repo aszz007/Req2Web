@@ -238,11 +238,11 @@ class Phase4RemoteFreshIntegratedProfileTests(unittest.TestCase):
             f3_full_direct["exact_output_contract"]["invariants"],
         )
         self.assertIn(
-            "let N be the number of supplied F2 states and emit exactly 2*N-1 interactions",
+            "emit the exact number of rows in required_interaction_plan; a non-final state contributes two rows when it has distinct same-state and forward triggers, otherwise it contributes its single forward row, and the final state contributes one same-state row",
             f3_full_direct["exact_output_contract"]["invariants"],
         )
         self.assertIn(
-            "use this exact interaction order: same-state work for state 0, forward transition state 0 to state 1, same-state work for state 1, then continue alternating until same-state work for the final state",
+            "preserve required_interaction_plan order: optional same-state work for a non-final state precedes its forward transition, and final-state same-state work is last",
             f3_full_direct["exact_output_contract"]["invariants"],
         )
         f3_input = json.loads(f3_full_input_bytes)
@@ -325,6 +325,44 @@ class Phase4RemoteFreshIntegratedProfileTests(unittest.TestCase):
                 )
                 for index, use_case in enumerate(f4_use_cases)
             ],
+        )
+
+    def test_f4_target_plan_filters_states_through_actual_f3_targets(self) -> None:
+        classes = remote._expected_input_classes("F4")
+        projection = {name: {} for name in classes}
+        projection["canonical_b_use_case_view"] = {
+            "use_cases": [
+                {"use_case_id": "UC-01"},
+                {"use_case_id": "UC-02"},
+            ]
+        }
+        projection["f2_registered_state_visibility_view"] = {
+            "states": [
+                {"stable_id": "state-initial"},
+                {"stable_id": "state-result"},
+            ]
+        }
+        projection["f3_registered_interaction_view"] = {
+            "interactions": [
+                {"target_state_stable_id": "state-result"},
+            ]
+        }
+        input_bytes = remote._canonical_bytes(
+            {
+                "schema_version": remote.P4_05_INPUT_SCHEMA_VERSION,
+                "node_id": "F4",
+                "case_id": "case-target-filter",
+                "request_id": "request-target-filter",
+                "logical_input_classes": list(classes),
+                "projection": projection,
+            }
+        )
+
+        plan = remote._f4_required_acceptance_target_plan(input_bytes)
+
+        self.assertEqual(
+            [row["state_ref"]["ref_id"] for row in plan],
+            ["state-result", "state-result"],
         )
 
     def test_f4_direct_acceptance_receipt_is_replayable_and_non_rewriting(

@@ -12,9 +12,16 @@ import tarfile
 from typing import Literal, Mapping, Sequence, TypedDict
 
 
-SCHEMA_VERSION = "req2web.phase5.result_return_manifest.v2"
+SCHEMA_VERSION = "req2web.phase5.result_return_manifest.v3"
+PREVIOUS_SCHEMA_VERSION = "req2web.phase5.result_return_manifest.v2"
 LEGACY_SCHEMA_VERSION = "req2web.phase5.result_return_manifest.v1"
 SOURCE_BINDING_SCHEMA_VERSION = "req2web.phase5.result_return.source_binding.v1"
+PUBLICATION_SOURCE_BINDING_SCHEMA_VERSION = (
+    "req2web.phase5.result_return.source_binding.v2"
+)
+PUBLICATION_SUMMARY_SCHEMA_VERSION = (
+    "req2web.phase5.publication_action.v1.summary"
+)
 SEMANTIC_SUMMARY_SCHEMA_VERSIONS = frozenset(
     {
         "req2web.phase5.semantic_run_summary.v1",
@@ -37,7 +44,21 @@ class SemanticResultSourceBinding(TypedDict):
     semantic_summary_schema_version: str
 
 
-ResultSourceBinding = FormalResultSourceBinding | SemanticResultSourceBinding
+class PublicationActionResultSourceBinding(TypedDict):
+    schema_version: str
+    source_kind: Literal["publication_action"]
+    run_id: str
+    package_sha256: str
+    source_action_commit: str
+    candidate_matrix_id: str
+    publication_summary_schema_version: str
+
+
+ResultSourceBinding = (
+    FormalResultSourceBinding
+    | SemanticResultSourceBinding
+    | PublicationActionResultSourceBinding
+)
 
 
 def _canonical(value: object) -> bytes:
@@ -143,6 +164,57 @@ def _validate_source_binding(value: object) -> dict[str, object]:
         ):
             raise ValueError("semantic result return summary schema is invalid")
         return binding
+    if source_kind == "publication_action":
+        binding = _exact(
+            value,
+            (
+                "schema_version",
+                "source_kind",
+                "run_id",
+                "package_sha256",
+                "source_action_commit",
+                "candidate_matrix_id",
+                "publication_summary_schema_version",
+            ),
+            "publication result return source binding",
+        )
+        if (
+            binding["schema_version"]
+            != PUBLICATION_SOURCE_BINDING_SCHEMA_VERSION
+        ):
+            raise ValueError(
+                "publication result return source binding schema drifted"
+            )
+        if not isinstance(binding["run_id"], str) or not binding["run_id"]:
+            raise ValueError("publication result return run ID is invalid")
+        _digest(
+            binding["package_sha256"],
+            "publication result return package hash",
+        )
+        commit = binding["source_action_commit"]
+        if (
+            not isinstance(commit, str)
+            or len(commit) != 40
+            or any(character not in "0123456789abcdef" for character in commit)
+        ):
+            raise ValueError(
+                "publication result return source commit is invalid"
+            )
+        if (
+            not isinstance(binding["candidate_matrix_id"], str)
+            or not binding["candidate_matrix_id"]
+        ):
+            raise ValueError(
+                "publication result return candidate matrix ID is invalid"
+            )
+        if (
+            binding["publication_summary_schema_version"]
+            != PUBLICATION_SUMMARY_SCHEMA_VERSION
+        ):
+            raise ValueError(
+                "publication result return summary schema is invalid"
+            )
+        return binding
     raise ValueError("result return source kind is unsupported")
 
 
@@ -171,7 +243,7 @@ def _validate_payload(value: object) -> dict[str, object]:
             ),
             "legacy result return manifest",
         )
-    elif schema_version == SCHEMA_VERSION:
+    elif schema_version in {PREVIOUS_SCHEMA_VERSION, SCHEMA_VERSION}:
         manifest = _exact(
             value,
             (
@@ -350,6 +422,52 @@ def _source_inventory(result_root: Path) -> list[tuple[str, bytes]]:
 
 
 def _source_binding_from_summary(summary: Mapping[str, object]) -> ResultSourceBinding:
+    if summary.get("schema_version") == PUBLICATION_SUMMARY_SCHEMA_VERSION:
+        for key in (
+            "formal_evaluation",
+            "formal_quality_claimed",
+            "h1_opened",
+            "gold_content_present",
+        ):
+            if summary.get(key) is not False:
+                raise ValueError(
+                    f"publication result return summary {key} must be false"
+                )
+        run_id = summary.get("run_id")
+        package_sha256 = summary.get("package_sha256")
+        source_action_commit = summary.get("source_action_commit")
+        candidate_matrix_id = summary.get("candidate_matrix_id")
+        if not isinstance(run_id, str) or not run_id:
+            raise ValueError("publication result return run ID is invalid")
+        _digest(
+            package_sha256,
+            "publication result return package hash",
+        )
+        if (
+            not isinstance(source_action_commit, str)
+            or len(source_action_commit) != 40
+            or any(
+                character not in "0123456789abcdef"
+                for character in source_action_commit
+            )
+        ):
+            raise ValueError("publication result return source commit is invalid")
+        if not isinstance(candidate_matrix_id, str) or not candidate_matrix_id:
+            raise ValueError(
+                "publication result return candidate matrix ID is invalid"
+            )
+        binding: PublicationActionResultSourceBinding = {
+            "schema_version": PUBLICATION_SOURCE_BINDING_SCHEMA_VERSION,
+            "source_kind": "publication_action",
+            "run_id": run_id,
+            "package_sha256": package_sha256,
+            "source_action_commit": source_action_commit,
+            "candidate_matrix_id": candidate_matrix_id,
+            "publication_summary_schema_version": (
+                PUBLICATION_SUMMARY_SCHEMA_VERSION
+            ),
+        }
+        return binding
     if "run_id" in summary or "package_sha256" in summary:
         run_id = summary.get("run_id")
         package_sha256 = summary.get("package_sha256")

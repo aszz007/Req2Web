@@ -18,6 +18,7 @@ from req2web_orchestration.phase4_graph import (
 from req2web_runtime import phase4_remote_qwen_fresh_integrated as fresh
 from req2web_runtime.phase5_publication_action import (
     IRRELEVANT_EVIDENCE_ROLE,
+    Phase5PublicationActionError,
     TOTAL_GENERATE_CALL_CAP,
     build_phase5_provider_evidence_projection,
     build_phase5_publication_baseline_documents,
@@ -25,6 +26,7 @@ from req2web_runtime.phase5_publication_action import (
     load_phase5_publication_fixtures,
     phase5_publication_fixture_blob_ids,
     run_phase5_publication_action,
+    validate_phase5_publication_run_summary,
     write_phase5_publication_baseline_index,
 )
 
@@ -387,6 +389,17 @@ class Phase5PublicationActionTests(unittest.TestCase):
         self.assertEqual(summary["completed_runtime_row_count"], 12)
         self.assertEqual(summary["aggregate"]["total_generate_started_count"], 48)
         self.assertEqual(summary["status"], "completed_descriptive_results")
+        self.assertEqual(
+            validate_phase5_publication_run_summary(summary),
+            summary,
+        )
+        tampered = copy.deepcopy(summary)
+        tampered["aggregate"]["total_generate_started_count"] = 47
+        with self.assertRaisesRegex(
+            Phase5PublicationActionError,
+            "aggregate drifted",
+        ):
+            validate_phase5_publication_run_summary(tampered)
         self.assertIs(preflight["all_cases_passed"], True)
         self.assertEqual(preflight["case_count"], 4)
         self.assertEqual(preflight["generate_started_count"], 0)

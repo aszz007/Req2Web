@@ -108,6 +108,199 @@ def _repository_head(repository_root: Path) -> str:
     return head
 
 
+def validate_phase5_publication_run_summary(
+    value: object,
+) -> dict[str, object]:
+    """Replay the terminal publication summary without model or filesystem action."""
+
+    expected_keys = {
+        "schema_version",
+        "run_id",
+        "package_sha256",
+        "status",
+        "source_action_commit",
+        "candidate_matrix_id",
+        "execution_order_sha256",
+        "planned_runtime_row_count",
+        "completed_runtime_row_count",
+        "node_generate_call_cap",
+        "aggregate",
+        "baseline_g0_preflight_identity",
+        "rows",
+        "infrastructure_failure",
+        "raw_first",
+        "automatic_retry",
+        "numeric_gain_thresholds_used",
+        "aggregate_pass_score_computed",
+        "reporting_scope",
+        "h1_opened",
+        "gold_content_present",
+        "formal_evaluation",
+        "formal_quality_claimed",
+        "training",
+        "lora",
+        "summary_identity",
+    }
+    if not isinstance(value, Mapping) or set(value) != expected_keys:
+        raise Phase5PublicationActionError(
+            "publication run summary keys drifted"
+        )
+    summary = copy.deepcopy(dict(value))
+    if summary["schema_version"] != RUN_SUMMARY_SCHEMA_VERSION:
+        raise Phase5PublicationActionError(
+            "publication run summary schema drifted"
+        )
+    if not isinstance(summary["run_id"], str) or not summary["run_id"]:
+        raise Phase5PublicationActionError("publication run ID is invalid")
+    for key in ("package_sha256", "execution_order_sha256"):
+        digest = summary[key]
+        if (
+            not isinstance(digest, str)
+            or len(digest) != 64
+            or any(character not in "0123456789abcdef" for character in digest)
+        ):
+            raise Phase5PublicationActionError(
+                f"publication summary {key} is invalid"
+            )
+    _validate_commit(
+        summary["source_action_commit"],
+        "publication summary source commit",
+    )
+    if (
+        not isinstance(summary["candidate_matrix_id"], str)
+        or not summary["candidate_matrix_id"]
+    ):
+        raise Phase5PublicationActionError(
+            "publication summary candidate matrix ID is invalid"
+        )
+    if (
+        summary["planned_runtime_row_count"] != 12
+        or summary["node_generate_call_cap"] != TOTAL_GENERATE_CALL_CAP
+    ):
+        raise Phase5PublicationActionError(
+            "publication summary fixed limits drifted"
+        )
+    rows = summary["rows"]
+    if not isinstance(rows, list) or len(rows) > 12:
+        raise Phase5PublicationActionError("publication summary rows are invalid")
+    validated_rows: list[dict[str, object]] = []
+    for expected_index, raw_row in enumerate(rows, start=1):
+        row_keys = {
+            "schema_version",
+            "execution_index",
+            "row_id",
+            "case_ref",
+            "condition_id",
+            "provider_visible_projection_identity",
+            "shared_case_upstream_identity",
+            "shared_flow_summary",
+            "row_summary_identity",
+        }
+        if not isinstance(raw_row, Mapping) or set(raw_row) != row_keys:
+            raise Phase5PublicationActionError(
+                "publication row summary keys drifted"
+            )
+        row = copy.deepcopy(dict(raw_row))
+        if (
+            row["schema_version"] != ROW_SUMMARY_SCHEMA_VERSION
+            or row["execution_index"] != expected_index
+            or not isinstance(row["row_id"], str)
+            or not row["row_id"]
+            or not isinstance(row["case_ref"], str)
+            or not row["case_ref"]
+            or not isinstance(row["condition_id"], str)
+            or not row["condition_id"]
+            or not isinstance(row["shared_flow_summary"], Mapping)
+        ):
+            raise Phase5PublicationActionError(
+                "publication row summary binding drifted"
+            )
+        row_body = {
+            key: row[key]
+            for key in row
+            if key != "row_summary_identity"
+        }
+        if _canonical(row["row_summary_identity"]) != _canonical(
+            _fresh._identity(
+                row_body,
+                revision=ROW_SUMMARY_SCHEMA_VERSION,
+            )
+        ):
+            raise Phase5PublicationActionError(
+                "publication row summary identity drifted"
+            )
+        validated_rows.append(row)
+    if summary["completed_runtime_row_count"] != len(validated_rows):
+        raise Phase5PublicationActionError(
+            "publication completed row count drifted"
+        )
+    shared_summaries = [
+        dict(row["shared_flow_summary"])
+        for row in validated_rows
+    ]
+    try:
+        expected_aggregate = _aggregate(shared_summaries)
+    except (KeyError, TypeError, ValueError) as exc:
+        raise Phase5PublicationActionError(
+            "publication shared flow summary is invalid"
+        ) from exc
+    if _canonical(summary["aggregate"]) != _canonical(expected_aggregate):
+        raise Phase5PublicationActionError(
+            "publication aggregate drifted from row summaries"
+        )
+    if expected_aggregate["total_generate_started_count"] > TOTAL_GENERATE_CALL_CAP:
+        raise Phase5PublicationActionError(
+            "publication aggregate generate-call cap was exceeded"
+        )
+    expected_status = (
+        "completed_descriptive_results"
+        if len(validated_rows) == 12
+        and summary["infrastructure_failure"] is None
+        else "incomplete_experiment"
+    )
+    if summary["status"] != expected_status:
+        raise Phase5PublicationActionError(
+            "publication terminal status drifted"
+        )
+    if (
+        summary["raw_first"] is not True
+        or summary["automatic_retry"] is not False
+        or summary["numeric_gain_thresholds_used"] is not False
+        or summary["aggregate_pass_score_computed"] is not False
+        or summary["reporting_scope"] != "descriptive_case_level_only"
+    ):
+        raise Phase5PublicationActionError(
+            "publication reporting or retry boundary drifted"
+        )
+    for key in (
+        "h1_opened",
+        "gold_content_present",
+        "formal_evaluation",
+        "formal_quality_claimed",
+        "training",
+        "lora",
+    ):
+        if summary[key] is not False:
+            raise Phase5PublicationActionError(
+                f"publication summary {key} must be false"
+            )
+    summary_body = {
+        key: summary[key]
+        for key in summary
+        if key != "summary_identity"
+    }
+    if _canonical(summary["summary_identity"]) != _canonical(
+        _fresh._identity(
+            summary_body,
+            revision=RUN_SUMMARY_SCHEMA_VERSION,
+        )
+    ):
+        raise Phase5PublicationActionError(
+            "publication run summary identity drifted"
+        )
+    return summary
+
+
 def phase5_publication_fixture_blob_ids(
     repository_root: Path,
     source_action_commit: str,
@@ -1081,8 +1274,12 @@ def run_phase5_publication_action(
             revision=RUN_SUMMARY_SCHEMA_VERSION,
         ),
     }
-    _fresh._write_fsync(result_root / "run_summary.json", _canonical(summary))
-    return summary
+    validated_summary = validate_phase5_publication_run_summary(summary)
+    _fresh._write_fsync(
+        result_root / "run_summary.json",
+        _canonical(validated_summary),
+    )
+    return validated_summary
 
 
 __all__ = [
@@ -1102,6 +1299,7 @@ __all__ = [
     "load_phase5_publication_fixtures",
     "phase5_publication_fixture_blob_ids",
     "run_phase5_publication_action",
+    "validate_phase5_publication_run_summary",
     "validate_phase5_publication_owner_action_receipt",
     "write_phase5_publication_baseline_index",
 ]

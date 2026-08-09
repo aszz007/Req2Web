@@ -319,6 +319,110 @@ class Phase4PromptAuthorityTest(unittest.TestCase):
                 [plan[index + 1]["required_trigger_component_local_id"]],
             )
 
+    def test_shared_f3_plan_uses_one_forward_row_for_one_visible_non_final_state(
+        self,
+    ) -> None:
+        plan = build_canonical_f3_interaction_plan(
+            f1_registered_structure_view={
+                "components": [
+                    {
+                        "local_id": "advance_action",
+                        "component_type": "action_button",
+                        "label": "Continue",
+                        "purpose": "Advance to the result state.",
+                    },
+                    {
+                        "local_id": "result_summary",
+                        "component_type": "summary",
+                        "label": "Result Summary",
+                        "purpose": "Show the completed result.",
+                    },
+                ]
+            },
+            f2_registered_state_visibility_view={
+                "states": [
+                    {
+                        "local_id": "state-working",
+                        "name": "Working",
+                        "description": "Continue the current work.",
+                        "visible_component_local_ids": ["advance_action"],
+                    },
+                    {
+                        "local_id": "state-result",
+                        "name": "Result",
+                        "description": "Review the completed result.",
+                        "visible_component_local_ids": ["result_summary"],
+                    },
+                ]
+            },
+        )
+
+        self.assertEqual(
+            [
+                (
+                    row["transition_kind"],
+                    row["source_state_local_id"],
+                    row["target_state_local_id"],
+                    row["required_trigger_component_local_id"],
+                )
+                for row in plan
+            ],
+            [
+                (
+                    "forward_transition",
+                    "state-working",
+                    "state-result",
+                    "advance_action",
+                ),
+                (
+                    "same_state_work",
+                    "state-result",
+                    "state-result",
+                    "result_summary",
+                ),
+            ],
+        )
+        self.assertEqual(
+            len(
+                {
+                    (
+                        row["source_state_local_id"],
+                        row["required_trigger_component_local_id"],
+                    )
+                    for row in plan
+                }
+            ),
+            len(plan),
+        )
+
+    def test_shared_f3_plan_still_rejects_zero_visible_components(self) -> None:
+        with self.assertRaisesRegex(
+            PromptAuthorityError,
+            "visibility is invalid",
+        ):
+            build_canonical_f3_interaction_plan(
+                f1_registered_structure_view={
+                    "components": [
+                        {
+                            "local_id": "advance_action",
+                            "component_type": "action_button",
+                            "label": "Continue",
+                            "purpose": "Advance the workflow.",
+                        }
+                    ]
+                },
+                f2_registered_state_visibility_view={
+                    "states": [
+                        {
+                            "local_id": "state-empty",
+                            "name": "Empty",
+                            "description": "No visible controls are available.",
+                            "visible_component_local_ids": [],
+                        }
+                    ]
+                },
+            )
+
     def test_shared_f3_plan_does_not_treat_active_validation_as_error(
         self,
     ) -> None:

@@ -16,7 +16,7 @@ from typing import Mapping
 PROMPT_AUTHORITY_SCHEMA_VERSION = "req2web.agent.f1_f4_prompt_authority.v1"
 PROMPT_SCHEMA_VERSION = "req2web.agent.f1_f4_prompt.v1"
 PROMPT_AUTHORITY_REVISION = (
-    "f3_f4_explicit_actual_state_plan_a07a_direct_english_v13"
+    "f3_f4_explicit_actual_state_plan_a07a_direct_english_v14"
 )
 REGISTRY_REVISION = "req2web.phase4.registry.p4_02a.v1"
 NODE_ORDER = ("F1", "F2", "F3", "F4")
@@ -132,19 +132,21 @@ def _base_output_contracts() -> dict[str, dict[str, object]]:
                 "source_state_local_id and target_state_local_id name F2 state local IDs supplied in this input",
                 "treat the first row in the supplied F2 states array as the initial workflow state; do not require its name to be the literal word initial",
                 "follow canonical B use-case order and create deterministic state progressions from the initial state",
-                "for every supplied F2 state, include at least one same-state interaction that performs in-state work so that state is a non-empty acceptance target",
+                "for every final F2 state, include one same-state interaction that performs in-state work so that state is a non-empty acceptance target",
+                "for a non-final F2 state with at least two visible components, include one same-state interaction and one adjacent forward transition with distinct triggers",
+                "for a non-final F2 state with exactly one visible component, emit only the adjacent forward transition so the source-state trigger remains unambiguous",
                 "for every adjacent pair in supplied F2 state order, include at least one forward transition from the earlier state to the later state",
                 "every interaction trigger component must be visible in its source state's visible_component_local_ids",
                 "same-state actions are allowed, but cannot replace the required forward transitions toward later workflow states",
                 "avoid backward transitions and avoid multiple equivalent forward paths for the same workflow step",
                 "do not add or fabricate use-case reference fields",
-                "let N be the number of supplied F2 states and emit exactly 2*N-1 interactions",
-                "use this exact interaction order: same-state work for state 0, forward transition state 0 to state 1, same-state work for state 1, then continue alternating until same-state work for the final state",
+                "emit the exact number of rows in required_interaction_plan; a non-final state contributes two rows when it has distinct same-state and forward triggers, otherwise it contributes its single forward row, and the final state contributes one same-state row",
+                "preserve required_interaction_plan order: optional same-state work for a non-final state precedes its forward transition, and final-state same-state work is last",
                 "every same-state interaction must use the same supplied state local ID for source_state_local_id and target_state_local_id",
                 "every forward transition must connect one supplied state directly to the next supplied state in array order; never skip a state",
                 "choose each trigger_component_local_id only from the source state's visible_component_local_ids; never use a component that is visible only in the target state",
-                "within one source state, each trigger_component_local_id may appear in at most one interaction; the same-state work and forward transition from that state must use different trigger components",
-                "the initial state's same-state interaction performs the first canonical use case's in-state work, and each later state's same-state interaction performs that state's main work or validation",
+                "within one source state, each trigger_component_local_id may appear in at most one interaction; whenever both same-state work and a forward transition exist, they must use different trigger components",
+                "when a state has a same-state interaction, it performs that state's main work or validation; a one-visible non-final state advances through its sole unambiguous forward interaction instead",
             ],
         },
         "F4": {
@@ -588,12 +590,7 @@ def build_canonical_f3_interaction_plan(
             if state_index + 1 < len(states)
             else None
         )
-        forward_trigger: str | None = None
         if next_state is not None:
-            if len(visible) < 2:
-                raise PromptAuthorityError(
-                    "F3 non-final state needs two distinct visible triggers"
-                )
             forward_trigger = max(
                 visible,
                 key=lambda component_id: (
@@ -605,6 +602,22 @@ def build_canonical_f3_interaction_plan(
                     visible.index(component_id),
                 ),
             )
+            if len(visible) == 1:
+                plan.append(
+                    {
+                        "position": len(plan),
+                        "transition_kind": "forward_transition",
+                        "source_state_local_id": local_id,
+                        "target_state_local_id": str(next_state["local_id"]),
+                        "allowed_trigger_component_local_ids": [
+                            forward_trigger
+                        ],
+                        "required_trigger_component_local_id": forward_trigger,
+                    }
+                )
+                continue
+        else:
+            forward_trigger = None
         same_candidates = [
             component_id
             for component_id in visible

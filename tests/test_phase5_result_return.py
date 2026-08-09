@@ -73,6 +73,84 @@ class Phase5ResultReturnTest(unittest.TestCase):
         )
         return result_root
 
+    def _publication_result_root(self) -> Path:
+        result_root = (self.temp / "publication-result").resolve()
+        result_root.mkdir()
+        (result_root / "raw_response.bin").write_bytes(b"publication raw response")
+        summary = {
+            "schema_version": "req2web.phase5.publication_action.v1.summary",
+            "run_id": "phase5-publication-result-return-test",
+            "package_sha256": "b" * 64,
+            "source_action_commit": "c" * 40,
+            "candidate_matrix_id": "phase5-publication-matrix-test",
+            "formal_evaluation": False,
+            "formal_quality_claimed": False,
+            "h1_opened": False,
+            "gold_content_present": False,
+        }
+        (result_root / "run_summary.json").write_bytes(
+            self._canonical(summary)
+        )
+        return result_root
+
+    def test_publication_action_uses_non_formal_v3_source_binding(self) -> None:
+        result_root = self._publication_result_root()
+        tar_path = (self.return_root / "publication-return.tar").resolve()
+        manifest_path = (
+            self.return_root / "publication-return.manifest.json"
+        ).resolve()
+        manifest = create_phase5_result_return(
+            result_root=result_root,
+            tar_path=tar_path,
+            manifest_path=manifest_path,
+        )
+        payload = manifest.to_dict()
+        self.assertEqual(
+            payload["schema_version"],
+            "req2web.phase5.result_return_manifest.v3",
+        )
+        self.assertEqual(
+            payload["source_binding"],
+            {
+                "candidate_matrix_id": "phase5-publication-matrix-test",
+                "package_sha256": "b" * 64,
+                "publication_summary_schema_version": (
+                    "req2web.phase5.publication_action.v1.summary"
+                ),
+                "run_id": "phase5-publication-result-return-test",
+                "schema_version": (
+                    "req2web.phase5.result_return.source_binding.v2"
+                ),
+                "source_action_commit": "c" * 40,
+                "source_kind": "publication_action",
+            },
+        )
+        self.assertEqual(
+            validate_phase5_result_return(
+                tar_path=tar_path,
+                manifest_path=manifest_path,
+            ),
+            manifest,
+        )
+
+    def test_publication_action_rejects_formal_claim_drift(self) -> None:
+        result_root = self._publication_result_root()
+        summary_path = result_root / "run_summary.json"
+        summary = json.loads(summary_path.read_text(encoding="utf-8"))
+        summary["formal_evaluation"] = True
+        summary_path.write_bytes(self._canonical(summary))
+        with self.assertRaisesRegex(
+            ValueError,
+            "formal_evaluation must be false",
+        ):
+            create_phase5_result_return(
+                result_root=result_root,
+                tar_path=(self.return_root / "invalid-publication.tar").resolve(),
+                manifest_path=(
+                    self.return_root / "invalid-publication.manifest.json"
+                ).resolve(),
+            )
+
     def test_semantic_case_summary_uses_typed_source_binding(self) -> None:
         result_root = self._semantic_result_root()
         tar_path = (self.return_root / "semantic-return.tar").resolve()
@@ -149,6 +227,39 @@ class Phase5ResultReturnTest(unittest.TestCase):
             "req2web.phase5.result_return_manifest.v1",
         )
         self.assertEqual(replayed.to_dict()["run_id"], source["run_id"])
+
+    def test_existing_v2_formal_manifest_replays(self) -> None:
+        manifest = create_phase5_result_return(
+            result_root=self.result_root,
+            tar_path=self.tar_path,
+            manifest_path=self.manifest_path,
+        )
+        current = manifest.to_dict()
+        previous_body = {
+            **{
+                key: value
+                for key, value in current.items()
+                if key != "manifest_id"
+            },
+            "schema_version": "req2web.phase5.result_return_manifest.v2",
+        }
+        previous_payload = {
+            "manifest_id": (
+                "phase5-result-return-"
+                + sha256(self._canonical(previous_body)).hexdigest()
+            ),
+            **previous_body,
+        }
+        previous_path = (self.return_root / "previous.manifest.json").resolve()
+        previous_path.write_bytes(self._canonical(previous_payload))
+        replayed = validate_phase5_result_return(
+            tar_path=self.tar_path,
+            manifest_path=previous_path,
+        )
+        self.assertEqual(
+            replayed.to_dict()["schema_version"],
+            "req2web.phase5.result_return_manifest.v2",
+        )
 
     def test_deterministic_return_round_trip_and_exact_inventory(self) -> None:
         manifest = create_phase5_result_return(

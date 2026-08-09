@@ -639,22 +639,59 @@ def _f4_required_acceptance_target_plan(
         )
     use_case_view = projection.get("canonical_b_use_case_view")
     state_view = projection.get("f2_registered_state_visibility_view")
+    interaction_view = projection.get("f3_registered_interaction_view")
     if not isinstance(use_case_view, Mapping) or not isinstance(
         state_view, Mapping
-    ):
+    ) or not isinstance(interaction_view, Mapping):
         raise Phase4RemoteFreshIntegratedError(
             "F4 full-direct authority views are unavailable"
         )
     use_cases = use_case_view.get("use_cases")
     states = state_view.get("states")
+    interactions = interaction_view.get("interactions")
     if (
         not isinstance(use_cases, list)
         or not use_cases
         or not isinstance(states, list)
         or not states
+        or not isinstance(interactions, list)
+        or not interactions
     ):
         raise Phase4RemoteFreshIntegratedError(
             "F4 full-direct authority arrays are unavailable"
+        )
+
+    state_ids: list[str] = []
+    for state in states:
+        if not isinstance(state, Mapping) or not isinstance(
+            state.get("stable_id"), str
+        ):
+            raise Phase4RemoteFreshIntegratedError(
+                "F4 full-direct state binding is invalid"
+            )
+        state_ids.append(str(state["stable_id"]))
+    target_state_ids: set[str] = set()
+    for interaction in interactions:
+        if not isinstance(interaction, Mapping) or not isinstance(
+            interaction.get("target_state_stable_id"), str
+        ):
+            raise Phase4RemoteFreshIntegratedError(
+                "F4 full-direct interaction target is invalid"
+            )
+        target_state_id = str(interaction["target_state_stable_id"])
+        if target_state_id not in state_ids:
+            raise Phase4RemoteFreshIntegratedError(
+                "F4 full-direct interaction target is not a supplied state"
+            )
+        target_state_ids.add(target_state_id)
+    eligible_states = [
+        state
+        for state in states
+        if str(state["stable_id"]) in target_state_ids
+    ]
+    if not eligible_states:
+        raise Phase4RemoteFreshIntegratedError(
+            "F4 full-direct actual interaction targets are unavailable"
         )
 
     plan: list[dict[str, object]] = []
@@ -665,13 +702,7 @@ def _f4_required_acceptance_target_plan(
             raise Phase4RemoteFreshIntegratedError(
                 "F4 full-direct use-case binding is invalid"
             )
-        state = states[min(index, len(states) - 1)]
-        if not isinstance(state, Mapping) or not isinstance(
-            state.get("stable_id"), str
-        ):
-            raise Phase4RemoteFreshIntegratedError(
-                "F4 full-direct state binding is invalid"
-            )
+        state = eligible_states[min(index, len(eligible_states) - 1)]
         plan.append(
             {
                 "position": index,
