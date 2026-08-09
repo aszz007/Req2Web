@@ -157,7 +157,8 @@ def _sorted_texts(value: object, field_name: str, *, allow_empty: bool = False) 
 
 
 def _blind_case_ref(slot_id: str) -> str:
-    return f"blind-case-{sha256(f'{_EXPERIMENT_SEED}\\0{slot_id}'.encode()).hexdigest()[:20]}"
+    material = f"{_EXPERIMENT_SEED}\0{slot_id}".encode()
+    return f"blind-case-{sha256(material).hexdigest()[:20]}"
 
 
 def _seed(blind_case_ref: str, intervention: str, repeat_index: int) -> int:
