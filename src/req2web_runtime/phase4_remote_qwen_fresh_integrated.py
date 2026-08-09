@@ -36,6 +36,7 @@ from req2web_agent import (
     build_canonical_f1_f4_prompt,
 )
 from req2web_generation import RetrievalGuidance
+from req2web_generation.publication_language import contains_cjk_text
 from req2web_orchestration.phase4_graph import (
     NODE_ORDER,
     REGISTRY_REVISION,
@@ -74,6 +75,9 @@ P4_05_PROFILE_SCHEMA_VERSION = f"{P4_05_SCHEMA_PREFIX}.profile.v1"
 P4_05_POLICY_SCHEMA_VERSION = f"{P4_05_SCHEMA_PREFIX}.policy.v1"
 P4_05_RESULT_SCHEMA_VERSION = f"{P4_05_SCHEMA_PREFIX}.result.v1"
 P4_05_INPUT_SCHEMA_VERSION = f"{P4_05_SCHEMA_PREFIX}.input.v1"
+P4_05_PROVIDER_EVIDENCE_VIEW_SCHEMA_VERSION = (
+    "req2web.provider.evidence_projection.v1"
+)
 P4_05_PROMPT_SCHEMA_VERSION = SHARED_PROMPT_SCHEMA_VERSION
 P4_05_PRE_CALL_SCHEMA_VERSION = f"{P4_05_SCHEMA_PREFIX}.pre_call.v1"
 P4_05_ATTEMPT_SCHEMA_VERSION = f"{P4_05_SCHEMA_PREFIX}.attempt.v2"
@@ -132,6 +136,19 @@ P4_05_STOP_POLICY = {
     "parent_wall_clock_timeout_enforced": True,
     "input_truncation": False,
     "output_truncation": False,
+}
+P4_05_PROVIDER_EVIDENCE_CLASS = "provider_evidence_view"
+P4_05_PROVIDER_EVIDENCE_ROLE_ORDER = (
+    "ui_reference",
+    "interaction_flow",
+    "implementation",
+    "validation",
+)
+P4_05_PROVIDER_EVIDENCE_NODE_ROLES = {
+    "F1": ("ui_reference", "implementation"),
+    "F2": ("implementation",),
+    "F3": ("interaction_flow",),
+    "F4": ("validation",),
 }
 P4_05_INPUT_CLASSES = {
     "F1": (
@@ -409,6 +426,106 @@ def _expected_input_classes(node_id: str) -> tuple[str, ...]:
         raise Phase4RemoteFreshIntegratedError(
             f"unknown P4-05 input node: {node_id}"
         ) from exc
+
+
+def _validate_provider_evidence_view(
+    value: object,
+    *,
+    node_id: str,
+) -> dict[str, object]:
+    """Validate the optional typed evidence view without changing Phase 4 defaults."""
+
+    if node_id not in NODE_ORDER:
+        raise Phase4RemoteFreshIntegratedError(
+            f"unknown provider evidence node: {node_id}"
+        )
+    if not isinstance(value, Mapping) or set(value) != {
+        "schema_version",
+        "items",
+    }:
+        raise Phase4RemoteFreshIntegratedError(
+            f"{node_id} provider evidence view keys drifted"
+        )
+    if value["schema_version"] != P4_05_PROVIDER_EVIDENCE_VIEW_SCHEMA_VERSION:
+        raise Phase4RemoteFreshIntegratedError(
+            f"{node_id} provider evidence view schema drifted"
+        )
+    raw_items = value["items"]
+    if not isinstance(raw_items, list) or len(raw_items) > 4:
+        raise Phase4RemoteFreshIntegratedError(
+            f"{node_id} provider evidence items are invalid"
+        )
+    allowed_roles = P4_05_PROVIDER_EVIDENCE_NODE_ROLES[node_id]
+    items: list[dict[str, str]] = []
+    for index, raw_item in enumerate(raw_items):
+        if not isinstance(raw_item, Mapping) or set(raw_item) != {
+            "role",
+            "opaque_doc_id",
+            "project_authored_nonverbatim_short_summary",
+        }:
+            raise Phase4RemoteFreshIntegratedError(
+                f"{node_id} provider evidence item {index} keys drifted"
+            )
+        role = raw_item["role"]
+        doc_id = raw_item["opaque_doc_id"]
+        summary = raw_item["project_authored_nonverbatim_short_summary"]
+        if role not in allowed_roles:
+            raise Phase4RemoteFreshIntegratedError(
+                f"{node_id} provider evidence role is not allowed"
+            )
+        if (
+            not isinstance(doc_id, str)
+            or not 1 <= len(doc_id) <= 128
+            or any(
+                character not in "abcdefghijklmnopqrstuvwxyz0123456789-_"
+                for character in doc_id
+            )
+        ):
+            raise Phase4RemoteFreshIntegratedError(
+                f"{node_id} provider evidence document ID is invalid"
+            )
+        if (
+            not isinstance(summary, str)
+            or not 1 <= len(summary.strip()) <= 1200
+            or contains_cjk_text(summary)
+            or any(
+                marker in summary.lower()
+                for marker in (
+                    "http://",
+                    "https://",
+                    "file://",
+                    "/root/",
+                    "../",
+                    "d:\\",
+                )
+            )
+        ):
+            raise Phase4RemoteFreshIntegratedError(
+                f"{node_id} provider evidence summary is invalid"
+            )
+        items.append(
+            {
+                "role": role,
+                "opaque_doc_id": doc_id,
+                "project_authored_nonverbatim_short_summary": summary,
+            }
+        )
+    role_rank = {
+        role: index
+        for index, role in enumerate(P4_05_PROVIDER_EVIDENCE_ROLE_ORDER)
+    }
+    expected = sorted(
+        items,
+        key=lambda item: (role_rank[item["role"]], item["opaque_doc_id"]),
+    )
+    if items != expected or len({item["opaque_doc_id"] for item in items}) != len(items):
+        raise Phase4RemoteFreshIntegratedError(
+            f"{node_id} provider evidence order or identity drifted"
+        )
+    return {
+        "schema_version": P4_05_PROVIDER_EVIDENCE_VIEW_SCHEMA_VERSION,
+        "items": copy.deepcopy(items),
+    }
 
 
 def _validate_prompt_revision(
@@ -790,6 +907,7 @@ def _provider_visible_projection(
     b_input: Mapping[str, object],
     state: Mapping[str, object],
     authority_projection: Mapping[str, object],
+    provider_evidence_view: Mapping[str, object] | None = None,
 ) -> dict[str, object]:
     classes = _expected_input_classes(node_id)
     projection: dict[str, object] = {
@@ -836,6 +954,14 @@ def _provider_visible_projection(
                 authority_projection["ordered_mappings"]
             ),
         }
+    if provider_evidence_view is not None:
+        projection[P4_05_PROVIDER_EVIDENCE_CLASS] = (
+            _validate_provider_evidence_view(
+                provider_evidence_view,
+                node_id=node_id,
+            )
+        )
+        classes = (*classes, P4_05_PROVIDER_EVIDENCE_CLASS)
     if tuple(projection) != classes:
         raise Phase4RemoteFreshIntegratedError(
             f"{node_id} provider projection classes drifted"
@@ -860,11 +986,19 @@ def _validate_node_input_value(value: object, node_id: str) -> Mapping[str, obje
         raise Phase4RemoteFreshIntegratedError(
             f"{node_id} input envelope keys drifted"
         )
-    classes = _expected_input_classes(node_id)
+    base_classes = _expected_input_classes(node_id)
+    logical_classes = value["logical_input_classes"]
+    if logical_classes == list(base_classes):
+        classes = base_classes
+    elif logical_classes == [*base_classes, P4_05_PROVIDER_EVIDENCE_CLASS]:
+        classes = (*base_classes, P4_05_PROVIDER_EVIDENCE_CLASS)
+    else:
+        raise Phase4RemoteFreshIntegratedError(
+            f"{node_id} input logical classes drifted"
+        )
     if (
         value["schema_version"] != P4_05_INPUT_SCHEMA_VERSION
         or value["node_id"] != node_id
-        or value["logical_input_classes"] != list(classes)
         or not isinstance(value["case_id"], str)
         or not isinstance(value["request_id"], str)
     ):
@@ -879,6 +1013,11 @@ def _validate_node_input_value(value: object, node_id: str) -> Mapping[str, obje
     if "b_aux_advisory_view" in projection or "upstream_outputs" in value:
         raise Phase4RemoteFreshIntegratedError(
             f"{node_id} input contains an unapproved upstream view"
+        )
+    if P4_05_PROVIDER_EVIDENCE_CLASS in projection:
+        _validate_provider_evidence_view(
+            projection[P4_05_PROVIDER_EVIDENCE_CLASS],
+            node_id=node_id,
         )
     return value
 
@@ -1945,18 +2084,23 @@ def _node_input(
     b_input: Mapping[str, object],
     state: Mapping[str, object],
     authority_projection: Mapping[str, object],
+    provider_evidence_view: Mapping[str, object] | None = None,
 ) -> bytes:
+    classes = list(_expected_input_classes(node_id))
+    if provider_evidence_view is not None:
+        classes.append(P4_05_PROVIDER_EVIDENCE_CLASS)
     payload: dict[str, object] = {
         "schema_version": P4_05_INPUT_SCHEMA_VERSION,
         "node_id": node_id,
         "case_id": b_input["case_id"],
         "request_id": b_input["request_id"],
-        "logical_input_classes": list(_expected_input_classes(node_id)),
+        "logical_input_classes": classes,
         "projection": _provider_visible_projection(
             node_id=node_id,
             b_input=b_input,
             state=state,
             authority_projection=authority_projection,
+            provider_evidence_view=provider_evidence_view,
         ),
     }
     _validate_node_input_value(payload, node_id)

@@ -72,6 +72,7 @@ def run_phase4_remote_qwen_langgraph_integrated(
     confirm_one_remote_langgraph_run: bool,
     run_id: str | None = None,
     console: object | None = None,
+    provider_evidence_projection_by_node: Mapping[str, object] | None = None,
 ) -> dict[str, object]:
     """Execute one fresh case; LangGraph is the only F1-F4 scheduler."""
 
@@ -79,6 +80,23 @@ def run_phase4_remote_qwen_langgraph_integrated(
         raise Phase4RemoteQwenLangGraphError(
             "explicit confirmation is required for real-model LangGraph execution"
         )
+    evidence_by_node: dict[str, dict[str, object]] | None = None
+    if provider_evidence_projection_by_node is not None:
+        if (
+            not isinstance(provider_evidence_projection_by_node, Mapping)
+            or tuple(provider_evidence_projection_by_node) != NODE_ORDER
+            or set(provider_evidence_projection_by_node) != set(NODE_ORDER)
+        ):
+            raise Phase4RemoteQwenLangGraphError(
+                "provider evidence projection must contain ordered F1-F4 views"
+            )
+        evidence_by_node = {
+            node_id: _fresh._validate_provider_evidence_view(
+                provider_evidence_projection_by_node[node_id],
+                node_id=node_id,
+            )
+            for node_id in NODE_ORDER
+        }
     prepared = _fresh.prepare_phase4_remote_qwen_fresh_integrated(
         model_root=model_root,
         integrity_evidence=integrity_evidence,
@@ -149,28 +167,38 @@ def run_phase4_remote_qwen_langgraph_integrated(
         "scripted_acceptance_used": True,
         "real_browser_acceptance_used": False,
     }
+    if evidence_by_node is not None:
+        graph_upstream_binding["provider_evidence_projection_identity"] = (
+            _fresh._identity(
+                evidence_by_node,
+                revision=_fresh.P4_05_PROVIDER_EVIDENCE_VIEW_SCHEMA_VERSION,
+            )
+        )
+        _fresh._write_fsync(
+            result_root / "provider_evidence_projection.json",
+            _fresh._canonical_bytes(evidence_by_node),
+        )
+    runtime_manifest = {
+        "schema_version": RUNNER_SCHEMA_VERSION,
+        "runner_revision": ACTIVE_RUNNER_REVISION,
+        "graph_revision": REAL_MODEL_GRAPH_REVISION,
+        "run_id": selected_run_id,
+        "case_id": selected_b_input["case_id"],
+        "request_id": selected_b_input["request_id"],
+        "node_order": list(NODE_ORDER),
+        "prompt_authority_identity": PROMPT_AUTHORITY_IDENTITY,
+        "upstream_binding": graph_upstream_binding,
+        "manual_f1_f4_loop_used": False,
+        "langgraph_is_workflow_scheduler": True,
+        "claim_boundary": (
+            "raw requirement through renderer/result package engineering "
+            "integration with scripted acceptance; not real browser, "
+            "production, H1/gold, or formal-quality evidence"
+        ),
+    }
     _fresh._write_fsync(
         result_root / "langgraph_runtime_manifest.json",
-        _fresh._canonical_bytes(
-            {
-                "schema_version": RUNNER_SCHEMA_VERSION,
-                "runner_revision": ACTIVE_RUNNER_REVISION,
-                "graph_revision": REAL_MODEL_GRAPH_REVISION,
-                "run_id": selected_run_id,
-                "case_id": selected_b_input["case_id"],
-                "request_id": selected_b_input["request_id"],
-                "node_order": list(NODE_ORDER),
-                "prompt_authority_identity": PROMPT_AUTHORITY_IDENTITY,
-                "upstream_binding": graph_upstream_binding,
-                "manual_f1_f4_loop_used": False,
-                "langgraph_is_workflow_scheduler": True,
-                "claim_boundary": (
-                    "raw requirement through renderer/result package engineering "
-                    "integration with scripted acceptance; not real browser, "
-                    "production, H1/gold, or formal-quality evidence"
-                ),
-            }
-        ),
+        _fresh._canonical_bytes(runtime_manifest),
     )
 
     mirror = _fresh.FreshIntegratedStreamMirror(console)
@@ -199,6 +227,9 @@ def run_phase4_remote_qwen_langgraph_integrated(
             b_input=selected_b_input,
             state=authority_state,
             authority_projection=authority_projection,
+            provider_evidence_view=(
+                None if evidence_by_node is None else evidence_by_node[node_id]
+            ),
         )
         prompt_bytes = _fresh._node_prompt(
             node_id=node_id,
