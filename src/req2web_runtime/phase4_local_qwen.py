@@ -8607,91 +8607,15 @@ def start_supervised_local_qwen_runtime(
     )
 
 
-def start_supervised_local_qwen_fresh_integrated_runtime(
+def _start_supervised_local_qwen_fresh_integrated_backend(
     *,
     model_root: Path,
-    integrity_evidence: Path,
-    result_root: Path,
-    pilot: PilotBinding,
-    policies: Sequence[NodeProjectionPolicy],
     profile: LocalQwenProfile,
-    manifest: PreCallManifest,
-    b_input: Mapping[str, object],
-    execution_lease: PilotExecutionLease,
-    load_timeout_seconds: int = 600,
-) -> SupervisedLocalQwenRuntime:
-    """Start one persistent worker for the fresh integrated pilot."""
+    load_timeout_seconds: int,
+    generate_call_cap: int,
+) -> SupervisedLocalQwenBackend:
+    """Start the shared fresh-integrated worker without stage semantics."""
 
-    if (
-        not isinstance(model_root, Path)
-        or not model_root.is_absolute()
-        or not model_root.is_dir()
-        or model_root.is_symlink()
-        or not isinstance(integrity_evidence, Path)
-        or not integrity_evidence.is_absolute()
-        or not integrity_evidence.is_file()
-        or integrity_evidence.is_symlink()
-        or not isinstance(result_root, Path)
-        or not result_root.is_absolute()
-        or not result_root.is_dir()
-        or pilot.pilot_id.startswith(FRESH_INTEGRATED_PILOT_PREFIX) is not True
-    ):
-        raise Phase4LocalQwenContractError(
-            "fresh integrated runtime path or pilot binding is invalid"
-        )
-    pilot.validate()
-    profile.validate()
-    manifest.validate()
-    execution_lease.validate()
-    if execution_lease.parent_pid != os.getpid():
-        raise Phase4LocalQwenContractError(
-            "fresh integrated execution lease parent binding drifted"
-        )
-    if manifest.pilot_binding != pilot.to_dict():
-        raise Phase4LocalQwenContractError(
-            "fresh integrated manifest/pilot binding drifted"
-        )
-    if [policy.node_id for policy in policies] != list(NODE_ORDER):
-        raise Phase4LocalQwenContractError(
-            "fresh integrated policy order drifted"
-        )
-    checked_policies = tuple(
-        NodeProjectionPolicy.from_dict(policy.to_dict()) for policy in policies
-    )
-    checked_b_input = copy.deepcopy(dict(b_input))
-    from req2web_orchestration.phase4_graph import validate_b_input
-
-    checked_b_input = validate_b_input(checked_b_input)
-    inventory = validate_model_inventory_metadata(
-        model_root=model_root,
-        integrity_evidence=integrity_evidence,
-    )
-    inventory_identity = dict(inventory["inventory_identity"])
-    model_root_identity = _identity(
-        {
-            "model_id": QWEN_MODEL_ID,
-            "model_revision": QWEN_MODEL_REVISION,
-            "resolved_model_root": str(model_root.resolve(strict=True)),
-            "inventory": inventory_identity,
-        },
-        revision=f"{P4_03_SCHEMA_PREFIX}.model-root.v1",
-    )
-    if (
-        profile.model_root_identity != model_root_identity
-        or profile.model_inventory_identity != inventory_identity
-        or profile.model_file_count != inventory["file_count"]
-        or manifest.model_root_identity != model_root_identity
-        or manifest.model_inventory_identity != inventory_identity
-        or manifest.inventory_file_count != inventory["file_count"]
-    ):
-        raise Phase4LocalQwenContractError(
-            "fresh integrated model identity drifted before worker start"
-        )
-    _integer(load_timeout_seconds, "fresh load_timeout_seconds", minimum=1, maximum=1800)
-    runtime_claim = _acquire_runtime_start_claim(
-        result_root=result_root,
-        lease=execution_lease,
-    )
     worker_bootstrap = (
         "import sys; from pathlib import Path; "
         "from req2web_runtime.phase4_local_qwen import "
@@ -8870,9 +8794,112 @@ def start_supervised_local_qwen_fresh_integrated_runtime(
         loaded_facts=data["loaded_facts"],
         capability=_REAL_RUNTIME_CAPABILITY,
         protocol=FRESH_INTEGRATED_WORKER_PROTOCOL,
-        generate_call_cap=4,
+        generate_call_cap=generate_call_cap,
         fresh_runtime_facts=fresh_runtime_facts,
     )
+    return backend
+
+
+def start_supervised_local_qwen_fresh_integrated_runtime(
+    *,
+    model_root: Path,
+    integrity_evidence: Path,
+    result_root: Path,
+    pilot: PilotBinding,
+    policies: Sequence[NodeProjectionPolicy],
+    profile: LocalQwenProfile,
+    manifest: PreCallManifest,
+    b_input: Mapping[str, object],
+    execution_lease: PilotExecutionLease,
+    load_timeout_seconds: int = 600,
+) -> SupervisedLocalQwenRuntime:
+    """Start one persistent worker for the fresh integrated pilot."""
+
+    if (
+        not isinstance(model_root, Path)
+        or not model_root.is_absolute()
+        or not model_root.is_dir()
+        or model_root.is_symlink()
+        or not isinstance(integrity_evidence, Path)
+        or not integrity_evidence.is_absolute()
+        or not integrity_evidence.is_file()
+        or integrity_evidence.is_symlink()
+        or not isinstance(result_root, Path)
+        or not result_root.is_absolute()
+        or not result_root.is_dir()
+        or pilot.pilot_id.startswith(FRESH_INTEGRATED_PILOT_PREFIX) is not True
+    ):
+        raise Phase4LocalQwenContractError(
+            "fresh integrated runtime path or pilot binding is invalid"
+        )
+    pilot.validate()
+    profile.validate()
+    manifest.validate()
+    execution_lease.validate()
+    if execution_lease.parent_pid != os.getpid():
+        raise Phase4LocalQwenContractError(
+            "fresh integrated execution lease parent binding drifted"
+        )
+    if manifest.pilot_binding != pilot.to_dict():
+        raise Phase4LocalQwenContractError(
+            "fresh integrated manifest/pilot binding drifted"
+        )
+    if [policy.node_id for policy in policies] != list(NODE_ORDER):
+        raise Phase4LocalQwenContractError(
+            "fresh integrated policy order drifted"
+        )
+    checked_policies = tuple(
+        NodeProjectionPolicy.from_dict(policy.to_dict()) for policy in policies
+    )
+    checked_b_input = copy.deepcopy(dict(b_input))
+    from req2web_orchestration.phase4_graph import validate_b_input
+
+    checked_b_input = validate_b_input(checked_b_input)
+    inventory = validate_model_inventory_metadata(
+        model_root=model_root,
+        integrity_evidence=integrity_evidence,
+    )
+    inventory_identity = dict(inventory["inventory_identity"])
+    model_root_identity = _identity(
+        {
+            "model_id": QWEN_MODEL_ID,
+            "model_revision": QWEN_MODEL_REVISION,
+            "resolved_model_root": str(model_root.resolve(strict=True)),
+            "inventory": inventory_identity,
+        },
+        revision=f"{P4_03_SCHEMA_PREFIX}.model-root.v1",
+    )
+    if (
+        profile.model_root_identity != model_root_identity
+        or profile.model_inventory_identity != inventory_identity
+        or profile.model_file_count != inventory["file_count"]
+        or manifest.model_root_identity != model_root_identity
+        or manifest.model_inventory_identity != inventory_identity
+        or manifest.inventory_file_count != inventory["file_count"]
+    ):
+        raise Phase4LocalQwenContractError(
+            "fresh integrated model identity drifted before worker start"
+        )
+    _integer(load_timeout_seconds, "fresh load_timeout_seconds", minimum=1, maximum=1800)
+    runtime_claim = _acquire_runtime_start_claim(
+        result_root=result_root,
+        lease=execution_lease,
+    )
+    backend = _start_supervised_local_qwen_fresh_integrated_backend(
+        model_root=model_root,
+        profile=profile,
+        load_timeout_seconds=load_timeout_seconds,
+        generate_call_cap=4,
+    )
+    fresh_runtime_facts = backend.fresh_runtime_facts
+    if fresh_runtime_facts is None:
+        backend._force_teardown("load_failed")
+        raise SupervisedWorkerStartFailure(
+            "fresh integrated runtime facts are unavailable",
+            backend.teardown_facts,
+            stderr_bytes=backend.stderr_bytes,
+            failure_code="worker_load_failed",
+        )
     try:
         receipt = LocalQwenLoadReceipt.create(
             manifest=manifest,
@@ -8918,6 +8945,74 @@ def start_supervised_local_qwen_fresh_integrated_runtime(
 class P4D1SupervisedRuntime(NamedTuple):
     backend: SupervisedLocalQwenBackend
     loaded_facts: dict[str, object]
+
+
+def start_supervised_local_qwen_fresh_integrated_component_runtime(
+    *,
+    model_root: Path,
+    integrity_evidence: Path,
+    profile: LocalQwenProfile,
+    load_timeout_seconds: int = 600,
+    generate_call_cap: int = 1,
+) -> P4D1SupervisedRuntime:
+    """Start the shared worker for a caller-owned component diagnostic."""
+
+    if (
+        not isinstance(model_root, Path)
+        or not model_root.is_absolute()
+        or not model_root.is_dir()
+        or model_root.is_symlink()
+        or not isinstance(integrity_evidence, Path)
+        or not integrity_evidence.is_absolute()
+        or not integrity_evidence.is_file()
+        or integrity_evidence.is_symlink()
+    ):
+        raise Phase4LocalQwenContractError(
+            "component diagnostic model root is invalid"
+        )
+    profile.validate()
+    _integer(
+        load_timeout_seconds,
+        "component diagnostic load_timeout_seconds",
+        minimum=1,
+        maximum=1800,
+    )
+    if generate_call_cap != 1:
+        raise Phase4LocalQwenContractError(
+            "component diagnostic generate_call_cap must be one"
+        )
+    live_inventory = validate_model_inventory_metadata(
+        model_root=model_root,
+        integrity_evidence=integrity_evidence,
+    )
+    live_inventory_identity = dict(live_inventory["inventory_identity"])
+    expected_model_root_identity = _identity(
+        {
+            "model_id": QWEN_MODEL_ID,
+            "model_revision": QWEN_MODEL_REVISION,
+            "resolved_model_root": str(model_root.resolve(strict=True)),
+            "inventory": live_inventory_identity,
+        },
+        revision=f"{P4_03_SCHEMA_PREFIX}.model-root.v1",
+    )
+    if (
+        profile.model_inventory_identity != live_inventory_identity
+        or profile.model_file_count != live_inventory["file_count"]
+        or profile.model_root_identity != expected_model_root_identity
+    ):
+        raise Phase4LocalQwenContractError(
+            "component diagnostic live model inventory drifted"
+        )
+    backend = _start_supervised_local_qwen_fresh_integrated_backend(
+        model_root=model_root,
+        profile=profile,
+        load_timeout_seconds=load_timeout_seconds,
+        generate_call_cap=generate_call_cap,
+    )
+    return P4D1SupervisedRuntime(
+        backend=backend,
+        loaded_facts=backend.loaded_facts,
+    )
 
 
 def _p4d1_worker_stderr_write(raw: bytes) -> None:
@@ -10951,6 +11046,7 @@ __all__ = [
     "SupervisedWorkerFailure",
     "SupervisedWorkerStartFailure",
     "start_supervised_local_qwen_fresh_integrated_runtime",
+    "start_supervised_local_qwen_fresh_integrated_component_runtime",
     "TRANSFORMERS_VERSION",
     "TORCH_VERSION",
     "WorkerStderrArtifact",
