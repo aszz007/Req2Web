@@ -267,6 +267,50 @@ class Phase4BrowserAcceptanceTest(unittest.TestCase):
         finally:
             shutil.rmtree(root, ignore_errors=True)
 
+    def test_phase5_publication_scope_reuses_objective_browser_authority(
+        self,
+    ) -> None:
+        root = (
+            ROOT
+            / "tests"
+            / ".tmp_phase4_browser_acceptance"
+            / self._testMethodName
+        )
+        shutil.rmtree(root, ignore_errors=True)
+        source_identity = {
+            "identity_kind": "canonical_json",
+            "sha256": "sha256:" + "b" * 64,
+            "byte_length": 20,
+            "revision": "req2web.phase5.publication.source.v1",
+        }
+        try:
+            with patch(
+                "req2web_runtime.phase4_browser_acceptance."
+                "validate_english_publication_tree"
+            ):
+                audit = run_real_browser_case_audit(
+                    package_root=PACKAGE_ROOT,
+                    output_root=root,
+                    run_id="phase5-publication-browser-test",
+                    case_index=1,
+                    case_id="publication-case-01",
+                    evidence_scope="phase5_publication_engineering",
+                    source_case_summary_identity=source_identity,
+                    backend_factory=_backend_factory,
+                )
+            self.assertEqual(audit["browser_status"], "pass")
+            self.assertEqual(
+                audit["source_case_summary_identity"],
+                source_identity,
+            )
+            self.assertEqual(
+                audit["semantic_alignment"]["status"],
+                "not_executed",
+            )
+            self.assertIn("Phase 5 publication", audit["claim_boundary"])
+        finally:
+            shutil.rmtree(root, ignore_errors=True)
+
     def test_canonical_browser_audit_rejects_mixed_language_package(
         self,
     ) -> None:

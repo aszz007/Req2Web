@@ -66,6 +66,7 @@ EVIDENCE_SCOPES = {
     "historical_synthetic_canary",
     "phase4_canonical_canary",
     "phase4_canonical_full",
+    "phase5_publication_engineering",
 }
 VIEWPORTS = {
     "mobile": {"width": 390, "height": 844},
@@ -1009,9 +1010,16 @@ def run_real_browser_case_audit(
             "scope is not Phase 4 ten-case final browser-quality evidence"
             if evidence_scope == "historical_synthetic_canary"
             else (
-                "real browser execution bound to one exact canonical Phase 4 "
-                "case; browser execution and PageSpec conformance are objective "
-                "evidence, while semantic alignment remains separately pending"
+                "real browser execution bound to one exact Phase 5 publication "
+                "engineering ResultPackage; browser execution and PageSpec "
+                "conformance are objective evidence, while semantic alignment "
+                "remains separately pending"
+                if evidence_scope == "phase5_publication_engineering"
+                else (
+                    "real browser execution bound to one exact canonical Phase 4 "
+                    "case; browser execution and PageSpec conformance are objective "
+                    "evidence, while semantic alignment remains separately pending"
+                )
             )
         ),
     }

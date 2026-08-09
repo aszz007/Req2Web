@@ -50,8 +50,8 @@ def build_parser() -> argparse.ArgumentParser:
         "--source-case-summary",
         type=Path,
         help=(
-            "Required for phase4_canonical_canary/full evidence; supplies the "
-            "exact source case_summary_identity."
+            "Required for every non-historical evidence scope; supplies the "
+            "exact source result identity."
         ),
     )
     case.add_argument("--timeout-ms", type=int, default=5_000)
