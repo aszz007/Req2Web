@@ -306,33 +306,29 @@ class Phase4RemoteFreshIntegratedProfileTests(unittest.TestCase):
             remote.P4_05_FULL_DIRECT_PROMPT_REVISION,
         )
         self.assertIn(
-            "derive every state_ref from the actual supplied F3 interaction plan; the selected stable state ID must be an actual validated target for that use case",
+            "for each canonical use case, independently select exactly one state_ref from that use case's supplied ordered eligible target list",
             f4_full_direct["exact_output_contract"]["invariants"],
         )
         f4_input = json.loads(f4_full_input_bytes)
         f4_use_cases = f4_input["projection"]["canonical_b_use_case_view"][
             "use_cases"
         ]
-        f4_states = f4_input["projection"][
-            "f2_registered_state_visibility_view"
-        ]["states"]
         self.assertEqual(
             [
-                (
-                    row["use_case_ref"]["ref_id"],
-                    row["state_ref"]["ref_id"],
-                )
+                row["use_case_ref"]["ref_id"]
                 for row in f4_full_direct[
                     "required_acceptance_target_plan"
                 ]
             ],
-            [
-                (
-                    use_case["use_case_id"],
-                    f4_states[min(index, len(f4_states) - 1)]["stable_id"],
-                )
-                for index, use_case in enumerate(f4_use_cases)
-            ],
+            [use_case["use_case_id"] for use_case in f4_use_cases],
+        )
+        self.assertTrue(
+            all(
+                row["ordered_eligible_state_refs"]
+                for row in f4_full_direct[
+                    "required_acceptance_target_plan"
+                ]
+            )
         )
 
     def test_f4_target_plan_filters_states_through_actual_f3_targets(self) -> None:
@@ -352,7 +348,23 @@ class Phase4RemoteFreshIntegratedProfileTests(unittest.TestCase):
         }
         projection["f3_registered_interaction_view"] = {
             "interactions": [
-                {"target_state_stable_id": "state-result"},
+                {
+                    "stable_id": "interaction-result",
+                    "source_state_stable_id": "state-initial",
+                    "target_state_stable_id": "state-result",
+                },
+            ]
+        }
+        projection["deterministic_use_case_mapping_view"] = {
+            "ordered_mappings": [
+                {
+                    "use_case_id": "UC-01",
+                    "interaction_stable_ids": ["interaction-result"],
+                },
+                {
+                    "use_case_id": "UC-02",
+                    "interaction_stable_ids": ["interaction-result"],
+                },
             ]
         }
         input_bytes = remote._canonical_bytes(
@@ -369,8 +381,11 @@ class Phase4RemoteFreshIntegratedProfileTests(unittest.TestCase):
         plan = remote._f4_required_acceptance_target_plan(input_bytes)
 
         self.assertEqual(
-            [row["state_ref"]["ref_id"] for row in plan],
-            ["state-result", "state-result"],
+            [
+                [ref["ref_id"] for ref in row["ordered_eligible_state_refs"]]
+                for row in plan
+            ],
+            [["state-result"], ["state-result"]],
         )
 
     def test_f4_direct_acceptance_receipt_is_replayable_and_non_rewriting(
@@ -411,9 +426,18 @@ class Phase4RemoteFreshIntegratedProfileTests(unittest.TestCase):
         self.assertIs(receipt["automatic_rewrite"], False)
         self.assertIs(receipt["automatic_retry"], False)
         self.assertEqual(receipt["a07b_status"], "not_executed_by_policy")
+        self.assertEqual(
+            receipt["schema_version"],
+            remote.P4_05_F4_DIRECT_ACCEPTANCE_POLICY_RECEIPT_SCHEMA_VERSION,
+        )
+        self.assertEqual(
+            receipt["policy"],
+            remote.P4_05_F4_INDEPENDENT_ELIGIBLE_TARGET_POLICY_REVISION,
+        )
+        self.assertTrue(receipt["eligible_target_plan_identity"]["sha256"])
         self.assertEqual(len(receipt["selected_targets"]), 2)
 
-    def test_f4_direct_acceptance_receipt_rejects_unreachable_or_backward_targets(
+    def test_f4_direct_acceptance_receipt_rejects_unreachable_target_but_not_cross_use_case_order(
         self,
     ) -> None:
         b_input = synthetic_commerce_b_input()
@@ -466,15 +490,137 @@ class Phase4RemoteFreshIntegratedProfileTests(unittest.TestCase):
         backward["acceptance_checks"][1]["state_ref"]["ref_id"] = (
             checkout_state_id
         )
-        with self.assertRaisesRegex(
-            remote.Phase4RemoteFreshIntegratedError,
-            "target order is not monotonic",
-        ):
-            remote._f4_direct_acceptance_policy_receipt(
-                input_bytes=input_bytes,
-                output=backward,
-                raw_bytes=remote._canonical_bytes(backward),
-            )
+        receipt = remote._f4_direct_acceptance_policy_receipt(
+            input_bytes=input_bytes,
+            output=backward,
+            raw_bytes=remote._canonical_bytes(backward),
+        )
+        self.assertIs(
+            receipt["cross_use_case_monotonic_order_required"],
+            False,
+        )
+        self.assertEqual(
+            [row["selected_state_id"] for row in receipt["selected_targets"]],
+            [final_state_id, checkout_state_id],
+        )
+
+    def test_service_request_f4_receipt_allows_independent_semantic_targets(
+        self,
+    ) -> None:
+        classes = remote._expected_input_classes("F4")
+        projection = {name: {} for name in classes}
+        projection["canonical_b_use_case_view"] = {
+            "use_cases": [
+                {
+                    "use_case_id": "UC-01",
+                    "name": "Complete and submit a form",
+                },
+                {
+                    "use_case_id": "UC-02",
+                    "name": "Review the primary workflow entry points",
+                },
+            ]
+        }
+        projection["f2_registered_state_visibility_view"] = {
+            "states": [
+                {"stable_id": "state-initial"},
+                {"stable_id": "state-validation-error"},
+                {"stable_id": "state-recovery-success"},
+            ]
+        }
+        projection["f3_registered_interaction_view"] = {
+            "interactions": [
+                {
+                    "stable_id": "interaction-review-entry",
+                    "source_state_stable_id": "state-initial",
+                    "target_state_stable_id": "state-initial",
+                },
+                {
+                    "stable_id": "interaction-validation-error",
+                    "source_state_stable_id": "state-initial",
+                    "target_state_stable_id": "state-validation-error",
+                },
+                {
+                    "stable_id": "interaction-recovery-success",
+                    "source_state_stable_id": "state-validation-error",
+                    "target_state_stable_id": "state-recovery-success",
+                },
+            ]
+        }
+        all_interactions = [
+            "interaction-review-entry",
+            "interaction-validation-error",
+            "interaction-recovery-success",
+        ]
+        projection["deterministic_use_case_mapping_view"] = {
+            "ordered_mappings": [
+                {
+                    "use_case_id": "UC-01",
+                    "interaction_stable_ids": all_interactions,
+                },
+                {
+                    "use_case_id": "UC-02",
+                    "interaction_stable_ids": all_interactions,
+                },
+            ]
+        }
+        input_bytes = remote._canonical_bytes(
+            {
+                "schema_version": remote.P4_05_INPUT_SCHEMA_VERSION,
+                "node_id": "F4",
+                "case_id": "service-request-regression",
+                "request_id": "service-request-regression",
+                "logical_input_classes": list(classes),
+                "projection": projection,
+            }
+        )
+        output = {
+            "acceptance_checks": [
+                {
+                    "use_case_refs": [
+                        {
+                            "ref_type": "canonical_b_use_case",
+                            "ref_id": "UC-01",
+                            "ref_revision": "canonical_b.use_case.v1",
+                        }
+                    ],
+                    "state_ref": {
+                        "ref_type": "registry_stable",
+                        "ref_id": "state-recovery-success",
+                        "ref_revision": "req2web.phase4.registry.p4_02a.v1",
+                    },
+                },
+                {
+                    "use_case_refs": [
+                        {
+                            "ref_type": "canonical_b_use_case",
+                            "ref_id": "UC-02",
+                            "ref_revision": "canonical_b.use_case.v1",
+                        }
+                    ],
+                    "state_ref": {
+                        "ref_type": "registry_stable",
+                        "ref_id": "state-initial",
+                        "ref_revision": "req2web.phase4.registry.p4_02a.v1",
+                    },
+                },
+            ]
+        }
+
+        receipt = remote._f4_direct_acceptance_policy_receipt(
+            input_bytes=input_bytes,
+            output=output,
+            raw_bytes=remote._canonical_bytes(output),
+        )
+
+        self.assertEqual(
+            [row["selected_state_id"] for row in receipt["selected_targets"]],
+            ["state-recovery-success", "state-initial"],
+        )
+        self.assertEqual(
+            receipt["selection_rule"],
+            "independent_per_use_case_eligible_membership",
+        )
 
     def test_profile_is_exact_bf16_gpu0_no_offload_profile(self) -> None:
         profile = remote.RemoteFreshIntegratedProfile.create(

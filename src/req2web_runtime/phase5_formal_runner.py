@@ -32,6 +32,7 @@ from req2web_agent import (
     PROMPT_SCHEMA_VERSION as SHARED_PROMPT_SCHEMA_VERSION,
     UseCase,
     build_canonical_f3_interaction_plan,
+    build_canonical_f4_acceptance_target_plan,
     build_canonical_f1_f4_prompt,
 )
 from req2web_acceptance import (
@@ -45,7 +46,6 @@ from req2web_orchestration.phase4_graph import (
     NO_CAPTURE_SHA256,
     REAL_MODEL_SOURCE_KIND,
     REAL_MODEL_GRAPH_REVISION,
-    REGISTRY_REVISION,
     Phase4RealModelGraphRuntime,
     create_real_model_graph_state,
     make_identity,
@@ -102,10 +102,10 @@ ACCEPTED_PHASE4_CANONICAL_FULL_FLOW_RUNNER = (
     "@78b1a12e4814f025cfe4737de196729272941ada"
 )
 EXPECTED_PROMPT_AUTHORITY_REVISION = (
-    "f3_f4_explicit_actual_state_plan_a07a_direct_english_v16"
+    "f3_f4_explicit_actual_state_plan_a07a_direct_english_v17"
 )
 EXPECTED_PROMPT_AUTHORITY_SHA256 = (
-    "sha256:68de2486f92ccf20aa3c2b6ba3826c3f201ba2ba14e9355e1a86ae40aca4c66f"
+    "sha256:ac1299759277257ec1f6c498d01b2e24307d9535073c2920e0099aedb1b600d1"
 )
 SYNTHETIC_VALIDATION_FLOW_ROLE = (
     "shared_phase4_langgraph_synthetic_no_model_validation_only"
@@ -560,39 +560,26 @@ def _f4_plan(
 ) -> list[dict[str, object]]:
     use_cases = static_payload.get("canonical_use_cases")
     state_view = dynamic.get("f2_registered_state_visibility_view")
+    interaction_view = dynamic.get("f3_registered_interaction_view")
+    mapping_view = dynamic.get("deterministic_use_case_mapping_view")
     if not isinstance(use_cases, list) or not use_cases:
         raise Phase5FormalRunnerError("F4 use-case order is unavailable")
-    if not isinstance(state_view, Mapping):
-        raise Phase5FormalRunnerError("F4 state view is unavailable")
-    states = state_view.get("states")
-    if not isinstance(states, list) or not states:
-        raise Phase5FormalRunnerError("F4 state order is unavailable")
-    plan: list[dict[str, object]] = []
-    for index, use_case in enumerate(use_cases):
-        state = states[min(index, len(states) - 1)]
-        if (
-            not isinstance(use_case, Mapping)
-            or not isinstance(use_case.get("use_case_id"), str)
-            or not isinstance(state, Mapping)
-            or not isinstance(state.get("stable_id"), str)
-        ):
-            raise Phase5FormalRunnerError("F4 target binding is invalid")
-        plan.append(
-            {
-                "position": index,
-                "use_case_ref": {
-                    "ref_type": "canonical_b_use_case",
-                    "ref_id": str(use_case["use_case_id"]),
-                    "ref_revision": "canonical_b.use_case.v1",
-                },
-                "state_ref": {
-                    "ref_type": "registry_stable",
-                    "ref_id": str(state["stable_id"]),
-                    "ref_revision": REGISTRY_REVISION,
-                },
-            }
+    if not all(
+        isinstance(view, Mapping)
+        for view in (state_view, interaction_view, mapping_view)
+    ):
+        raise Phase5FormalRunnerError("F4 authority views are unavailable")
+    try:
+        return build_canonical_f4_acceptance_target_plan(
+            canonical_b_use_case_view={"use_cases": copy.deepcopy(use_cases)},
+            f2_registered_state_visibility_view=state_view,
+            f3_registered_interaction_view=interaction_view,
+            deterministic_use_case_mapping_view=mapping_view,
         )
-    return plan
+    except ValueError as exc:
+        raise Phase5FormalRunnerError(
+            "F4 eligible-target plan is invalid"
+        ) from exc
 
 
 def _node_input(

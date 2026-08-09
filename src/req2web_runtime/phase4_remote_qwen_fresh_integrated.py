@@ -33,6 +33,7 @@ from req2web_agent import (
     PROMPT_AUTHORITY_REVISION,
     PROMPT_SCHEMA_VERSION as SHARED_PROMPT_SCHEMA_VERSION,
     build_canonical_f3_interaction_plan,
+    build_canonical_f4_acceptance_target_plan,
     build_canonical_f1_f4_prompt,
 )
 from req2web_generation import RetrievalGuidance
@@ -114,12 +115,15 @@ P4_05_F3_F4_PROMPT_REVISION = "f3_f4_unique_reachable_acceptance_v1"
 P4_05_F4_DIRECT_ACCEPTANCE_PROMPT_REVISION = (
     "f4_actual_interaction_target_a07a_direct_v2"
 )
+P4_05_F4_INDEPENDENT_ELIGIBLE_TARGET_POLICY_REVISION = (
+    "f4_independent_eligible_target_a07a_direct_v3"
+)
 P4_05_FULL_DIRECT_PROMPT_REVISION = PROMPT_AUTHORITY_REVISION
 P4_05_REVISION_PROMPT_NODES = ("F3", "F4")
 P4_05_F4_DIRECT_ACCEPTANCE_PROMPT_NODES = ("F4",)
 P4_05_FULL_DIRECT_PROMPT_NODES = NODE_ORDER
 P4_05_F4_DIRECT_ACCEPTANCE_POLICY_RECEIPT_SCHEMA_VERSION = (
-    f"{P4_05_SCHEMA_PREFIX}.f4_direct_acceptance_policy_receipt.v1"
+    f"{P4_05_SCHEMA_PREFIX}.f4_direct_acceptance_policy_receipt.v2"
 )
 P4_05_RESUME_PREFIX_F1_F2 = "F1-F2"
 P4_05_RESUME_PREFIX_F1_F3 = "F1-F3"
@@ -640,85 +644,25 @@ def _f4_required_acceptance_target_plan(
     use_case_view = projection.get("canonical_b_use_case_view")
     state_view = projection.get("f2_registered_state_visibility_view")
     interaction_view = projection.get("f3_registered_interaction_view")
-    if not isinstance(use_case_view, Mapping) or not isinstance(
-        state_view, Mapping
-    ) or not isinstance(interaction_view, Mapping):
+    mapping_view = projection.get("deterministic_use_case_mapping_view")
+    if not all(
+        isinstance(view, Mapping)
+        for view in (use_case_view, state_view, interaction_view, mapping_view)
+    ):
         raise Phase4RemoteFreshIntegratedError(
             "F4 full-direct authority views are unavailable"
         )
-    use_cases = use_case_view.get("use_cases")
-    states = state_view.get("states")
-    interactions = interaction_view.get("interactions")
-    if (
-        not isinstance(use_cases, list)
-        or not use_cases
-        or not isinstance(states, list)
-        or not states
-        or not isinstance(interactions, list)
-        or not interactions
-    ):
+    try:
+        return build_canonical_f4_acceptance_target_plan(
+            canonical_b_use_case_view=use_case_view,
+            f2_registered_state_visibility_view=state_view,
+            f3_registered_interaction_view=interaction_view,
+            deterministic_use_case_mapping_view=mapping_view,
+        )
+    except ValueError as exc:
         raise Phase4RemoteFreshIntegratedError(
-            "F4 full-direct authority arrays are unavailable"
-        )
-
-    state_ids: list[str] = []
-    for state in states:
-        if not isinstance(state, Mapping) or not isinstance(
-            state.get("stable_id"), str
-        ):
-            raise Phase4RemoteFreshIntegratedError(
-                "F4 full-direct state binding is invalid"
-            )
-        state_ids.append(str(state["stable_id"]))
-    target_state_ids: set[str] = set()
-    for interaction in interactions:
-        if not isinstance(interaction, Mapping) or not isinstance(
-            interaction.get("target_state_stable_id"), str
-        ):
-            raise Phase4RemoteFreshIntegratedError(
-                "F4 full-direct interaction target is invalid"
-            )
-        target_state_id = str(interaction["target_state_stable_id"])
-        if target_state_id not in state_ids:
-            raise Phase4RemoteFreshIntegratedError(
-                "F4 full-direct interaction target is not a supplied state"
-            )
-        target_state_ids.add(target_state_id)
-    eligible_states = [
-        state
-        for state in states
-        if str(state["stable_id"]) in target_state_ids
-    ]
-    if not eligible_states:
-        raise Phase4RemoteFreshIntegratedError(
-            "F4 full-direct actual interaction targets are unavailable"
-        )
-
-    plan: list[dict[str, object]] = []
-    for index, use_case in enumerate(use_cases):
-        if not isinstance(use_case, Mapping) or not isinstance(
-            use_case.get("use_case_id"), str
-        ):
-            raise Phase4RemoteFreshIntegratedError(
-                "F4 full-direct use-case binding is invalid"
-            )
-        state = eligible_states[min(index, len(eligible_states) - 1)]
-        plan.append(
-            {
-                "position": index,
-                "use_case_ref": {
-                    "ref_type": "canonical_b_use_case",
-                    "ref_id": str(use_case["use_case_id"]),
-                    "ref_revision": "canonical_b.use_case.v1",
-                },
-                "state_ref": {
-                    "ref_type": "registry_stable",
-                    "ref_id": str(state["stable_id"]),
-                    "ref_revision": REGISTRY_REVISION,
-                },
-            }
-        )
-    return plan
+            "F4 full-direct eligible-target plan is invalid"
+        ) from exc
 
 
 def _validated_node_output(
@@ -2536,27 +2480,19 @@ def _f4_direct_acceptance_policy_receipt(
         raise Phase4RemoteFreshIntegratedError(
             "F4 direct-acceptance projection is invalid"
         )
-
-    use_case_view = projection.get("canonical_b_use_case_view")
     state_view = projection.get("f2_registered_state_visibility_view")
     interaction_view = projection.get("f3_registered_interaction_view")
-    mapping_view = projection.get("deterministic_use_case_mapping_view")
-    if not all(
-        isinstance(value, Mapping)
-        for value in (use_case_view, state_view, interaction_view, mapping_view)
+    if not isinstance(state_view, Mapping) or not isinstance(
+        interaction_view, Mapping
     ):
         raise Phase4RemoteFreshIntegratedError(
             "F4 direct-acceptance authority views are unavailable"
         )
-
-    use_cases = use_case_view.get("use_cases")
     states = state_view.get("states")
     interactions = interaction_view.get("interactions")
-    mappings = mapping_view.get("ordered_mappings")
     checks = output.get("acceptance_checks")
     if not all(
-        isinstance(value, list)
-        for value in (use_cases, states, interactions, mappings, checks)
+        isinstance(value, list) for value in (states, interactions, checks)
     ):
         raise Phase4RemoteFreshIntegratedError(
             "F4 direct-acceptance authority arrays are invalid"
@@ -2566,15 +2502,11 @@ def _f4_direct_acceptance_policy_receipt(
             "F4 direct-acceptance state order is empty"
         )
 
-    use_case_ids: list[str] = []
-    for row in use_cases:
-        if not isinstance(row, Mapping) or not isinstance(
-            row.get("use_case_id"), str
-        ):
-            raise Phase4RemoteFreshIntegratedError(
-                "F4 direct-acceptance use-case view is invalid"
-            )
-        use_case_ids.append(str(row["use_case_id"]))
+    eligible_target_plan = _f4_required_acceptance_target_plan(input_bytes)
+    if len(checks) != len(eligible_target_plan):
+        raise Phase4RemoteFreshIntegratedError(
+            "F4 direct-acceptance check count drifted"
+        )
 
     state_ids: list[str] = []
     for row in states:
@@ -2630,45 +2562,27 @@ def _f4_direct_acceptance_policy_receipt(
                 reachable.add(target_id)
                 frontier.append(target_id)
 
-    mapping_rows: dict[str, tuple[str, ...]] = {}
-    for row in mappings:
-        if (
-            not isinstance(row, Mapping)
-            or not isinstance(row.get("use_case_id"), str)
-            or not isinstance(row.get("interaction_stable_ids"), list)
-        ):
-            raise Phase4RemoteFreshIntegratedError(
-                "F4 direct-acceptance mapping view is invalid"
-            )
-        use_case_id = str(row["use_case_id"])
-        interaction_ids = tuple(row["interaction_stable_ids"])
-        if (
-            use_case_id in mapping_rows
-            or any(
-                not isinstance(interaction_id, str)
-                or interaction_id not in interaction_rows
-                for interaction_id in interaction_ids
-            )
-        ):
-            raise Phase4RemoteFreshIntegratedError(
-                "F4 direct-acceptance mapping binding is invalid"
-            )
-        mapping_rows[use_case_id] = interaction_ids
-    if list(mapping_rows) != use_case_ids:
-        raise Phase4RemoteFreshIntegratedError(
-            "F4 direct-acceptance mapping order drifted"
-        )
-    if len(checks) != len(use_case_ids):
-        raise Phase4RemoteFreshIntegratedError(
-            "F4 direct-acceptance check count drifted"
-        )
-
     selected_rows: list[dict[str, object]] = []
-    previous_position = -1
-    for use_case_id, check in zip(use_case_ids, checks, strict=True):
-        if not isinstance(check, Mapping):
+    for plan_row, check in zip(eligible_target_plan, checks, strict=True):
+        expected_use_case_ref = plan_row["use_case_ref"]
+        eligible_state_refs = plan_row["ordered_eligible_state_refs"]
+        if (
+            not isinstance(expected_use_case_ref, Mapping)
+            or not isinstance(eligible_state_refs, list)
+            or not isinstance(check, Mapping)
+        ):
             raise Phase4RemoteFreshIntegratedError(
                 "F4 direct-acceptance check is invalid"
+            )
+        use_case_id = str(expected_use_case_ref["ref_id"])
+        eligible_state_ids = [
+            str(state_ref["ref_id"])
+            for state_ref in eligible_state_refs
+            if isinstance(state_ref, Mapping)
+        ]
+        if len(eligible_state_ids) != len(eligible_state_refs):
+            raise Phase4RemoteFreshIntegratedError(
+                "F4 direct-acceptance eligible target plan is invalid"
             )
         use_case_refs = check.get("use_case_refs")
         state_ref = check.get("state_ref")
@@ -2689,26 +2603,12 @@ def _f4_direct_acceptance_policy_receipt(
                 "F4 direct-acceptance check binding is invalid"
             )
         selected_state_id = str(state_ref["ref_id"])
-        eligible_state_ids = sorted(
-            {
-                interaction_rows[interaction_id][1]
-                for interaction_id in mapping_rows[use_case_id]
-                if interaction_rows[interaction_id][1] in reachable
-                and interaction_rows[interaction_id][1] in targeted_states
-            },
-            key=state_position.__getitem__,
-        )
         if selected_state_id not in eligible_state_ids:
             raise Phase4RemoteFreshIntegratedError(
                 "F4 direct-acceptance target is not an actual reachable "
                 "mapped interaction target"
             )
         selected_position = state_position[selected_state_id]
-        if selected_position < previous_position:
-            raise Phase4RemoteFreshIntegratedError(
-                "F4 direct-acceptance target order is not monotonic"
-            )
-        previous_position = selected_position
         selected_rows.append(
             {
                 "use_case_id": use_case_id,
@@ -2722,7 +2622,9 @@ def _f4_direct_acceptance_policy_receipt(
         "schema_version": (
             P4_05_F4_DIRECT_ACCEPTANCE_POLICY_RECEIPT_SCHEMA_VERSION
         ),
-        "policy": P4_05_F4_DIRECT_ACCEPTANCE_PROMPT_REVISION,
+        "policy": P4_05_F4_INDEPENDENT_ELIGIBLE_TARGET_POLICY_REVISION,
+        "selection_rule": "independent_per_use_case_eligible_membership",
+        "cross_use_case_monotonic_order_required": False,
         "downstream_policy": PHASE4_FRESH_DELIVERY_POLICY_A07A_DIRECT_V1,
         "a07b_status": "not_executed_by_policy",
         "input_identity": _identity(
@@ -2746,6 +2648,10 @@ def _f4_direct_acceptance_policy_receipt(
         "actual_target_state_ids": [
             stable_id for stable_id in state_ids if stable_id in targeted_states
         ],
+        "eligible_target_plan_identity": _identity(
+            eligible_target_plan,
+            revision=P4_05_F4_INDEPENDENT_ELIGIBLE_TARGET_POLICY_REVISION,
+        ),
         "selected_targets": selected_rows,
         "automatic_rewrite": False,
         "automatic_retry": False,
@@ -4379,6 +4285,7 @@ __all__ = [
     "P4_05_F4_DIRECT_ACCEPTANCE_POLICY_RECEIPT_SCHEMA_VERSION",
     "P4_05_F4_DIRECT_ACCEPTANCE_PROMPT_NODES",
     "P4_05_F4_DIRECT_ACCEPTANCE_PROMPT_REVISION",
+    "P4_05_F4_INDEPENDENT_ELIGIBLE_TARGET_POLICY_REVISION",
     "P4_05_FULL_DIRECT_PROMPT_NODES",
     "P4_05_FULL_DIRECT_PROMPT_REVISION",
     "P4_05_F3_F4_PROMPT_REVISION",

@@ -316,6 +316,12 @@ class Phase5FormalRunnerTest(unittest.TestCase):
             [row["position"] for row in f4["required_acceptance_target_plan"]],
             list(range(len(f4["required_acceptance_target_plan"]))),
         )
+        self.assertTrue(
+            all(
+                row["ordered_eligible_state_refs"] and "state_ref" not in row
+                for row in f4["required_acceptance_target_plan"]
+            )
+        )
 
     def test_invalid_raw_is_preserved_and_does_not_retry(self) -> None:
         result_root = (self.temp / "invalid").resolve()

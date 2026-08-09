@@ -16,7 +16,7 @@ from typing import Mapping
 PROMPT_AUTHORITY_SCHEMA_VERSION = "req2web.agent.f1_f4_prompt_authority.v1"
 PROMPT_SCHEMA_VERSION = "req2web.agent.f1_f4_prompt.v1"
 PROMPT_AUTHORITY_REVISION = (
-    "f3_f4_explicit_actual_state_plan_a07a_direct_english_v16"
+    "f3_f4_explicit_actual_state_plan_a07a_direct_english_v17"
 )
 REGISTRY_REVISION = "req2web.phase4.registry.p4_02a.v1"
 NODE_ORDER = ("F1", "F2", "F3", "F4")
@@ -186,10 +186,10 @@ def _base_output_contracts() -> dict[str, dict[str, object]]:
                 "the union of use_case_refs covers every canonical use-case ID supplied in this input",
                 "state_ref uses ref_type registry_stable, a supplied F2 stable ID, and the supplied registry revision",
                 "emit exactly one acceptance check for each canonical use case, in canonical use-case order, and put exactly that one use-case reference in the check",
-                "derive every state_ref from the actual supplied F3 interaction plan; the selected stable state ID must be an actual validated target for that use case",
-                "do not select the first supplied F2 state merely because it is the initial state",
-                "keep selected state positions monotonically non-decreasing across canonical use-case order",
-                "when later use cases have no later eligible target, reuse only the final eligible target state; never invent an interaction, state, or registry identity",
+                "for each canonical use case, independently select exactly one state_ref from that use case's supplied ordered eligible target list",
+                "every eligible target is an actual supplied F3 target state, reachable from the first supplied F2 state, and included in that use case's deterministic mapping",
+                "canonical use-case order is output order, not workflow-time order; selected state positions need not be monotonic across different use cases",
+                "never invent an interaction, state, registry identity, or cross-use-case ordering constraint",
                 "never emit a second acceptance target for the same use case",
             ],
         },
@@ -402,6 +402,58 @@ def _validate_plan(
         if not isinstance(item, Mapping) or not item:
             raise PromptAuthorityError(f"{name} contains an invalid row")
         rows.append(copy.deepcopy(dict(item)))
+    return rows
+
+
+def _validate_f4_acceptance_target_plan(
+    value: object,
+) -> list[dict[str, object]]:
+    rows = _validate_plan(
+        value,
+        name="required_acceptance_target_plan",
+    )
+    for position, row in enumerate(rows):
+        if set(row) != {
+            "position",
+            "use_case_ref",
+            "ordered_eligible_state_refs",
+        } or type(row["position"]) is not int or row["position"] != position:
+            raise PromptAuthorityError(
+                "required_acceptance_target_plan row shape or order is invalid"
+            )
+        use_case_ref = row["use_case_ref"]
+        eligible_refs = row["ordered_eligible_state_refs"]
+        if (
+            not isinstance(use_case_ref, Mapping)
+            or set(use_case_ref) != {"ref_type", "ref_id", "ref_revision"}
+            or use_case_ref.get("ref_type") != "canonical_b_use_case"
+            or not isinstance(use_case_ref.get("ref_id"), str)
+            or not use_case_ref.get("ref_id")
+            or use_case_ref.get("ref_revision") != "canonical_b.use_case.v1"
+            or not isinstance(eligible_refs, list)
+            or not eligible_refs
+        ):
+            raise PromptAuthorityError(
+                "required_acceptance_target_plan use-case binding is invalid"
+            )
+        eligible_ids: list[str] = []
+        for state_ref in eligible_refs:
+            if (
+                not isinstance(state_ref, Mapping)
+                or set(state_ref) != {"ref_type", "ref_id", "ref_revision"}
+                or state_ref.get("ref_type") != "registry_stable"
+                or not isinstance(state_ref.get("ref_id"), str)
+                or not state_ref.get("ref_id")
+                or state_ref.get("ref_revision") != REGISTRY_REVISION
+            ):
+                raise PromptAuthorityError(
+                    "required_acceptance_target_plan state binding is invalid"
+                )
+            eligible_ids.append(str(state_ref["ref_id"]))
+        if len(eligible_ids) != len(set(eligible_ids)):
+            raise PromptAuthorityError(
+                "required_acceptance_target_plan contains duplicate states"
+            )
     return rows
 
 
@@ -672,6 +724,150 @@ def build_canonical_f3_interaction_plan(
     return plan
 
 
+def build_canonical_f4_acceptance_target_plan(
+    *,
+    canonical_b_use_case_view: Mapping[str, object],
+    f2_registered_state_visibility_view: Mapping[str, object],
+    f3_registered_interaction_view: Mapping[str, object],
+    deterministic_use_case_mapping_view: Mapping[str, object],
+) -> list[dict[str, object]]:
+    """Build ordered, independent eligible target sets for canonical F4 rows."""
+
+    use_cases = canonical_b_use_case_view.get("use_cases")
+    states = f2_registered_state_visibility_view.get("states")
+    interactions = f3_registered_interaction_view.get("interactions")
+    mappings = deterministic_use_case_mapping_view.get("ordered_mappings")
+    if (
+        not isinstance(use_cases, list)
+        or not use_cases
+        or not isinstance(states, list)
+        or not states
+        or not isinstance(interactions, list)
+        or not interactions
+        or not isinstance(mappings, list)
+        or not mappings
+    ):
+        raise PromptAuthorityError(
+            "F4 eligible-target authority arrays are unavailable"
+        )
+
+    use_case_ids: list[str] = []
+    for use_case in use_cases:
+        if (
+            not isinstance(use_case, Mapping)
+            or not isinstance(use_case.get("use_case_id"), str)
+            or not use_case.get("use_case_id")
+        ):
+            raise PromptAuthorityError("F4 use-case binding is invalid")
+        use_case_ids.append(str(use_case["use_case_id"]))
+    if len(use_case_ids) != len(set(use_case_ids)):
+        raise PromptAuthorityError("F4 use-case identity is duplicated")
+
+    state_ids: list[str] = []
+    for state in states:
+        if (
+            not isinstance(state, Mapping)
+            or not isinstance(state.get("stable_id"), str)
+            or not state.get("stable_id")
+        ):
+            raise PromptAuthorityError("F4 state binding is invalid")
+        state_ids.append(str(state["stable_id"]))
+    if len(state_ids) != len(set(state_ids)):
+        raise PromptAuthorityError("F4 state identity is duplicated")
+    state_set = set(state_ids)
+
+    interaction_rows: dict[str, tuple[str, str]] = {}
+    adjacency: dict[str, list[str]] = {state_id: [] for state_id in state_ids}
+    for interaction in interactions:
+        if not isinstance(interaction, Mapping):
+            raise PromptAuthorityError("F4 interaction binding is invalid")
+        interaction_id = interaction.get("stable_id")
+        source_state_id = interaction.get("source_state_stable_id")
+        target_state_id = interaction.get("target_state_stable_id")
+        if (
+            not isinstance(interaction_id, str)
+            or not interaction_id
+            or not isinstance(source_state_id, str)
+            or not isinstance(target_state_id, str)
+            or interaction_id in interaction_rows
+            or source_state_id not in state_set
+            or target_state_id not in state_set
+        ):
+            raise PromptAuthorityError("F4 interaction binding is invalid")
+        interaction_rows[interaction_id] = (
+            source_state_id,
+            target_state_id,
+        )
+        adjacency[source_state_id].append(target_state_id)
+
+    reachable = {state_ids[0]}
+    frontier = [state_ids[0]]
+    while frontier:
+        source_state_id = frontier.pop(0)
+        for target_state_id in adjacency[source_state_id]:
+            if target_state_id not in reachable:
+                reachable.add(target_state_id)
+                frontier.append(target_state_id)
+
+    mapped_interactions: dict[str, tuple[str, ...]] = {}
+    for mapping in mappings:
+        if (
+            not isinstance(mapping, Mapping)
+            or not isinstance(mapping.get("use_case_id"), str)
+            or not isinstance(mapping.get("interaction_stable_ids"), list)
+        ):
+            raise PromptAuthorityError("F4 mapping binding is invalid")
+        use_case_id = str(mapping["use_case_id"])
+        interaction_ids = tuple(mapping["interaction_stable_ids"])
+        if (
+            use_case_id in mapped_interactions
+            or any(
+                not isinstance(interaction_id, str)
+                or interaction_id not in interaction_rows
+                for interaction_id in interaction_ids
+            )
+        ):
+            raise PromptAuthorityError("F4 mapping binding is invalid")
+        mapped_interactions[use_case_id] = interaction_ids
+    if list(mapped_interactions) != use_case_ids:
+        raise PromptAuthorityError("F4 mapping order drifted")
+
+    plan: list[dict[str, object]] = []
+    for position, use_case_id in enumerate(use_case_ids):
+        mapped_target_ids = {
+            interaction_rows[interaction_id][1]
+            for interaction_id in mapped_interactions[use_case_id]
+        }
+        eligible_state_ids = [
+            state_id
+            for state_id in state_ids
+            if state_id in reachable and state_id in mapped_target_ids
+        ]
+        if not eligible_state_ids:
+            raise PromptAuthorityError(
+                "F4 use case has no actual reachable mapped target"
+            )
+        plan.append(
+            {
+                "position": position,
+                "use_case_ref": {
+                    "ref_type": "canonical_b_use_case",
+                    "ref_id": use_case_id,
+                    "ref_revision": "canonical_b.use_case.v1",
+                },
+                "ordered_eligible_state_refs": [
+                    {
+                        "ref_type": "registry_stable",
+                        "ref_id": state_id,
+                        "ref_revision": REGISTRY_REVISION,
+                    }
+                    for state_id in eligible_state_ids
+                ],
+            }
+        )
+    return _validate_f4_acceptance_target_plan(plan)
+
+
 def build_canonical_f1_f4_prompt(
     *,
     node_id: str,
@@ -696,9 +892,8 @@ def build_canonical_f1_f4_prompt(
     else:
         interaction_plan = None
     if node_id == "F4":
-        acceptance_plan = _validate_plan(
+        acceptance_plan = _validate_f4_acceptance_target_plan(
             required_acceptance_target_plan,
-            name="required_acceptance_target_plan",
         )
     elif required_acceptance_target_plan is not None:
         raise PromptAuthorityError("only F4 may receive an acceptance plan")
@@ -777,12 +972,16 @@ def build_canonical_f1_f4_prompt(
             (
                 "Emit exactly one acceptance check for every row in "
                 "required_acceptance_target_plan and in the same order. Copy "
-                "the reference values exactly, but reconstruct every "
-                "use_case_refs item and state_ref object in the contract key "
-                "order ref_type, ref_id, ref_revision. The canonical prompt "
-                "serialization may display those source-object keys in "
-                "lexical order; never copy that display order into the output. "
-                "Do not select a different state, omit a row, or add a row."
+                "the row's use_case_ref values exactly. Independently choose "
+                "exactly one state_ref from that row's "
+                "ordered_eligible_state_refs; canonical use-case order does "
+                "not require selected state positions to be monotonic. "
+                "Reconstruct every use_case_refs item and state_ref object in "
+                "the contract key order ref_type, ref_id, ref_revision. The "
+                "canonical prompt serialization may display source-object "
+                "keys in lexical order; never copy that display order into "
+                "the output. Do not choose outside the row's eligible list, "
+                "omit a row, or add a row."
             ),
         ]
     return _canonical(payload)
@@ -818,6 +1017,7 @@ __all__ = [
     "PROMPT_SCHEMA_VERSION",
     "PromptAuthorityError",
     "build_canonical_f3_interaction_plan",
+    "build_canonical_f4_acceptance_target_plan",
     "build_canonical_f1_f4_prompt",
     "prompt_authority_manifest",
     "validate_canonical_prompt",

@@ -18,6 +18,7 @@ from req2web_agent import (  # noqa: E402
     PROMPT_AUTHORITY_REVISION,
     PromptAuthorityError,
     build_canonical_f3_interaction_plan,
+    build_canonical_f4_acceptance_target_plan,
     build_canonical_f1_f4_prompt,
     prompt_authority_manifest,
     validate_canonical_prompt,
@@ -107,6 +108,18 @@ class Phase4PromptAuthorityTest(unittest.TestCase):
         )
         self.assertIn("required_f1_component_order", f2_instructions)
         self.assertIn("exact subsequence", f2_instructions)
+        f4_invariants = manifest["output_contracts"]["F4"]["invariants"]
+        self.assertIn(
+            "canonical use-case order is output order, not workflow-time "
+            "order; selected state positions need not be monotonic across "
+            "different use cases",
+            f4_invariants,
+        )
+        self.assertNotIn(
+            "keep selected state positions monotonically non-decreasing "
+            "across canonical use-case order",
+            f4_invariants,
+        )
 
     def test_f2_prompt_exposes_one_required_f1_component_order(self) -> None:
         input_bytes = _canonical(
@@ -530,11 +543,18 @@ class Phase4PromptAuthorityTest(unittest.TestCase):
                     "ref_id": "UC-01",
                     "ref_revision": "canonical_b.use_case.v1",
                 },
-                "state_ref": {
-                    "ref_type": "registry_stable",
-                    "ref_id": "p4-f2-state-example",
-                    "ref_revision": "req2web.phase4.registry.p4_02a.v1",
-                },
+                "ordered_eligible_state_refs": [
+                    {
+                        "ref_type": "registry_stable",
+                        "ref_id": "p4-f2-state-example",
+                        "ref_revision": "req2web.phase4.registry.p4_02a.v1",
+                    },
+                    {
+                        "ref_type": "registry_stable",
+                        "ref_id": "p4-f2-state-recovery",
+                        "ref_revision": "req2web.phase4.registry.p4_02a.v1",
+                    },
+                ],
             }
         ]
         raw = build_canonical_f1_f4_prompt(
@@ -552,6 +572,14 @@ class Phase4PromptAuthorityTest(unittest.TestCase):
             list(value["required_acceptance_target_plan"][0]["use_case_ref"]),
             ["ref_id", "ref_revision", "ref_type"],
         )
+        self.assertEqual(
+            list(
+                value["required_acceptance_target_plan"][0][
+                    "ordered_eligible_state_refs"
+                ][0]
+            ),
+            ["ref_id", "ref_revision", "ref_type"],
+        )
         instructions = "\n".join(value["instructions"])
         self.assertIn(
             "contract key order ref_type, ref_id, ref_revision",
@@ -560,6 +588,76 @@ class Phase4PromptAuthorityTest(unittest.TestCase):
         self.assertIn(
             "never copy that display order into the output",
             instructions,
+        )
+        self.assertIn(
+            "Independently choose exactly one state_ref",
+            instructions,
+        )
+        self.assertIn(
+            "does not require selected state positions to be monotonic",
+            instructions,
+        )
+
+    def test_f4_shared_plan_builds_independent_ordered_eligible_sets(self) -> None:
+        plan = build_canonical_f4_acceptance_target_plan(
+            canonical_b_use_case_view={
+                "use_cases": [
+                    {"use_case_id": "UC-01"},
+                    {"use_case_id": "UC-02"},
+                ]
+            },
+            f2_registered_state_visibility_view={
+                "states": [
+                    {"stable_id": "state-initial"},
+                    {"stable_id": "state-validation-error"},
+                    {"stable_id": "state-recovery-success"},
+                ]
+            },
+            f3_registered_interaction_view={
+                "interactions": [
+                    {
+                        "stable_id": "interaction-initial",
+                        "source_state_stable_id": "state-initial",
+                        "target_state_stable_id": "state-initial",
+                    },
+                    {
+                        "stable_id": "interaction-error",
+                        "source_state_stable_id": "state-initial",
+                        "target_state_stable_id": "state-validation-error",
+                    },
+                    {
+                        "stable_id": "interaction-recovery",
+                        "source_state_stable_id": "state-validation-error",
+                        "target_state_stable_id": "state-recovery-success",
+                    },
+                ]
+            },
+            deterministic_use_case_mapping_view={
+                "ordered_mappings": [
+                    {
+                        "use_case_id": "UC-01",
+                        "interaction_stable_ids": [
+                            "interaction-error",
+                            "interaction-recovery",
+                        ],
+                    },
+                    {
+                        "use_case_id": "UC-02",
+                        "interaction_stable_ids": ["interaction-initial"],
+                    },
+                ]
+            },
+        )
+
+        self.assertEqual(
+            [
+                [ref["ref_id"] for ref in row["ordered_eligible_state_refs"]]
+                for row in plan
+            ],
+            [
+                ["state-validation-error", "state-recovery-success"],
+                ["state-initial"],
+            ],
         )
 
     def test_prompt_replays_from_exact_input_and_plan(self) -> None:
