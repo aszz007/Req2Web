@@ -86,9 +86,9 @@ def main(argv: list[str] | None = None) -> int:
         source = payload["source_binding"]
         source_kind = source["source_kind"]
         source_id = (
-            source["run_id"]
-            if source_kind == "formal_run"
-            else source["case_id"]
+            source["case_id"]
+            if source_kind == "semantic_evaluator_case"
+            else source["run_id"]
         )
     print(
         "[Phase 5] "

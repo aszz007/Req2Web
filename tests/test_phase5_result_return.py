@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 import json
+from contextlib import redirect_stdout
 from hashlib import sha256
+from io import StringIO
 from pathlib import Path
 import shutil
 import sys
 import unittest
+from unittest.mock import patch
 import uuid
 
 
@@ -17,6 +20,7 @@ from req2web_runtime.phase5_result_return import (  # noqa: E402
     create_phase5_result_return,
     validate_phase5_result_return,
 )
+from scripts.build_phase5_result_return import main as result_return_cli_main  # noqa: E402
 
 
 class Phase5ResultReturnTest(unittest.TestCase):
@@ -131,6 +135,36 @@ class Phase5ResultReturnTest(unittest.TestCase):
                 manifest_path=manifest_path,
             ),
             manifest,
+        )
+
+    def test_publication_action_cli_reports_run_id(self) -> None:
+        result_root = self._publication_result_root()
+        tar_path = (self.return_root / "publication-cli-return.tar").resolve()
+        manifest_path = (
+            self.return_root / "publication-cli-return.manifest.json"
+        ).resolve()
+        output = StringIO()
+        with patch(
+            "scripts.build_phase5_result_return._outside_repository",
+            side_effect=lambda path, must_exist, name: path.resolve(
+                strict=must_exist
+            ),
+        ), redirect_stdout(output):
+            status = result_return_cli_main(
+                [
+                    "--result-root",
+                    str(result_root),
+                    "--tar",
+                    str(tar_path),
+                    "--manifest",
+                    str(manifest_path),
+                ]
+            )
+        self.assertEqual(status, 0)
+        self.assertIn("source_kind=publication_action", output.getvalue())
+        self.assertIn(
+            "source_id=phase5-publication-result-return-test",
+            output.getvalue(),
         )
 
     def test_publication_action_rejects_formal_claim_drift(self) -> None:
