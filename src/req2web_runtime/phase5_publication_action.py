@@ -42,6 +42,9 @@ from req2web_runtime.phase4_remote_qwen_langgraph_integrated import (
     ACTIVE_RUNNER_REVISION,
     run_phase4_remote_qwen_langgraph_integrated,
 )
+from req2web_runtime.phase4_fresh_delivery import (
+    build_phase4_actual_context_delivery_materials,
+)
 
 
 SCHEMA_VERSION = "req2web.phase5.publication_action.v1"
@@ -51,6 +54,7 @@ RUN_SUMMARY_SCHEMA_VERSION = f"{SCHEMA_VERSION}.summary"
 ROW_SUMMARY_SCHEMA_VERSION = f"{SCHEMA_VERSION}.row_summary"
 PROJECTION_RECEIPT_SCHEMA_VERSION = f"{SCHEMA_VERSION}.projection_receipt"
 BASELINE_CORPUS_SCHEMA_VERSION = f"{SCHEMA_VERSION}.baseline_corpus"
+BASELINE_G0_PREFLIGHT_SCHEMA_VERSION = f"{SCHEMA_VERSION}.baseline_g0_preflight"
 ROOT_MARKER = ".req2web-phase5-publication-action-root"
 EXPERIMENT_ID = "phase5-publication-project-authored-path2-v1"
 TOTAL_GENERATE_CALL_CAP = 48
@@ -825,6 +829,7 @@ def run_phase5_publication_action(
     case_inputs: dict[str, dict[str, object]] = {}
     upstream_by_case: dict[str, dict[str, object]] = {}
     template_for_case: dict[str, Mapping[str, object]] = {}
+    baseline_g0_preflight_cases: list[dict[str, object]] = []
     for case_index, case_value in enumerate(fixtures["drafts"]["cases"], start=1):
         case_ref = str(case_value["case_ref"])
         case = _case_input(case_value, case_index)
@@ -857,6 +862,84 @@ def run_phase5_publication_action(
         case_inputs[case_ref] = case
         upstream_by_case[case_ref] = upstream
         template_for_case[case_ref] = template
+
+        try:
+            materials = build_phase4_actual_context_delivery_materials(
+                graph_state={"b_input": upstream["adaptation"].b_input},
+                context=upstream["context"],
+                guidance=upstream["guidance"],
+                material_root=(
+                    result_root / "baseline" / f"{case_index:02d}" / "g0-preflight"
+                ).resolve(strict=False),
+            )
+        except Exception as exc:
+            failure = {
+                "case_index": case_index,
+                "case_ref": case_ref,
+                "error_type": type(exc).__name__,
+                "message": str(exc),
+                "generate_started_count": 0,
+                "automatic_retry": False,
+            }
+            preflight_body = {
+                "schema_version": BASELINE_G0_PREFLIGHT_SCHEMA_VERSION,
+                "case_count": len(baseline_g0_preflight_cases),
+                "all_cases_passed": False,
+                "cases": baseline_g0_preflight_cases,
+                "failure": failure,
+                "generate_started_count": 0,
+                "model_loaded": False,
+                "automatic_retry": False,
+            }
+            _fresh._write_fsync(
+                result_root / "baseline_g0_preflight_summary.json",
+                _canonical(
+                    {
+                        **preflight_body,
+                        "preflight_identity": _fresh._identity(
+                            preflight_body,
+                            revision=BASELINE_G0_PREFLIGHT_SCHEMA_VERSION,
+                        ),
+                    }
+                ),
+            )
+            raise
+        baseline_g0_preflight_cases.append(
+            {
+                "case_index": case_index,
+                "case_ref": case_ref,
+                "source_kind": materials.binding["source_kind"],
+                "binding_id": materials.binding["binding_id"],
+                "package_id": materials.binding["package_id"],
+                "page_id": materials.binding["page_id"],
+                "graph_assembler_bindings_exact": materials.binding[
+                    "graph_assembler_bindings_exact"
+                ],
+                "passed": True,
+            }
+        )
+
+    baseline_g0_preflight_body = {
+        "schema_version": BASELINE_G0_PREFLIGHT_SCHEMA_VERSION,
+        "case_count": len(baseline_g0_preflight_cases),
+        "all_cases_passed": len(baseline_g0_preflight_cases) == 4,
+        "cases": baseline_g0_preflight_cases,
+        "failure": None,
+        "generate_started_count": 0,
+        "model_loaded": False,
+        "automatic_retry": False,
+    }
+    baseline_g0_preflight = {
+        **baseline_g0_preflight_body,
+        "preflight_identity": _fresh._identity(
+            baseline_g0_preflight_body,
+            revision=BASELINE_G0_PREFLIGHT_SCHEMA_VERSION,
+        ),
+    }
+    _fresh._write_fsync(
+        result_root / "baseline_g0_preflight_summary.json",
+        _canonical(baseline_g0_preflight),
+    )
 
     rows_by_id = {str(item["row_id"]): item for item in matrix["rows"]}
     case_index_by_ref = {
@@ -974,6 +1057,9 @@ def run_phase5_publication_action(
         "completed_runtime_row_count": len(completed),
         "node_generate_call_cap": TOTAL_GENERATE_CALL_CAP,
         "aggregate": aggregate,
+        "baseline_g0_preflight_identity": baseline_g0_preflight[
+            "preflight_identity"
+        ],
         "rows": completed,
         "infrastructure_failure": infrastructure_failure,
         "raw_first": True,
@@ -1001,6 +1087,7 @@ def run_phase5_publication_action(
 
 __all__ = [
     "ACTION_PACKAGE_SCHEMA_VERSION",
+    "BASELINE_G0_PREFLIGHT_SCHEMA_VERSION",
     "EXPERIMENT_ID",
     "IRRELEVANT_EVIDENCE_ROLE",
     "NODE_EVIDENCE_ROLES",

@@ -1498,6 +1498,9 @@ class RetrievalGuidedPageSpecBuilder:
             affected: list[AffectedPageSpecField] = []
             if item.value == "empty_state":
                 use_case_id = _best_use_case(context, "filter_control")
+                empty_state_preexisting = any(
+                    state.name == "empty" for state in page_spec.states
+                )
                 empty_state = _ensure_empty_state(page_spec)
                 interaction = next(
                     (
@@ -1588,6 +1591,11 @@ class RetrievalGuidedPageSpecBuilder:
                         AffectedPageSpecField(check.check_id, "description"),
                     )
                 )
+                if not empty_state_preexisting:
+                    affected.insert(
+                        0,
+                        AffectedPageSpecField(empty_state.state_id, "description"),
+                    )
             else:
                 use_case_id = self._recovery_use_case(page_spec, item.value)
                 if use_case_id is None:

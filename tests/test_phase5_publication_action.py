@@ -378,10 +378,22 @@ class Phase5PublicationActionTests(unittest.TestCase):
                     python_executable="python-test",
                     confirm_publication_action=True,
                 )
+                preflight = json.loads(
+                    (result_root / "baseline_g0_preflight_summary.json").read_text(
+                        encoding="utf-8"
+                    )
+                )
         self.assertEqual(child.call_count, 12)
         self.assertEqual(summary["completed_runtime_row_count"], 12)
         self.assertEqual(summary["aggregate"]["total_generate_started_count"], 48)
         self.assertEqual(summary["status"], "completed_descriptive_results")
+        self.assertIs(preflight["all_cases_passed"], True)
+        self.assertEqual(preflight["case_count"], 4)
+        self.assertEqual(preflight["generate_started_count"], 0)
+        self.assertEqual(
+            summary["baseline_g0_preflight_identity"],
+            preflight["preflight_identity"],
+        )
         for call in child.call_args_list:
             self.assertEqual(tuple(call.kwargs["provider_evidence_projection_by_node"]), NODE_ORDER)
 

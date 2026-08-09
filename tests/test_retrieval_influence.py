@@ -97,6 +97,53 @@ class RetrievalInfluenceTest(TestCase):
         self.assertEqual(outcomes["validation"], "guidance_not_applicable_or_ignored")
         self.assertGreater(report.decision_status_counts["ignored"], 0)
 
+    def test_explicit_empty_state_has_validation_attribution(self) -> None:
+        context = build_context(
+            requirement=(
+                "Build a mobile field-visit check-in page with a conservative recovery action."
+            ),
+            summary="Mobile field check-in with blocked-state recovery.",
+            device="mobile",
+            task_type="mobile_empty_state_recovery",
+            constraints=[
+                "If no data is available, block completion and explain the recovery path."
+            ],
+            use_cases=[
+                UseCase(
+                    "UC-01",
+                    "Complete check-in",
+                    "Field worker",
+                    "Confirm a usable location and complete check-in",
+                    "The visit is recorded",
+                ),
+                UseCase(
+                    "UC-02",
+                    "Recover location access",
+                    "Field worker",
+                    "Resolve a blocked location and continue",
+                    "Check-in can continue",
+                ),
+            ],
+            ui_title="Field visit results",
+            ui_summary="Field status panel with a recovery action.",
+            validation_title="Empty-result recovery boundary",
+            validation_summary=(
+                "A check-in cannot complete while the location result is empty, "
+                "and recovery must resolve the blocking state."
+            ),
+        )
+        report = self._report(context)[-1]
+        self.assertTrue(report.passed)
+        validation_entities = {
+            field["entity_id"]
+            for decision in report.decision_traceability
+            if decision["source_kind"] == "retrieval_guidance"
+            and decision["role"] == "validation"
+            and decision["disposition"] == "adopted"
+            for field in decision["affected_fields"]
+        }
+        self.assertIn("state-empty", validation_entities)
+
     def test_rejects_fabricated_affected_field_and_missing_decision(self) -> None:
         context = build_context()
         guidance, full, ablations, rendered, _ = self._report(context)
