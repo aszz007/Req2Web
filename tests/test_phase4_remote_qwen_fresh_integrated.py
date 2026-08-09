@@ -207,6 +207,10 @@ class Phase4RemoteFreshIntegratedProfileTests(unittest.TestCase):
             f1["exact_output_contract"]["invariants"],
         )
         self.assertIn(
+            "page_title and layout_pattern; every section title and purpose; and every component component_type, section_local_id, label, and purpose are non-empty canonical text",
+            f1["exact_output_contract"]["invariants"],
+        )
+        self.assertIn(
             "finalize the complete components array",
             "\n".join(f1["instructions"]),
         )

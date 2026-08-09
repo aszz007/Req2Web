@@ -264,6 +264,10 @@ class Phase5PublicationActionTests(unittest.TestCase):
             "finalize the complete components array",
             "\n".join(prompt["instructions"]),
         )
+        self.assertIn(
+            "page_title and layout_pattern; every section title and purpose; and every component component_type, section_local_id, label, and purpose are non-empty canonical text",
+            prompt["exact_output_contract"]["invariants"],
+        )
 
     def test_parent_runs_exact_matrix_and_delegates_each_row_once(self) -> None:
         fake_inventory = {

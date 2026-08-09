@@ -52,7 +52,7 @@ SOURCE_UPSTREAM_IDENTITY = (
     "sha256:537e443cc4b7134b233db7d28bca4bf9976dbab08408e4825ad2879df0f53f03"
 )
 PROMPT_AUTHORITY_SHA256 = (
-    "sha256:b65ebf48ca06eb880db6194844139f5b7cba67b3f454d2c3bd791e556e46f87a"
+    "sha256:68de2486f92ccf20aa3c2b6ba3826c3f201ba2ba14e9355e1a86ae40aca4c66f"
 )
 RESULT_ROOT_MARKER_NAME = ".req2web-phase5-local-f1-diagnostic-root"
 
@@ -479,12 +479,12 @@ def _diagnostic_artifacts(
     )
     if (
         PROMPT_AUTHORITY_REVISION
-        != "f3_f4_explicit_actual_state_plan_a07a_direct_english_v15"
+        != "f3_f4_explicit_actual_state_plan_a07a_direct_english_v16"
         or PROMPT_AUTHORITY_IDENTITY.get("sha256") != PROMPT_AUTHORITY_SHA256
     ):
         raise Phase5LocalF1DiagnosticError("shared prompt authority drifted")
-    prompt_value = _strict_object(prompt_bytes, name="v15 F1 prompt")
-    validate_english_publication_value(prompt_value, artifact_name="v15 F1 prompt")
+    prompt_value = _strict_object(prompt_bytes, name="v16 F1 prompt")
+    validate_english_publication_value(prompt_value, artifact_name="v16 F1 prompt")
     config = {
         "schema_version": f"{SCHEMA_PREFIX}.config",
         "node_id": "F1",
@@ -541,7 +541,7 @@ def prepare_phase5_local_f1_diagnostic(
         not isinstance(diagnostic_run_id, str)
         or CORE2_EXPECTATIONS.get(expectation.condition_id) != expectation
         or not diagnostic_run_id.startswith(
-            f"phase5-local-f1-v15-core2-{expectation.condition_id}-"
+            f"phase5-local-f1-v16-core2-{expectation.condition_id}-"
         )
     ):
         raise Phase5LocalF1DiagnosticError("diagnostic run ID is invalid")
@@ -551,14 +551,14 @@ def prepare_phase5_local_f1_diagnostic(
         expectation=expectation,
     )
     if PROMPT_AUTHORITY_IDENTITY.get("sha256") != PROMPT_AUTHORITY_SHA256:
-        raise Phase5LocalF1DiagnosticError("v15 prompt authority identity drifted")
+        raise Phase5LocalF1DiagnosticError("v16 prompt authority identity drifted")
     provisional_prompt = build_canonical_f1_f4_prompt(
         node_id="F1",
         input_bytes=source.input_bytes,
     )
     validate_english_publication_value(
-        _strict_object(provisional_prompt, name="v15 F1 prompt"),
-        artifact_name="v15 F1 prompt",
+        _strict_object(provisional_prompt, name="v16 F1 prompt"),
+        artifact_name="v16 F1 prompt",
     )
 
     prepared_root, marker = _prepare_result_root(
@@ -584,12 +584,12 @@ def prepare_phase5_local_f1_diagnostic(
         expectation=expectation,
     )
     if prompt_bytes != provisional_prompt:
-        raise Phase5LocalF1DiagnosticError("v15 prompt reconstruction drifted")
+        raise Phase5LocalF1DiagnosticError("v16 prompt reconstruction drifted")
     runtime_preflight = {
         "schema_version": f"{SCHEMA_PREFIX}.component_runtime_preflight",
         "diagnostic_run_id": diagnostic_run_id,
         "result_root_marker": marker,
-        "scope": "one_local_nf4_v15_core2_condition_f1_diagnostic",
+        "scope": "one_local_nf4_v16_core2_condition_f1_diagnostic",
         "pipeline_scope": "component_only",
         "node_scope": ["F1"],
         "unused_nodes": ["F2", "F3", "F4"],
@@ -826,11 +826,11 @@ def run_phase5_local_f1_diagnostic(
         "schema_version": f"{SCHEMA_PREFIX}.summary",
         "diagnostic_run_id": diagnostic_run_id,
         "status": (
-            "local_nf4_v15_core2_f1_raw_contract_pass"
+            "local_nf4_v16_core2_f1_raw_contract_pass"
             if validated is not None
             else "failed_closed"
         ),
-        "scope": "one_local_nf4_v15_core2_condition_f1_diagnostic",
+        "scope": "one_local_nf4_v16_core2_condition_f1_diagnostic",
         "source_run_id": SOURCE_RUN_ID,
         "source_execution_index": expectation.execution_index,
         "source_condition_id": expectation.condition_id,

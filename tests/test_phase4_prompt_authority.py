@@ -59,6 +59,13 @@ class Phase4PromptAuthorityTest(unittest.TestCase):
             instructions,
         )
         self.assertIn("Do not emit Han characters", instructions)
+        f1_invariants = manifest["output_contracts"]["F1"]["invariants"]
+        self.assertIn(
+            "page_title and layout_pattern; every section title and purpose; "
+            "and every component component_type, section_local_id, label, "
+            "and purpose are non-empty canonical text",
+            f1_invariants,
+        )
         f2_instructions = "\n".join(
             manifest["node_specific_instructions"]["F2"]
         )

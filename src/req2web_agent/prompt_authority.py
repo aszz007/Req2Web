@@ -16,7 +16,7 @@ from typing import Mapping
 PROMPT_AUTHORITY_SCHEMA_VERSION = "req2web.agent.f1_f4_prompt_authority.v1"
 PROMPT_SCHEMA_VERSION = "req2web.agent.f1_f4_prompt.v1"
 PROMPT_AUTHORITY_REVISION = (
-    "f3_f4_explicit_actual_state_plan_a07a_direct_english_v15"
+    "f3_f4_explicit_actual_state_plan_a07a_direct_english_v16"
 )
 REGISTRY_REVISION = "req2web.phase4.registry.p4_02a.v1"
 NODE_ORDER = ("F1", "F2", "F3", "F4")
@@ -91,6 +91,7 @@ def _base_output_contracts() -> dict[str, dict[str, object]]:
             "invariants": [
                 "sections and components are non-empty arrays",
                 "all local_id values are non-empty and unique across sections and components",
+                "page_title and layout_pattern; every section title and purpose; and every component component_type, section_local_id, label, and purpose are non-empty canonical text",
                 "sections contain component IDs only; components are separate top-level rows and are never nested inside sections",
                 "components array order exactly equals the concatenation of sections[].component_local_ids",
                 "each component.section_local_id names the section that lists that component local ID",

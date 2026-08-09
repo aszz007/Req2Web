@@ -243,7 +243,7 @@ class Phase5LocalF1DiagnosticTests(unittest.TestCase):
                     expectation=expectation,
                 )
 
-    def test_v15_prompt_is_built_by_shared_authority(self) -> None:
+    def test_v16_prompt_is_built_by_shared_authority(self) -> None:
         profile = LocalQwenProfile.create(
             model_root_identity={
                 "identity_kind": "canonical_json",
@@ -263,7 +263,7 @@ class Phase5LocalF1DiagnosticTests(unittest.TestCase):
         prompt, config, request = _diagnostic_artifacts(
             source=source,  # type: ignore[arg-type]
             profile=profile,
-            diagnostic_run_id="phase5-local-f1-v15-core2-none-test",
+            diagnostic_run_id="phase5-local-f1-v16-core2-none-test",
         )
         prompt_value = json.loads(prompt)
         self.assertEqual(prompt_value["prompt_revision"], PROMPT_AUTHORITY_REVISION)
@@ -322,7 +322,7 @@ class Phase5LocalF1DiagnosticTests(unittest.TestCase):
             profile=profile,
         )
 
-    def test_preparation_uses_component_only_v15_bootstrap(self) -> None:
+    def test_preparation_uses_component_only_v16_bootstrap(self) -> None:
         parent = self._test_root()
         result_root = parent / "diagnostic"
         profile = self._prepared(parent).profile
@@ -364,7 +364,7 @@ class Phase5LocalF1DiagnosticTests(unittest.TestCase):
                 model_root=parent,
                 integrity_evidence=parent / "unused-evidence.json",
                 result_root=result_root,
-                diagnostic_run_id="phase5-local-f1-v15-core2-none-test-bootstrap",
+                diagnostic_run_id="phase5-local-f1-v16-core2-none-test-bootstrap",
             )
         self.assertEqual(prepared.result_root, result_root.resolve())
         self.assertFalse((result_root / "pre_call_manifest.json").exists())
@@ -534,7 +534,7 @@ class Phase5LocalF1DiagnosticTests(unittest.TestCase):
                 model_root=result_root,
                 integrity_evidence=result_root / "unused-evidence.json",
                 result_root=result_root,
-                diagnostic_run_id="phase5-local-f1-v15-core2-none-test",
+                diagnostic_run_id="phase5-local-f1-v16-core2-none-test",
             )
         self.assertEqual((result_root / "raw_response.bin").read_bytes(), raw)
         self.assertTrue(summary["raw_contract_pass"])
@@ -566,7 +566,7 @@ class Phase5LocalF1DiagnosticTests(unittest.TestCase):
                 model_root=result_root,
                 integrity_evidence=result_root / "unused-evidence.json",
                 result_root=result_root,
-                diagnostic_run_id="phase5-local-f1-v15-core2-none-test",
+                diagnostic_run_id="phase5-local-f1-v16-core2-none-test",
             )
         self.assertEqual((result_root / "raw_response.bin").read_bytes(), raw)
         self.assertFalse(summary["raw_contract_pass"])

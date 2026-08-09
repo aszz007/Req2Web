@@ -102,10 +102,10 @@ ACCEPTED_PHASE4_CANONICAL_FULL_FLOW_RUNNER = (
     "@78b1a12e4814f025cfe4737de196729272941ada"
 )
 EXPECTED_PROMPT_AUTHORITY_REVISION = (
-    "f3_f4_explicit_actual_state_plan_a07a_direct_english_v15"
+    "f3_f4_explicit_actual_state_plan_a07a_direct_english_v16"
 )
 EXPECTED_PROMPT_AUTHORITY_SHA256 = (
-    "sha256:b65ebf48ca06eb880db6194844139f5b7cba67b3f454d2c3bd791e556e46f87a"
+    "sha256:68de2486f92ccf20aa3c2b6ba3826c3f201ba2ba14e9355e1a86ae40aca4c66f"
 )
 SYNTHETIC_VALIDATION_FLOW_ROLE = (
     "shared_phase4_langgraph_synthetic_no_model_validation_only"
