@@ -17,6 +17,7 @@ import os
 from pathlib import Path
 import sys
 import tarfile
+from types import MappingProxyType
 from typing import Mapping
 
 from req2web_agent.prompt_authority import (
@@ -41,28 +42,14 @@ SCHEMA_PREFIX = "req2web.phase5.local_f1_diagnostic.v1"
 SOURCE_RUN_ID = "phase5-publication-path2-v3-20260809"
 SOURCE_CASE_ID = "publication-core-case-02-service-request"
 SOURCE_REQUEST_ID = "phase5-publication-request-02"
-SOURCE_CONDITION_ID = "none"
-SOURCE_EXECUTION_INDEX = 9
-SOURCE_ROW_ID = (
-    "phase5-publication-candidate-row-"
-    "d07f81d94690955cc7b192d9dba453953ed475a94d19c811d1e2d298cf5ff2c7"
-)
-SOURCE_ROW_ROOT = f"rows/09-{SOURCE_ROW_ID}"
 SOURCE_TAR_SHA256 = (
     "e14f30eec4f5490e167db05ef4a2a206aceebd459bc03f308d109ac544ee2d24"
 )
 SOURCE_MANIFEST_SHA256 = (
     "f47b731f35363e6ba7ce979a560b8e1b8d87acd6ef746dab0ccb1cc3a07db420"
 )
-SOURCE_INPUT_SHA256 = (
-    "5b34b9ffc8e8f6e0555214f9a5626203c5cd0439c3285ed423049dd572e90ee6"
-)
-SOURCE_INPUT_BYTE_LENGTH = 2664
 SOURCE_UPSTREAM_IDENTITY = (
     "sha256:537e443cc4b7134b233db7d28bca4bf9976dbab08408e4825ad2879df0f53f03"
-)
-SOURCE_PROJECTION_IDENTITY = (
-    "sha256:6ea390c782d54105e7e6d9dade8265ab5eab7de87366f4b269e919117cbfd2b2"
 )
 PROMPT_AUTHORITY_SHA256 = (
     "sha256:b65ebf48ca06eb880db6194844139f5b7cba67b3f454d2c3bd791e556e46f87a"
@@ -91,20 +78,84 @@ class SourceExpectation:
     projection_identity: str
 
 
-CORE2_NONE_EXPECTATION = SourceExpectation(
-    tar_sha256=SOURCE_TAR_SHA256,
-    manifest_sha256=SOURCE_MANIFEST_SHA256,
-    run_id=SOURCE_RUN_ID,
-    case_id=SOURCE_CASE_ID,
-    request_id=SOURCE_REQUEST_ID,
-    condition_id=SOURCE_CONDITION_ID,
-    execution_index=SOURCE_EXECUTION_INDEX,
-    row_id=SOURCE_ROW_ID,
-    row_root=SOURCE_ROW_ROOT,
-    input_sha256=SOURCE_INPUT_SHA256,
-    input_byte_length=SOURCE_INPUT_BYTE_LENGTH,
-    upstream_identity=SOURCE_UPSTREAM_IDENTITY,
-    projection_identity=SOURCE_PROJECTION_IDENTITY,
+def _core2_expectation(
+    *,
+    condition_id: str,
+    execution_index: int,
+    row_suffix: str,
+    input_sha256: str,
+    input_byte_length: int,
+    projection_identity: str,
+) -> SourceExpectation:
+    row_id = f"phase5-publication-candidate-row-{row_suffix}"
+    return SourceExpectation(
+        tar_sha256=SOURCE_TAR_SHA256,
+        manifest_sha256=SOURCE_MANIFEST_SHA256,
+        run_id=SOURCE_RUN_ID,
+        case_id=SOURCE_CASE_ID,
+        request_id=SOURCE_REQUEST_ID,
+        condition_id=condition_id,
+        execution_index=execution_index,
+        row_id=row_id,
+        row_root=f"rows/{execution_index:02d}-{row_id}",
+        input_sha256=input_sha256,
+        input_byte_length=input_byte_length,
+        upstream_identity=SOURCE_UPSTREAM_IDENTITY,
+        projection_identity=projection_identity,
+    )
+
+
+CORE2_REMOVE_CRITICAL_ROLE_EXPECTATION = _core2_expectation(
+    condition_id="remove_critical_role",
+    execution_index=2,
+    row_suffix=(
+        "426f765f972bf08243459cfac5c0be4549a5c61a94442dbf24013ce442fa4247"
+    ),
+    input_sha256=(
+        "5b34b9ffc8e8f6e0555214f9a5626203c5cd0439c3285ed423049dd572e90ee6"
+    ),
+    input_byte_length=2664,
+    projection_identity=(
+        "sha256:bd9023021e0255d4c36d84cb099f4c6a5d951dc497bbcee30379b2ea5289f74e"
+    ),
+)
+CORE2_IRRELEVANT_EVIDENCE_EXPECTATION = _core2_expectation(
+    condition_id="irrelevant_evidence",
+    execution_index=5,
+    row_suffix=(
+        "777152750b5142f29bf7afd68f261160ff85f25f8bc3a8094f40d9425a1e669b"
+    ),
+    input_sha256=(
+        "a910db8800db1bab9a9b3958462ba4f419db8322ecfa3c21979618def9ba014d"
+    ),
+    input_byte_length=2883,
+    projection_identity=(
+        "sha256:43c1a510918ded1049db9dbff1cb35b7472d38b16a543b2143ee2b71ebe0860f"
+    ),
+)
+CORE2_NONE_EXPECTATION = _core2_expectation(
+    condition_id="none",
+    execution_index=9,
+    row_suffix=(
+        "d07f81d94690955cc7b192d9dba453953ed475a94d19c811d1e2d298cf5ff2c7"
+    ),
+    input_sha256=(
+        "5b34b9ffc8e8f6e0555214f9a5626203c5cd0439c3285ed423049dd572e90ee6"
+    ),
+    input_byte_length=2664,
+    projection_identity=(
+        "sha256:6ea390c782d54105e7e6d9dade8265ab5eab7de87366f4b269e919117cbfd2b2"
+    ),
+)
+CORE2_EXPECTATIONS: Mapping[str, SourceExpectation] = MappingProxyType(
+    {
+        item.condition_id: item
+        for item in (
+            CORE2_NONE_EXPECTATION,
+            CORE2_IRRELEVANT_EVIDENCE_EXPECTATION,
+            CORE2_REMOVE_CRITICAL_ROLE_EXPECTATION,
+        )
+    }
 )
 
 
@@ -274,7 +325,7 @@ def _archive_members(
     return observed
 
 
-def load_core2_none_source_material(
+def load_core2_source_material(
     *,
     tar_path: Path,
     manifest_path: Path,
@@ -400,11 +451,27 @@ def load_core2_none_source_material(
     )
 
 
+def load_core2_none_source_material(
+    *,
+    tar_path: Path,
+    manifest_path: Path,
+    expectation: SourceExpectation = CORE2_NONE_EXPECTATION,
+) -> SourceMaterial:
+    """Compatibility wrapper for the original Core 2 baseline diagnostic."""
+
+    return load_core2_source_material(
+        tar_path=tar_path,
+        manifest_path=manifest_path,
+        expectation=expectation,
+    )
+
+
 def _diagnostic_artifacts(
     *,
     source: SourceMaterial,
     profile: _local.LocalQwenProfile,
     diagnostic_run_id: str,
+    expectation: SourceExpectation = CORE2_NONE_EXPECTATION,
 ) -> tuple[bytes, bytes, bytes]:
     prompt_bytes = build_canonical_f1_f4_prompt(
         node_id="F1",
@@ -443,10 +510,10 @@ def _diagnostic_artifacts(
         "schema_version": f"{SCHEMA_PREFIX}.request",
         "diagnostic_run_id": diagnostic_run_id,
         "source_run_id": SOURCE_RUN_ID,
-        "source_execution_index": SOURCE_EXECUTION_INDEX,
+        "source_execution_index": expectation.execution_index,
         "case_id": SOURCE_CASE_ID,
         "request_id": SOURCE_REQUEST_ID,
-        "condition_id": SOURCE_CONDITION_ID,
+        "condition_id": expectation.condition_id,
         "node_id": "F1",
         "call_kind": "integrated",
         "b_aux_disposition": "absent/not_requested",
@@ -466,17 +533,22 @@ def prepare_phase5_local_f1_diagnostic(
     integrity_evidence: Path,
     result_root: Path,
     diagnostic_run_id: str,
+    expectation: SourceExpectation = CORE2_NONE_EXPECTATION,
 ) -> PreparedDiagnostic:
     """Prepare all persisted call inputs before the supervised model load."""
 
     if (
         not isinstance(diagnostic_run_id, str)
-        or not diagnostic_run_id.startswith("phase5-local-f1-v15-core2-none-")
+        or CORE2_EXPECTATIONS.get(expectation.condition_id) != expectation
+        or not diagnostic_run_id.startswith(
+            f"phase5-local-f1-v15-core2-{expectation.condition_id}-"
+        )
     ):
         raise Phase5LocalF1DiagnosticError("diagnostic run ID is invalid")
-    source = load_core2_none_source_material(
+    source = load_core2_source_material(
         tar_path=tar_path,
         manifest_path=manifest_path,
+        expectation=expectation,
     )
     if PROMPT_AUTHORITY_IDENTITY.get("sha256") != PROMPT_AUTHORITY_SHA256:
         raise Phase5LocalF1DiagnosticError("v15 prompt authority identity drifted")
@@ -509,6 +581,7 @@ def prepare_phase5_local_f1_diagnostic(
         source=source,
         profile=profile,
         diagnostic_run_id=diagnostic_run_id,
+        expectation=expectation,
     )
     if prompt_bytes != provisional_prompt:
         raise Phase5LocalF1DiagnosticError("v15 prompt reconstruction drifted")
@@ -516,7 +589,7 @@ def prepare_phase5_local_f1_diagnostic(
         "schema_version": f"{SCHEMA_PREFIX}.component_runtime_preflight",
         "diagnostic_run_id": diagnostic_run_id,
         "result_root_marker": marker,
-        "scope": "one_local_nf4_v15_core2_none_f1_diagnostic",
+        "scope": "one_local_nf4_v15_core2_condition_f1_diagnostic",
         "pipeline_scope": "component_only",
         "node_scope": ["F1"],
         "unused_nodes": ["F2", "F3", "F4"],
@@ -623,6 +696,7 @@ def run_phase5_local_f1_diagnostic(
     integrity_evidence: Path,
     result_root: Path,
     diagnostic_run_id: str,
+    expectation: SourceExpectation = CORE2_NONE_EXPECTATION,
 ) -> dict[str, object]:
     """Run exactly one local NF4 F1 call and close the worker in all paths."""
 
@@ -633,6 +707,7 @@ def run_phase5_local_f1_diagnostic(
         integrity_evidence=integrity_evidence,
         result_root=result_root,
         diagnostic_run_id=diagnostic_run_id,
+        expectation=expectation,
     )
     runtime: _local.P4D1SupervisedRuntime | None = None
     partial = bytearray()
@@ -755,10 +830,10 @@ def run_phase5_local_f1_diagnostic(
             if validated is not None
             else "failed_closed"
         ),
-        "scope": "one_local_nf4_v15_core2_none_f1_diagnostic",
+        "scope": "one_local_nf4_v15_core2_condition_f1_diagnostic",
         "source_run_id": SOURCE_RUN_ID,
-        "source_execution_index": SOURCE_EXECUTION_INDEX,
-        "source_condition_id": SOURCE_CONDITION_ID,
+        "source_execution_index": expectation.execution_index,
+        "source_condition_id": expectation.condition_id,
         "prompt_revision": PROMPT_AUTHORITY_REVISION,
         "prompt_authority_identity": copy.deepcopy(PROMPT_AUTHORITY_IDENTITY),
         "profile_name": prepared.profile.profile_name,
@@ -796,12 +871,16 @@ def run_phase5_local_f1_diagnostic(
 
 
 __all__ = [
+    "CORE2_EXPECTATIONS",
+    "CORE2_IRRELEVANT_EVIDENCE_EXPECTATION",
     "CORE2_NONE_EXPECTATION",
+    "CORE2_REMOVE_CRITICAL_ROLE_EXPECTATION",
     "PROMPT_AUTHORITY_SHA256",
     "Phase5LocalF1DiagnosticError",
     "PreparedDiagnostic",
     "SourceExpectation",
     "SourceMaterial",
+    "load_core2_source_material",
     "load_core2_none_source_material",
     "prepare_phase5_local_f1_diagnostic",
     "run_phase5_local_f1_diagnostic",

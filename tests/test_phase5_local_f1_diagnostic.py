@@ -30,6 +30,7 @@ from req2web_orchestration.phase4_graph import (  # noqa: E402
 from req2web_runtime import phase4_local_qwen as local_runtime  # noqa: E402
 from req2web_runtime.phase4_local_qwen import LocalQwenProfile  # noqa: E402
 from req2web_runtime.phase5_local_f1_diagnostic import (  # noqa: E402
+    CORE2_EXPECTATIONS,
     PROMPT_AUTHORITY_SHA256,
     Phase5LocalF1DiagnosticError,
     PreparedDiagnostic,
@@ -344,7 +345,7 @@ class Phase5LocalF1DiagnosticTests(unittest.TestCase):
         with (
             patch(
                 "req2web_runtime.phase5_local_f1_diagnostic."
-                "load_core2_none_source_material",
+                "load_core2_source_material",
                 return_value=source,
             ),
             patch(
@@ -381,6 +382,25 @@ class Phase5LocalF1DiagnosticTests(unittest.TestCase):
         serialized = canonical(preflight)
         self.assertNotIn(b"p4-03-prompt-v1", serialized)
         self.assertNotIn(b"fresh_integrated_policy", serialized)
+
+    def test_three_core2_condition_expectations_are_frozen(self) -> None:
+        self.assertEqual(
+            set(CORE2_EXPECTATIONS),
+            {"none", "irrelevant_evidence", "remove_critical_role"},
+        )
+        self.assertEqual(CORE2_EXPECTATIONS["none"].execution_index, 9)
+        self.assertEqual(
+            CORE2_EXPECTATIONS["irrelevant_evidence"].execution_index,
+            5,
+        )
+        self.assertEqual(
+            CORE2_EXPECTATIONS["remove_critical_role"].execution_index,
+            2,
+        )
+        self.assertEqual(
+            CORE2_EXPECTATIONS["irrelevant_evidence"].input_sha256,
+            "a910db8800db1bab9a9b3958462ba4f419db8322ecfa3c21979618def9ba014d",
+        )
 
     def test_component_runtime_starter_is_one_call_and_stage_neutral(self) -> None:
         model_root = self._test_root()

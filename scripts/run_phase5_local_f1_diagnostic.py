@@ -7,6 +7,7 @@ import json
 from pathlib import Path
 
 from req2web_runtime.phase5_local_f1_diagnostic import (
+    CORE2_EXPECTATIONS,
     run_phase5_local_f1_diagnostic,
 )
 
@@ -15,7 +16,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description=(
             "Run one component-only local NF4 F1 call from the exact preserved "
-            "Phase 5 Core 2 baseline input. This is not a publication rerun, "
+            "Phase 5 Core 2 condition input. This is not a publication rerun, "
             "full-chain run, or formal evaluation."
         )
     )
@@ -25,6 +26,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--integrity-evidence", type=Path, required=True)
     parser.add_argument("--result-root", type=Path, required=True)
     parser.add_argument("--diagnostic-run-id", required=True)
+    parser.add_argument(
+        "--condition-id",
+        choices=tuple(CORE2_EXPECTATIONS),
+        default="none",
+        help="Frozen Core 2 condition whose exact preserved F1 input is used.",
+    )
     parser.add_argument(
         "--confirm-one-local-nf4-f1-call",
         action="store_true",
@@ -44,6 +51,7 @@ def main() -> int:
         integrity_evidence=args.integrity_evidence.resolve(),
         result_root=args.result_root.resolve(),
         diagnostic_run_id=args.diagnostic_run_id,
+        expectation=CORE2_EXPECTATIONS[args.condition_id],
     )
     print(json.dumps(summary, ensure_ascii=False, sort_keys=True, indent=2))
     return 0 if summary["raw_contract_pass"] is True else 2
