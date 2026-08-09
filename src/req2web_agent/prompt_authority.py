@@ -16,7 +16,7 @@ from typing import Mapping
 PROMPT_AUTHORITY_SCHEMA_VERSION = "req2web.agent.f1_f4_prompt_authority.v1"
 PROMPT_SCHEMA_VERSION = "req2web.agent.f1_f4_prompt.v1"
 PROMPT_AUTHORITY_REVISION = (
-    "f3_f4_explicit_actual_state_plan_a07a_direct_english_v14"
+    "f3_f4_explicit_actual_state_plan_a07a_direct_english_v15"
 )
 REGISTRY_REVISION = "req2web.phase4.registry.p4_02a.v1"
 NODE_ORDER = ("F1", "F2", "F3", "F4")
@@ -220,6 +220,16 @@ def _base_instructions() -> list[str]:
 def _node_specific_instructions() -> dict[str, list[str]]:
     return {
         "F1": [
+            (
+                "Before emitting the F1 JSON object, finalize the complete "
+                "components array. Then, in components-array order, place "
+                "every component local_id exactly once in the "
+                "component_local_ids of the section identified by that "
+                "component's section_local_id. This includes every submit, "
+                "retry, and feedback component. The concatenation of "
+                "sections[].component_local_ids must exactly equal the "
+                "components array local_id order."
+            ),
             (
                 "When the requirement includes form submission, validation, "
                 "error recovery, retry, or final confirmation, represent data "

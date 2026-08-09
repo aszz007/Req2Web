@@ -70,6 +70,23 @@ class Phase4PromptAuthorityTest(unittest.TestCase):
             f1_instructions,
         )
         self.assertIn(
+            "finalize the complete components array",
+            f1_instructions,
+        )
+        self.assertIn(
+            "place every component local_id exactly once",
+            f1_instructions,
+        )
+        self.assertIn(
+            "every submit, retry, and feedback component",
+            f1_instructions,
+        )
+        self.assertIn(
+            "concatenation of sections[].component_local_ids must exactly "
+            "equal the components array local_id order",
+            f1_instructions,
+        )
+        self.assertIn(
             "dedicated advancement control",
             f1_instructions,
         )

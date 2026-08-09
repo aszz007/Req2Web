@@ -206,6 +206,10 @@ class Phase4RemoteFreshIntegratedProfileTests(unittest.TestCase):
             "components array order exactly equals the concatenation of sections[].component_local_ids",
             f1["exact_output_contract"]["invariants"],
         )
+        self.assertIn(
+            "finalize the complete components array",
+            "\n".join(f1["instructions"]),
+        )
         self.assertEqual(
             f4_contract["acceptance_check_constants"],
             {"entity_type": "candidate_acceptance_check", "refs": []},

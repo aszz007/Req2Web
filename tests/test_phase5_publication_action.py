@@ -260,6 +260,10 @@ class Phase5PublicationActionTests(unittest.TestCase):
             )
         )
         self.assertEqual(prompt["prompt_revision"], fresh.P4_05_FULL_DIRECT_PROMPT_REVISION)
+        self.assertIn(
+            "finalize the complete components array",
+            "\n".join(prompt["instructions"]),
+        )
 
     def test_parent_runs_exact_matrix_and_delegates_each_row_once(self) -> None:
         fake_inventory = {
