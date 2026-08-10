@@ -217,9 +217,16 @@ def _csv_bytes(rows: list[dict[str, Any]]) -> bytes:
 class DemoV2RegressionRunner:
     """Build exactly one fixture set and publish package plus aggregate evidence."""
 
-    def __init__(self, *, index_dir: Path, top_k: int = 2) -> None:
+    def __init__(
+        self,
+        *,
+        index_dir: Path,
+        top_k: int = 2,
+        backend: str = "tfidf",
+    ) -> None:
         self.index_dir = Path(index_dir)
         self.top_k = top_k
+        self.backend = backend
 
     def run(self, case_set: RegressionCaseSet, output_root: Path) -> dict[str, Any]:
         case_set.validate()
@@ -228,7 +235,12 @@ class DemoV2RegressionRunner:
             raise ValueError("output_root already exists and is not empty; refusing to overwrite")
         root.mkdir(parents=True, exist_ok=True)
         packages = root / "packages"; packages.mkdir()
-        retriever = create_retriever(RetrieverConfig(index_dir=self.index_dir.resolve(), backend="tfidf"))
+        retriever = create_retriever(
+            RetrieverConfig(
+                index_dir=self.index_dir.resolve(),
+                backend=self.backend,
+            )
+        )
         chain = MinimalAgentChain(DeterministicRequirementProvider(), retriever, top_k_per_role=self.top_k)
         records = []
         try:

@@ -146,8 +146,11 @@ class AgentChainTest(unittest.TestCase):
                 "\u7ed3\u7b97\u9875\u9762"
             )
 
-    def test_registry_keeps_future_backends_pluggable_but_disabled(self) -> None:
-        self.assertEqual(DEFAULT_RETRIEVER_REGISTRY.available_backends(), ("tfidf",))
+    def test_registry_exposes_only_the_three_local_lexical_backends(self) -> None:
+        self.assertEqual(
+            DEFAULT_RETRIEVER_REGISTRY.available_backends(),
+            ("bm25", "rrf", "tfidf"),
+        )
         registry = RetrieverRegistry()
         registry.register("test_backend", lambda config: self.retriever)
         configured = registry.create(

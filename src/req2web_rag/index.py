@@ -107,6 +107,38 @@ def _document_text(document: dict[str, Any]) -> str:
     return "\n".join(weighted)
 
 
+def _compact_result(document: dict[str, Any], score: float) -> dict[str, Any]:
+    """Project one backend score through the shared retrieval-result contract."""
+
+    result = {
+        "score": round(score, 6),
+        "doc_id": document["doc_id"],
+        "role": document["role"],
+        "dataset": document["dataset"],
+        "subset": document["subset"],
+        "sample_id": document["sample_id"],
+        "title": _english_projection(
+            document["title"],
+            role=document["role"],
+            field="title",
+            doc_id=document["doc_id"],
+        ),
+        "summary": _english_projection(
+            document["summary"],
+            role=document["role"],
+            field="summary",
+            doc_id=document["doc_id"],
+        ),
+        "result_projection_revision": RETRIEVAL_RESULT_PROJECTION_REVISION,
+        "references": _ascii_references(document["references"]),
+    }
+    if document["role"] == "validation":
+        result["validation_signals"] = build_validation_signals(document)
+    if document["role"] == "ui_reference":
+        result["ui_structure_signals"] = build_ui_structure_signals(document)
+    return result
+
+
 def build_tfidf_index(
     documents: list[dict[str, Any]], max_features: int = 30_000
 ) -> dict[str, Any]:
@@ -228,39 +260,118 @@ class TfidfIndex:
         results: list[dict[str, Any]] = []
         for document_index, score in ranked[:top_k]:
             document = self.documents[document_index]
-            result = {
-                "score": round(score, 6),
-                "doc_id": document["doc_id"],
-                "role": document["role"],
-                "dataset": document["dataset"],
-                "subset": document["subset"],
-                "sample_id": document["sample_id"],
-                "title": _english_projection(
-                    document["title"],
-                    role=document["role"],
-                    field="title",
-                    doc_id=document["doc_id"],
-                ),
-                "summary": _english_projection(
-                    document["summary"],
-                    role=document["role"],
-                    field="summary",
-                    doc_id=document["doc_id"],
-                ),
-                "result_projection_revision": (
-                    RETRIEVAL_RESULT_PROJECTION_REVISION
-                ),
-                "references": _ascii_references(document["references"]),
-            }
-            # Optional and validation-only: old consumers can ignore this
-            # field; guided generation gains a bounded trace to structured
-            # source facts hidden by the old compact result contract.
-            if document["role"] == "validation":
-                result["validation_signals"] = build_validation_signals(document)
-            if document["role"] == "ui_reference":
-                result["ui_structure_signals"] = build_ui_structure_signals(document)
-            results.append(result)
+            results.append(_compact_result(document, score))
         return results
 
     def search_by_role(self, query: str, top_k: int = 2) -> dict[str, list[dict[str, Any]]]:
         return {role: self.search(query, top_k=top_k, roles=[role]) for role in ROLE_ORDER}
+
+
+class Bm25Index:
+    """In-memory Okapi BM25 over the same validated document envelope."""
+
+    def __init__(
+        self,
+        documents: list[dict[str, Any]],
+        *,
+        k1: float = 1.5,
+        b: float = 0.75,
+    ) -> None:
+        if not documents:
+            raise ValueError("cannot build BM25 without documents")
+        if not isinstance(k1, float) or not 0.0 < k1 <= 5.0:
+            raise ValueError("BM25 k1 must be a float in (0, 5]")
+        if not isinstance(b, float) or not 0.0 <= b <= 1.0:
+            raise ValueError("BM25 b must be a float in [0, 1]")
+        term_counts: list[Counter[str]] = []
+        document_frequency: Counter[str] = Counter()
+        document_lengths: list[int] = []
+        for document in documents:
+            validate_document(document)
+            counts = Counter(tokenize(_document_text(document)))
+            term_counts.append(counts)
+            document_frequency.update(counts.keys())
+            document_lengths.append(sum(counts.values()))
+        self.documents = documents
+        self.k1 = k1
+        self.b = b
+        self._term_counts = term_counts
+        self._document_frequency = document_frequency
+        self._document_lengths = document_lengths
+        self._average_document_length = (
+            sum(document_lengths) / len(document_lengths)
+        )
+
+    @classmethod
+    def load(
+        cls,
+        directory: Path,
+        *,
+        k1: float = 1.5,
+        b: float = 0.75,
+    ) -> "Bm25Index":
+        return cls(_load_documents(directory / "documents.jsonl"), k1=k1, b=b)
+
+    def search(
+        self,
+        query: str,
+        top_k: int = 5,
+        roles: Iterable[str] | None = None,
+    ) -> list[dict[str, Any]]:
+        if not query.strip():
+            raise ValueError("query must not be empty")
+        if isinstance(top_k, bool) or not isinstance(top_k, int) or top_k < 1:
+            raise ValueError("top_k must be a positive integer")
+        allowed_roles = set(roles) if roles is not None else None
+        query_terms = sorted(set(tokenize(expand_query(query))))
+        document_count = len(self.documents)
+        scores: list[tuple[int, float]] = []
+        for document_index, document in enumerate(self.documents):
+            if allowed_roles is not None and document["role"] not in allowed_roles:
+                continue
+            counts = self._term_counts[document_index]
+            length = self._document_lengths[document_index]
+            normalization = self.k1 * (
+                1.0
+                - self.b
+                + self.b * length / self._average_document_length
+            )
+            score = 0.0
+            for term in query_terms:
+                frequency = counts.get(term, 0)
+                if frequency == 0:
+                    continue
+                frequency_document_count = self._document_frequency[term]
+                inverse_document_frequency = math.log(
+                    1.0
+                    + (
+                        document_count
+                        - frequency_document_count
+                        + 0.5
+                    )
+                    / (frequency_document_count + 0.5)
+                )
+                score += inverse_document_frequency * (
+                    frequency * (self.k1 + 1.0)
+                    / (frequency + normalization)
+                )
+            if score > 0.0:
+                scores.append((document_index, score))
+        ranked = sorted(
+            scores,
+            key=lambda item: (-item[1], self.documents[item[0]]["doc_id"]),
+        )
+        return [
+            _compact_result(self.documents[document_index], score)
+            for document_index, score in ranked[:top_k]
+        ]
+
+    def search_by_role(
+        self,
+        query: str,
+        top_k: int = 2,
+    ) -> dict[str, list[dict[str, Any]]]:
+        return {
+            role: self.search(query, top_k=top_k, roles=[role])
+            for role in ROLE_ORDER
+        }
