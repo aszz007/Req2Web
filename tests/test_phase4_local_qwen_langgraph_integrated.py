@@ -44,8 +44,10 @@ class Phase4LocalQwenLangGraphIntegratedTests(unittest.TestCase):
         self.assertEqual(low["quantization"], "nf4_double_quant")
         self.assertFalse(low["formal_quality_eligible"])
         self.assertEqual(low["max_input_tokens"], 8192)
+        self.assertEqual(low["timeout_seconds"], 3600)
         self.assertEqual(high["quantization"], "none")
         self.assertTrue(high["formal_quality_eligible"])
+        self.assertEqual(high["timeout_seconds"], 1200)
         for profile in (low, high):
             self.assertFalse(profile["input_truncation"])
             self.assertFalse(profile["output_truncation"])

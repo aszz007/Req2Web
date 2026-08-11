@@ -195,6 +195,7 @@ class LocalLangGraphProfile:
                 or self.min_total_vram_bytes != 8_000_000_000
                 or self.min_free_vram_bytes < 5_000_000_000
                 or self.max_input_tokens != 8_192
+                or self.timeout_seconds != 3_600
                 or self.formal_quality_eligible is not False
             ):
                 raise Phase4LocalQwenLangGraphError("low-GPU profile drifted")
@@ -202,6 +203,7 @@ class LocalLangGraphProfile:
             self.quantization != "none"
             or self.min_total_vram_bytes < 30_000_000_000
             or self.min_free_vram_bytes < 24_000_000_000
+            or self.timeout_seconds != 1_200
             or self.formal_quality_eligible is not True
         ):
             raise Phase4LocalQwenLangGraphError("high-GPU profile drifted")
@@ -250,7 +252,7 @@ def local_langgraph_profile(profile_name: str) -> LocalLangGraphProfile:
             min_total_vram_bytes=8_000_000_000,
             min_free_vram_bytes=5_500_000_000,
             max_input_tokens=8_192,
-            timeout_seconds=1_200,
+            timeout_seconds=3_600,
             formal_quality_eligible=False,
         )
     elif profile_name == HIGH_GPU_PROFILE:
@@ -584,6 +586,10 @@ def run_phase4_local_qwen_langgraph_integrated(
     run_id: str | None = None,
     b_aux_sidecar: Mapping[str, object] | None = None,
     console: object | None = None,
+    progress_callback: Callable[
+        [str, str, Mapping[str, object] | None], None
+    ]
+    | None = None,
     _raw_node_generator: Callable[[str, Mapping[str, object]], bytes] | None = None,
 ) -> dict[str, object]:
     """Execute one case through the sole formal graph on a local GPU profile."""
@@ -681,6 +687,8 @@ def run_phase4_local_qwen_langgraph_integrated(
                 "model_loaded": True,
             },
         )
+        if progress_callback is not None:
+            progress_callback("runtime", "model_loaded", None)
 
     def node_executor(
         node_id: str,
@@ -729,6 +737,8 @@ def run_phase4_local_qwen_langgraph_integrated(
             "raw_first": True,
         }
         _write_json(attempt_root / "pre_call_record.json", pre_call)
+        if progress_callback is not None:
+            progress_callback(node_id, "preparing_generation", None)
         raw: bytes | None = None
         metrics: dict[str, object] | None = None
         output: dict[str, object] | None = None
@@ -799,6 +809,8 @@ def run_phase4_local_qwen_langgraph_integrated(
             }
             attempts[node_id] = attempt
             _write_json(attempt_root / "attempt_result.json", attempt)
+            if progress_callback is not None:
+                progress_callback(node_id, "validated", attempt)
             return {
                 "schema_version": "req2web.phase4.real_model_node_execution.v1",
                 "node_id": node_id,
@@ -847,6 +859,8 @@ def run_phase4_local_qwen_langgraph_integrated(
             }
             attempts[node_id] = attempt
             _write_json(attempt_root / "attempt_result.json", attempt)
+            if progress_callback is not None:
+                progress_callback(node_id, "failed_closed", attempt)
             return {
                 "schema_version": "req2web.phase4.real_model_node_execution.v1",
                 "node_id": node_id,

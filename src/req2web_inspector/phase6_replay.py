@@ -523,7 +523,7 @@ _INDEX_HTML = """<!doctype html>
       <div class="hero-copy">
         <p class="eyebrow">REQ2WEB INSPECTION CONSOLE</p>
         <h1>Trace a requirement into a runnable page.</h1>
-        <p class="lede">Use one console to create a safe local draft, inspect each processing stage, revisit earlier runs, or replay twelve frozen evaluation rows. Full F1-F4 generation remains disconnected; the optional local semantic assistant reports its own availability and stays outside the draft path.</p>
+        <p class="lede">Use one console to check an irregular requirement, create a model-free draft, run the canonical local model flow when explicitly enabled, inspect every stage, or replay twelve frozen evaluation rows.</p>
         <div class="hero-actions">
           <a class="button" href="#intake">Create a local draft</a>
           <a class="button secondary" href="#case-inspector">Replay frozen evidence</a>
@@ -531,8 +531,8 @@ _INDEX_HTML = """<!doctype html>
       </div>
       <aside class="release-card" aria-label="Release status">
         <span class="section-kicker">Current capability</span>
-        <strong>Replay, deterministic drafts, optional local advice</strong>
-        <p>Deterministic controls call no model. When explicitly enabled, the isolated semantic assistant uses only the configured local Qwen profile and never an external service.</p>
+        <strong>Replay, drafts, optional canonical generation</strong>
+        <p>Deterministic controls call no model. Optional local-Qwen actions are single-flight, zero-retry, and keep requirement advice, F1-F4 generation, browser facts, and semantic acceptance separate.</p>
         <div class="status-line warning"><i></i> Public license decision pending</div>
       </aside>
     </section>
@@ -542,7 +542,7 @@ _INDEX_HTML = """<!doctype html>
       <div class="section-heading">
         <div>
           <span class="section-kicker">New requirement</span>
-          <h2 class="module-title">Turn an irregular request into a safe local draft <button class="info-tip" type="button" aria-label="About local draft creation" data-tooltip="Checks the raw request, shows what the system understood, retrieves local evidence, creates a deterministic PageSpec, renders a runnable page, validates structure, and packages the result. It does not run F1-F4 models or real browser acceptance.">!</button></h2>
+          <h2 class="module-title">Turn an irregular request into an inspectable result <button class="info-tip" type="button" aria-label="About requirement processing" data-tooltip="Checks the raw request and shows what the system understood. You can create a fast model-free draft or, when the local model route is enabled, run canonical B, F1-F4, composition, delivery, real-browser checks, semantic acceptance, and export.">!</button></h2>
           <p class="muted">Write naturally. The Inspector keeps the raw text, flags uncertainty, and shows its interpretation before or during generation.</p>
         </div>
         <div id="live-capability" class="capability-pill pending">Checking local service</div>
@@ -563,6 +563,13 @@ _INDEX_HTML = """<!doctype html>
             <button id="generate-draft" class="button" type="submit">Generate deterministic draft</button>
             <button id="fill-example" class="text-button" type="button">Use an example</button>
           </div>
+          <div class="canonical-controls">
+            <div><strong class="module-title">Complete local flow <button class="info-tip" type="button" aria-label="About the complete local flow" data-tooltip="Runs the sole canonical requirement adapter and LangGraph F1-F4 route, then the existing renderer, gates, ResultPackage export, real Chrome audit, and semantic acceptance. The low-GPU profile is integration evidence, not formal quality evidence.">!</button></strong><small>One local model job at a time. A 4060 run can take many minutes.</small></div>
+            <label><input id="canonical-b-aux" type="checkbox" checked> Requirement advice</label>
+            <label><input id="canonical-browser" type="checkbox" checked> Real browser check</label>
+            <label><input id="canonical-semantic" type="checkbox" checked> Semantic acceptance</label>
+            <button id="generate-canonical" class="button" type="button" disabled>Run complete local flow</button>
+          </div>
         </form>
         <aside class="intake-side">
           <article class="compact-module">
@@ -576,9 +583,9 @@ _INDEX_HTML = """<!doctype html>
             <span id="semantic-assist-status" class="module-status unavailable">Not connected</span>
           </article>
           <article class="compact-module">
-            <h3 class="module-title">Full model generation <button class="info-tip" type="button" aria-label="About full model generation" data-tooltip="The accepted full flow uses canonical B, the shared F1-F4 prompt authority, Phase4RealModelGraphRuntime, downstream gates, browser evidence, and semantic sidecars. This local draft mode does not imitate that model route.">!</button></h3>
-            <p>Current drafts use the existing deterministic guided/G0 route.</p>
-            <span class="module-status unavailable">Not executed</span>
+            <h3 class="module-title">Canonical model flow <button class="info-tip" type="button" aria-label="About full model generation" data-tooltip="Uses canonical B, the shared F1-F4 prompt authority, Phase4RealModelGraphRuntime, registries, deterministic composition, downstream gates, same-input G0 fallback, browser evidence, and a separately accounted semantic sidecar.">!</button></h3>
+            <p>The server exposes it only when an exact local model and integrity record are configured. Every run requires an explicit click.</p>
+            <span id="canonical-flow-status" class="module-status unavailable">Not connected</span>
           </article>
         </aside>
       </div>
@@ -587,11 +594,12 @@ _INDEX_HTML = """<!doctype html>
 
     <section class="panel history-panel" id="run-history">
       <div class="section-heading">
-        <div><span class="section-kicker">Local runs</span><h2 class="module-title">Open a previous run or import a package <button class="info-tip" type="button" aria-label="About local run history" data-tooltip="Lists immutable drafts and validated package imports. Each run keeps its source facts, stage statuses, failure location, validated ResultPackage, runnable page, and ZIP download when available.">!</button></h2></div>
+        <div><span class="section-kicker">Local runs</span><h2 class="module-title">Open any previous run or import a package <button class="info-tip" type="button" aria-label="About local run history" data-tooltip="Lists deterministic drafts, asynchronous canonical runs, and validated package imports. Each record keeps its source facts, stage statuses, failure location, result kind, runnable page, and ZIP download when available.">!</button></h2></div>
         <button id="refresh-runs" class="text-button" type="button">Refresh</button>
       </div>
       <div class="entry-strip" aria-label="Inspector entry points">
         <span><strong>Create</strong> available</span>
+        <span><strong>Complete model flow</strong> optional</span>
         <span><strong>Previous runs</strong> available</span>
         <span><strong>Import a package</strong> available</span>
         <span><strong>Frozen replay</strong> available below</span>
@@ -614,7 +622,7 @@ _INDEX_HTML = """<!doctype html>
     <section class="human-section" id="human-work">
       <div class="section-intro">
         <div><span class="section-kicker">Human handoff</span><h2 class="module-title">Three decisions remain outside automation <button class="info-tip" type="button" aria-label="About human handoff" data-tooltip="Retrieval relevance judgment, license ownership, and authored submission materials require people. They are separate from local tool operation and do not block deterministic drafts.">!</button></h2></div>
-        <p>All authorized non-human engineering is complete. These tasks require independent judgment, legal ownership, or authored submission material.</p>
+        <p>These tasks still require independent judgment, legal ownership, or authored submission work even when the local tool flow is complete.</p>
       </div>
       <div class="human-grid">
         <article class="task-card">
@@ -787,8 +795,8 @@ a { color: var(--accent); }
 .brand-mark { display: grid; width: 36px; height: 36px; place-items: center; border-radius: 10px; background: var(--ink); color: white; font-size: .72rem; font-weight: 800; letter-spacing: .04em; }
 .brand > span:last-child { display: grid; line-height: 1.15; }
 .brand small { color: var(--muted); font-size: .7rem; font-weight: 600; }
-nav { display: flex; justify-content: center; gap: 1.55rem; }
-nav a { color: #475467; text-decoration: none; font-size: .86rem; font-weight: 650; }
+nav { display: flex; min-width: 0; justify-content: center; gap: clamp(.7rem, 1.5vw, 1.55rem); }
+nav a { flex: 0 0 auto; color: #475467; text-decoration: none; font-size: .86rem; font-weight: 650; white-space: nowrap; }
 nav a:hover { color: var(--accent); }
 .local-status { display: inline-flex; align-items: center; gap: .5rem; padding: .42rem .7rem; border: 1px solid var(--line); border-radius: 999px; color: #344054; background: white; font-size: .78rem; font-weight: 700; }
 .local-status i, .status-line i { width: 7px; height: 7px; border-radius: 50%; background: #12b76a; box-shadow: 0 0 0 3px #d1fadf; }
@@ -854,6 +862,12 @@ textarea, input { width: 100%; padding: .72rem .8rem; border: 1px solid var(--li
 textarea:focus, input:focus, select:focus { outline: 3px solid #bfdbfe; outline-offset: 1px; border-color: #84adff; }
 .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: .75rem; margin: .8rem 0; }
 .form-actions { display: flex; flex-wrap: wrap; align-items: center; gap: .55rem; margin-top: .9rem; }
+.canonical-controls { display: grid; grid-template-columns: minmax(190px, 1fr) repeat(3, auto); align-items: center; gap: .65rem; margin-top: 1rem; padding: .8rem; border: 1px solid #c7d7fe; border-radius: 10px; background: var(--accent-soft); }
+.canonical-controls > div { display: grid; gap: .2rem; }
+.canonical-controls small { color: var(--muted); font-weight: 500; line-height: 1.4; }
+.canonical-controls label { display: flex; align-items: center; gap: .35rem; white-space: nowrap; }
+.canonical-controls input { width: auto; margin: 0; }
+.canonical-controls .button { grid-column: 1 / -1; justify-self: start; }
 .text-button { padding: .52rem .65rem; border: 0; border-radius: 8px; background: transparent; color: var(--accent-dark); font: inherit; font-size: .78rem; font-weight: 750; cursor: pointer; }
 .text-button:hover { background: var(--accent-soft); }
 .button:disabled, .text-button:disabled { cursor: not-allowed; opacity: .5; }
@@ -875,8 +889,8 @@ textarea:focus, input:focus, select:focus { outline: 3px solid #bfdbfe; outline-
 .stage-list { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: .45rem; margin: .8rem 0; padding: 0; list-style: none; }
 .stage-list li { min-width: 0; padding: .55rem; border: 1px solid var(--line); border-radius: 8px; color: #475467; font-size: .72rem; line-height: 1.35; }
 .stage-list strong { display: block; margin-bottom: .2rem; color: var(--ink); overflow-wrap: anywhere; }
-.stage-list .completed { border-color: #a6f4c5; background: var(--success-soft); }
-.stage-list .failed_closed { border-color: #fedf89; background: var(--warning-soft); }
+.stage-list li[class*="completed"], .stage-list .validated, .stage-list .pass, .stage-list li[class*="result_package"] { border-color: #a6f4c5; background: var(--success-soft); }
+.stage-list li[class*="failed"], .stage-list li[class*="not_completed"] { border-color: #fedf89; background: var(--warning-soft); }
 .stage-list .not_executed { background: var(--soft); }
 .history-panel { margin: 1rem 0 3rem; }
 .entry-strip { display: flex; flex-wrap: wrap; gap: .5rem; margin: .8rem 0 1rem; }
@@ -978,6 +992,8 @@ footer a { white-space: nowrap; text-decoration: none; font-weight: 750; }
   .release-card { max-width: 520px; }
   .section-intro, .section-heading, .control-row { flex-direction: column; align-items: stretch; }
   .intake-grid { grid-template-columns: 1fr; }
+  .canonical-controls { grid-template-columns: 1fr 1fr; }
+  .canonical-controls > div, .canonical-controls .button { grid-column: 1 / -1; }
   .import-form { grid-template-columns: 1fr; }
   .stage-list { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .run-list { grid-template-columns: 1fr; }
@@ -1093,11 +1109,11 @@ function stageMarkup(item) {
   return `<li class="${escapeHtml(item.status)}"><strong>${escapeHtml(item.label)}</strong>${escapeHtml(item.status.replaceAll('_', ' '))}${item.detail ? `<br>${escapeHtml(item.detail)}` : ''}</li>`;
 }
 
-function renderRunTrace(record) {
+function renderRunTrace(record, scroll = true) {
   const imported = record.status === 'completed_imported_result_package';
-  const completed = record.status === 'completed_deterministic_draft' || imported;
+  const canonical = record.mode === 'canonical_local_qwen_full_flow';
   const result = record.result || {};
-  const actions = completed
+  const actions = result.entrypoint
     ? `<div class="form-actions"><a class="button" href="${escapeHtml(result.entrypoint)}" target="_blank" rel="noopener">Open page</a><a class="button secondary" href="${escapeHtml(result.download)}">Download ResultPackage ZIP</a></div>`
     : '';
   const failure = record.failure
@@ -1105,9 +1121,13 @@ function renderRunTrace(record) {
     : '';
   const note = imported
     ? 'This is a validated existing ResultPackage import. Generation, model, semantic Agent, and real browser stages were not rerun or inferred.'
-    : 'This is a component-level deterministic guided/G0 draft. F1-F4 model generation, semantic Agent calls, and real browser acceptance were not executed.';
-  byId('intake-result').innerHTML = `<div class="result-box"><h3>${completed ? escapeHtml(result.title) : 'Local run trace'}</h3><p>${completed ? escapeHtml(result.summary) : escapeHtml(record.status.replaceAll('_', ' '))}</p>${failure}<ul class="stage-list">${record.stages.map(stageMarkup).join('')}</ul>${actions}<details><summary>Exact local run record</summary><pre>${escapeHtml(pretty(record))}</pre></details><p class="media-note">${escapeHtml(note)}</p></div>`;
-  byId('intake-result').scrollIntoView({behavior: 'smooth', block: 'nearest'});
+    : canonical
+      ? 'This canonical run keeps model-node calls, deterministic fallback, browser facts, and semantic acceptance separate. The low-GPU profile proves integration only and is not formal-quality evidence.'
+      : 'This is a component-level deterministic guided/G0 draft. F1-F4 model generation, semantic Agent calls, and real browser acceptance were not executed.';
+  const title = result.title || record.input?.requirement || 'Local run trace';
+  const detail = result.summary || result.selected_delivery_kind || record.status.replaceAll('_', ' ');
+  byId('intake-result').innerHTML = `<div class="result-box"><h3>${escapeHtml(title)}</h3><p>${escapeHtml(detail)}</p>${failure}<ul class="stage-list">${record.stages.map(stageMarkup).join('')}</ul>${actions}<details><summary>Exact local run record</summary><pre>${escapeHtml(pretty(record))}</pre></details><p class="media-note">${escapeHtml(note)}</p></div>`;
+  if (scroll) byId('intake-result').scrollIntoView({behavior: 'smooth', block: 'nearest'});
 }
 
 function renderRuns(records) {
@@ -1117,21 +1137,24 @@ function renderRuns(records) {
   }
   byId('run-list').innerHTML = records.map(record => {
     const imported = record.status === 'completed_imported_result_package';
-    const complete = record.status === 'completed_deterministic_draft' || imported;
+    const canonical = record.mode === 'canonical_local_qwen_full_flow';
+    const complete = record.status === 'completed_deterministic_draft' || imported || Boolean(record.result?.entrypoint);
     const title = record.result?.title || record.input?.requirement || record.input?.source_filename || record.run_id;
-    const detail = complete
-      ? record.result.summary
-      : record.failure?.message || record.status.replaceAll('_', ' ');
-    const actions = complete
+    const detail = record.result?.summary
+      || record.result?.selected_delivery_kind
+      || record.failure?.message
+      || record.status.replaceAll('_', ' ');
+    const actions = record.result?.entrypoint
       ? `<a href="${escapeHtml(record.result.entrypoint)}" target="_blank" rel="noopener">Open page</a><a href="${escapeHtml(record.result.download)}">Download</a>`
       : '';
-    const statusLabel = imported ? 'imported package ready' : (complete ? 'deterministic draft ready' : 'failed closed');
-    return `<article class="run-card"><div class="badges">${badge(statusLabel, !complete)}</div><h3>${escapeHtml(title)}</h3><p>${escapeHtml(detail)}</p><p>${escapeHtml(record.created_at || 'time unavailable')} - ${escapeHtml(record.run_id)}</p><div class="run-actions"><button type="button" data-run-id="${escapeHtml(record.run_id)}">Inspect trace</button>${actions}</div></article>`;
+    const statusLabel = imported ? 'imported package ready' : canonical ? record.status.replaceAll('_', ' ') : (complete ? 'deterministic draft ready' : 'failed closed');
+    const recordUrl = canonical ? `/api/canonical-runs/${record.run_id}` : `/api/runs/${record.run_id}`;
+    return `<article class="run-card"><div class="badges">${badge(statusLabel, !complete && record.status !== 'running' && record.status !== 'queued')}</div><h3>${escapeHtml(title)}</h3><p>${escapeHtml(detail)}</p><p>${escapeHtml(record.created_at || 'time unavailable')} - ${escapeHtml(record.run_id)}</p><div class="run-actions"><button type="button" data-record-url="${escapeHtml(recordUrl)}">Inspect trace</button>${actions}</div></article>`;
   }).join('');
-  byId('run-list').querySelectorAll('[data-run-id]').forEach(button => {
+  byId('run-list').querySelectorAll('[data-record-url]').forEach(button => {
     button.addEventListener('click', async () => {
       try {
-        renderRunTrace(await requestJson(`/api/runs/${button.dataset.runId}`));
+        renderRunTrace(await requestJson(button.dataset.recordUrl));
       } catch (error) {
         byId('intake-result').innerHTML = `<div class="failure">${escapeHtml(error.message)}</div>`;
       }
@@ -1140,19 +1163,25 @@ function renderRuns(records) {
 }
 
 async function loadRuns() {
-  const value = await requestJson('/api/runs');
-  renderRuns(value.runs || []);
+  const [drafts, canonical] = await Promise.all([
+    requestJson('/api/runs'),
+    requestJson('/api/canonical-runs'),
+  ]);
+  const records = [...(drafts.runs || []), ...(canonical.runs || [])]
+    .sort((left, right) => String(right.created_at || '').localeCompare(String(left.created_at || '')));
+  renderRuns(records);
 }
 
 function setIntakeBusy(busy, label = '') {
   byId('analyze-requirement').disabled = busy;
   byId('semantic-assist').disabled = busy || byId('semantic-assist').dataset.available !== 'true';
   byId('generate-draft').disabled = busy;
+  byId('generate-canonical').disabled = busy || byId('generate-canonical').dataset.available !== 'true';
   byId('import-package-button').disabled = busy;
   if (busy) {
-    const modelAction = label.includes('semantic');
+    const modelAction = label.toLowerCase().includes('semantic') || label.toLowerCase().includes('complete local');
     const detail = modelAction
-      ? 'The isolated local Qwen worker may take several minutes. It performs one call with no retry, writes raw output before parsing, and cannot alter canonical B or the draft pipeline.'
+      ? 'The isolated local Qwen route may take many minutes. Every model node is single-call with no retry, raw output is saved before parsing, and same-input deterministic fallback remains separately identified.'
       : 'The local deterministic pipeline is running. No model or external service is being called.';
     byId('intake-result').innerHTML = `<div class="result-box"><h3>${escapeHtml(label)}</h3><p class="muted">${escapeHtml(detail)}</p></div>`;
   }
@@ -1165,7 +1194,8 @@ async function initializeLiveInspector() {
     const available = value.deterministic_guided_draft === 'available';
     const importAvailable = value.result_package_import === 'available';
     const semanticAvailable = value.semantic_requirement_assist === 'available_local_qwen';
-    capability.textContent = available ? 'Local drafts available' : 'Portable replay only';
+    const canonicalAvailable = value.model_f1_f4_generation === 'available_explicit_local_qwen';
+    capability.textContent = canonicalAvailable ? 'Complete local flow available' : (available ? 'Local drafts available' : 'Portable replay only');
     capability.className = `capability-pill ${available ? 'available' : 'unavailable'}`;
     byId('analyze-requirement').disabled = !available;
     byId('generate-draft').disabled = !available;
@@ -1175,6 +1205,14 @@ async function initializeLiveInspector() {
       ? `Available: ${value.semantic_requirement_assist_detail.profile.profile_name}`
       : 'Not connected';
     byId('semantic-assist-status').className = `module-status ${semanticAvailable ? 'available' : 'unavailable'}`;
+    byId('generate-canonical').dataset.available = String(canonicalAvailable);
+    byId('generate-canonical').disabled = !canonicalAvailable;
+    byId('canonical-flow-status').textContent = canonicalAvailable
+      ? `Available: ${value.canonical_model_flow.profile.profile_name}`
+      : 'Not connected';
+    byId('canonical-flow-status').className = `module-status ${canonicalAvailable ? 'available' : 'unavailable'}`;
+    byId('canonical-b-aux').disabled = !value.canonical_model_flow.requirement_assist_available;
+    if (!value.canonical_model_flow.requirement_assist_available) byId('canonical-b-aux').checked = false;
     byId('import-package-button').disabled = !importAvailable;
     byId('import-package').disabled = !importAvailable;
     if (available) await loadRuns();
@@ -1186,6 +1224,10 @@ async function initializeLiveInspector() {
     byId('generate-draft').disabled = true;
     byId('semantic-assist').dataset.available = 'false';
     byId('semantic-assist').disabled = true;
+    byId('generate-canonical').dataset.available = 'false';
+    byId('generate-canonical').disabled = true;
+    byId('canonical-flow-status').textContent = 'Not connected';
+    byId('canonical-flow-status').className = 'module-status unavailable';
     byId('semantic-assist-status').textContent = 'Not connected';
     byId('semantic-assist-status').className = 'module-status unavailable';
     byId('import-package-button').disabled = true;
@@ -1242,6 +1284,40 @@ async function initializeLiveInspector() {
       await loadRuns();
     } catch (error) {
       byId('intake-result').innerHTML = `<div class="failure"><strong>Draft generation failed closed.</strong> ${escapeHtml(error.message)}</div>`;
+      try { await loadRuns(); } catch (ignored) { /* Preserve the original failure. */ }
+    } finally {
+      setIntakeBusy(false);
+    }
+  });
+  byId('canonical-browser').addEventListener('change', event => {
+    if (!event.target.checked) byId('canonical-semantic').checked = false;
+    byId('canonical-semantic').disabled = !event.target.checked;
+  });
+  byId('generate-canonical').addEventListener('click', async () => {
+    setIntakeBusy(true, 'Starting the complete local flow');
+    try {
+      const record = await requestJson('/api/canonical-runs', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({
+          ...intakePayload(),
+          confirm_local_model_action: true,
+          run_requirement_assist: byId('canonical-b-aux').checked,
+          run_browser_acceptance: byId('canonical-browser').checked,
+          run_semantic_acceptance: byId('canonical-semantic').checked,
+        }),
+      });
+      renderRunTrace(record);
+      setIntakeBusy(false);
+      while (true) {
+        await new Promise(resolve => setTimeout(resolve, 3000));
+        const current = await requestJson(`/api/canonical-runs/${record.run_id}`);
+        renderRunTrace(current, false);
+        await loadRuns();
+        if (!['queued', 'running'].includes(current.status)) break;
+      }
+    } catch (error) {
+      byId('intake-result').innerHTML = `<div class="failure"><strong>Complete local flow failed closed.</strong> ${escapeHtml(error.message)}</div>`;
       try { await loadRuns(); } catch (ignored) { /* Preserve the original failure. */ }
     } finally {
       setIntakeBusy(false);

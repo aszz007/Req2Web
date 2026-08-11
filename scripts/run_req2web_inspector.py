@@ -9,6 +9,7 @@ import json
 import mimetypes
 from pathlib import Path
 import sys
+import threading
 from urllib.parse import unquote, urlsplit
 
 
@@ -35,9 +36,15 @@ from req2web_inspector.semantic_assist import (  # noqa: E402
 )
 
 
+CANONICAL_LOW_GPU_PROFILE = "local_low_gpu_nf4"
+CANONICAL_HIGH_GPU_PROFILE = "high_gpu_bf16"
+
+
 class _InspectorHandler(SimpleHTTPRequestHandler):
     run_store: LocalDraftRunStore | None = None
     semantic_assist_store: SemanticRequirementAssistStore | None = None
+    canonical_run_store: object | None = None
+    model_dispatch_lock = threading.Lock()
     live_drafts_enabled = False
 
     def end_headers(self) -> None:
@@ -104,8 +111,24 @@ class _InspectorHandler(SimpleHTTPRequestHandler):
                 }
             ),
             "semantic_requirement_assist_providers": provider_capabilities(),
-            "model_f1_f4_generation": "not_connected_no_model_action",
-            "real_browser_acceptance_for_new_drafts": "not_connected",
+            "canonical_model_flow": (
+                self.canonical_run_store.capability()
+                if self.canonical_run_store is not None
+                else {
+                    "status": "not_connected_no_model_action",
+                    "b_aux_consumed_by_f1_f4": False,
+                }
+            ),
+            "model_f1_f4_generation": (
+                "available_explicit_local_qwen"
+                if self.canonical_run_store is not None
+                else "not_connected_no_model_action"
+            ),
+            "real_browser_acceptance_for_new_drafts": (
+                "available_for_canonical_runs"
+                if self.canonical_run_store is not None
+                else "not_connected"
+            ),
             "external_api_or_paid_service": "not_used",
         }
 
@@ -133,7 +156,43 @@ class _InspectorHandler(SimpleHTTPRequestHandler):
             else:
                 self._json_response(200, {"runs": self.run_store.list()})
             return True
+        if path == "/api/canonical-runs":
+            self._json_response(
+                200,
+                {
+                    "runs": (
+                        []
+                        if self.canonical_run_store is None
+                        else self.canonical_run_store.list()
+                    )
+                },
+            )
+            return True
         parts = path.strip("/").split("/")
+        if len(parts) >= 3 and parts[:2] == ["api", "canonical-runs"]:
+            if self.canonical_run_store is None:
+                raise InspectorLiveDraftError(
+                    "local canonical model runs are disabled"
+                )
+            run_id = parts[2]
+            if len(parts) == 3:
+                self._json_response(200, self.canonical_run_store.get(run_id))
+                return True
+            if len(parts) == 4 and parts[3] == "download":
+                self._send_file(
+                    self.canonical_run_store.artifact_path(
+                        run_id,
+                        "result-package.zip",
+                    ),
+                    download_name=f"{run_id}-result-package.zip",
+                )
+                return True
+            if len(parts) >= 5 and parts[3] == "package":
+                relative = "package/" + "/".join(parts[4:])
+                self._send_file(
+                    self.canonical_run_store.artifact_path(run_id, relative)
+                )
+                return True
         if len(parts) >= 3 and parts[:2] == ["api", "runs"]:
             if not self.live_drafts_enabled or self.run_store is None:
                 raise InspectorLiveDraftError("local draft runs are disabled")
@@ -219,7 +278,16 @@ class _InspectorHandler(SimpleHTTPRequestHandler):
                     raise InspectorLiveDraftError(
                         "local semantic requirement assistance is not enabled"
                     )
-                self._json_response(200, self.semantic_assist_store.run(value))
+                with self.model_dispatch_lock:
+                    if (
+                        self.canonical_run_store is not None
+                        and self.canonical_run_store.is_busy()
+                    ):
+                        raise InspectorLiveDraftError(
+                            "a canonical local-model run is already active"
+                        )
+                    semantic_record = self.semantic_assist_store.run(value)
+                self._json_response(200, semantic_record)
                 return
             if path == "/api/runs":
                 if not self.live_drafts_enabled or self.run_store is None:
@@ -230,6 +298,15 @@ class _InspectorHandler(SimpleHTTPRequestHandler):
                     record,
                 )
                 return
+            if path == "/api/canonical-runs":
+                if self.canonical_run_store is None:
+                    raise InspectorLiveDraftError(
+                        "local canonical model runs are disabled"
+                    )
+                with self.model_dispatch_lock:
+                    record = self.canonical_run_store.create(value)
+                self._json_response(202, record)
+                return
             self._json_response(404, {"status": "not_found"})
         except (OSError, ValueError, json.JSONDecodeError) as exc:
             self._error(422, exc)
@@ -239,14 +316,14 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description=(
             "Validate or serve the Req2Web Inspector. The local server can "
-            "create deterministic guided drafts without a model, GPU, browser "
-            "automation, remote service, or H1/gold material."
+            "create model-free deterministic drafts and, when explicitly enabled, "
+            "run the canonical local-Qwen flow with browser and semantic evidence."
         )
     )
     parser.add_argument(
         "--bundle-root",
         type=Path,
-        default=ROOT / "release" / "phase6_reviewer_v10",
+        default=ROOT / "release" / "phase6_reviewer_v11",
     )
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8765)
@@ -298,6 +375,36 @@ def build_parser() -> argparse.ArgumentParser:
         help="Module-owned immutable semantic-assist evidence directory.",
     )
     parser.add_argument(
+        "--enable-local-canonical-run",
+        action="store_true",
+        help=(
+            "Expose the asynchronous canonical B -> F1-F4 -> delivery -> browser "
+            "-> semantic route. Each request still requires explicit model confirmation."
+        ),
+    )
+    parser.add_argument(
+        "--local-model-root",
+        type=Path,
+        help="Existing exact local Qwen model root for canonical and semantic runs.",
+    )
+    parser.add_argument(
+        "--local-integrity-evidence",
+        type=Path,
+        help="Existing exact local model integrity evidence for canonical runs.",
+    )
+    parser.add_argument(
+        "--canonical-profile",
+        choices=(CANONICAL_LOW_GPU_PROFILE, CANONICAL_HIGH_GPU_PROFILE),
+        default=CANONICAL_LOW_GPU_PROFILE,
+        help="Select the low-GPU debug or high-GPU quality generation profile.",
+    )
+    parser.add_argument(
+        "--canonical-run-root",
+        type=Path,
+        default=ROOT / "outputs" / "req2web_inspector_canonical_runs",
+        help="Module-owned canonical model run and evidence directory.",
+    )
+    parser.add_argument(
         "--validate-only",
         action="store_true",
         help="Validate the precomputed bundle and exit without starting a server.",
@@ -340,6 +447,7 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     run_store: LocalDraftRunStore | None = None
     semantic_assist_store: SemanticRequirementAssistStore | None = None
+    canonical_run_store: object | None = None
     if not args.read_only:
         try:
             run_store = LocalDraftRunStore(args.run_root, args.index_dir)
@@ -353,7 +461,11 @@ def main(argv: list[str] | None = None) -> int:
                 file=sys.stderr,
             )
             return 2
-        if args.semantic_model_root is None or args.semantic_integrity_evidence is None:
+        semantic_model_root = args.semantic_model_root or args.local_model_root
+        semantic_integrity_evidence = (
+            args.semantic_integrity_evidence or args.local_integrity_evidence
+        )
+        if semantic_model_root is None or semantic_integrity_evidence is None:
             print(
                 "[REQ2WEB-INSPECTOR] failed closed: semantic model root and integrity evidence are required",
                 file=sys.stderr,
@@ -362,15 +474,51 @@ def main(argv: list[str] | None = None) -> int:
         try:
             semantic_assist_store = SemanticRequirementAssistStore(
                 root=args.semantic_assist_root,
-                model_root=args.semantic_model_root,
-                integrity_evidence=args.semantic_integrity_evidence,
+                model_root=semantic_model_root,
+                integrity_evidence=semantic_integrity_evidence,
                 profile_name=args.semantic_profile,
             )
         except (OSError, ValueError, SemanticRequirementAssistError) as exc:
             print(f"[REQ2WEB-INSPECTOR] failed closed: {exc}", file=sys.stderr)
             return 2
+    if args.enable_local_canonical_run:
+        if args.read_only:
+            print(
+                "[REQ2WEB-INSPECTOR] failed closed: canonical model runs are unavailable in read-only mode",
+                file=sys.stderr,
+            )
+            return 2
+        model_root = args.local_model_root or args.semantic_model_root
+        integrity_evidence = (
+            args.local_integrity_evidence or args.semantic_integrity_evidence
+        )
+        if model_root is None or integrity_evidence is None:
+            print(
+                "[REQ2WEB-INSPECTOR] failed closed: local model root and integrity evidence are required",
+                file=sys.stderr,
+            )
+            return 2
+        try:
+            from req2web_inspector.canonical_run import CanonicalInspectorRunStore
+
+            canonical_run_store = CanonicalInspectorRunStore(
+                root=args.canonical_run_root,
+                index_dir=args.index_dir,
+                model_root=model_root,
+                integrity_evidence=integrity_evidence,
+                profile_name=args.canonical_profile,
+                requirement_assist_runner=(
+                    None
+                    if semantic_assist_store is None
+                    else semantic_assist_store.run
+                ),
+            )
+        except (ImportError, OSError, ValueError) as exc:
+            print(f"[REQ2WEB-INSPECTOR] failed closed: {exc}", file=sys.stderr)
+            return 2
     _InspectorHandler.run_store = run_store
     _InspectorHandler.semantic_assist_store = semantic_assist_store
+    _InspectorHandler.canonical_run_store = canonical_run_store
     _InspectorHandler.live_drafts_enabled = run_store is not None
     handler = partial(_InspectorHandler, directory=str(args.bundle_root.resolve()))
     try:
@@ -382,6 +530,7 @@ def main(argv: list[str] | None = None) -> int:
         f"[REQ2WEB-INSPECTOR] validated {manifest['counts']['row_count']} rows; "
         f"local drafts {'enabled' if run_store is not None else 'disabled'}; "
         f"semantic assist {'enabled' if semantic_assist_store is not None else 'disabled'}; "
+        f"canonical model runs {'enabled' if canonical_run_store is not None else 'disabled'}; "
         f"open http://{args.host}:{args.port}/",
         flush=True,
     )
