@@ -467,6 +467,25 @@ class CanonicalInspectorRunStore:
                             "metrics": attempt.get("metrics"),
                             "failure": attempt.get("failure"),
                         }
+                        output_path = (
+                            run_dir
+                            / "canonical"
+                            / "attempts"
+                            / node_id
+                            / "validated_node_output.json"
+                        )
+                        record.setdefault("node_evidence", {})[node_id] = {
+                            "attempt": (
+                                f"/api/canonical-runs/{run_id}/evidence/"
+                                f"node-{node_id}-attempt.json"
+                            ),
+                            "output": (
+                                f"/api/canonical-runs/{run_id}/evidence/"
+                                f"node-{node_id}-output.json"
+                                if output_path.is_file()
+                                else None
+                            ),
+                        }
                 self._save(run_id, record)
 
             active_stage = "F1"
@@ -496,7 +515,7 @@ class CanonicalInspectorRunStore:
                 ),
             )
             attempts_root = run_dir / "canonical" / "attempts"
-            record["node_evidence"] = {}
+            record.setdefault("node_evidence", {})
             for node_id in NODE_ORDER:
                 attempt_path = attempts_root / node_id / "attempt_result.json"
                 if attempt_path.is_file():

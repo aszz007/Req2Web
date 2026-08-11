@@ -59,7 +59,7 @@ from req2web_runtime.phase4_local_qwen import (
 
 SCHEMA_PREFIX = "req2web.phase4.local_qwen_langgraph_integrated"
 RUN_SCHEMA_VERSION = f"{SCHEMA_PREFIX}.run.v1"
-PROFILE_SCHEMA_VERSION = f"{SCHEMA_PREFIX}.profile.v1"
+PROFILE_SCHEMA_VERSION = f"{SCHEMA_PREFIX}.profile.v2"
 PRE_CALL_SCHEMA_VERSION = f"{SCHEMA_PREFIX}.pre_call.v1"
 ATTEMPT_SCHEMA_VERSION = f"{SCHEMA_PREFIX}.attempt.v1"
 LEDGER_SCHEMA_VERSION = f"{SCHEMA_PREFIX}.call_ledger.v1"
@@ -176,6 +176,8 @@ class LocalLangGraphProfile:
     min_total_vram_bytes: int
     min_free_vram_bytes: int
     max_input_tokens: int
+    f4_cache_implementation: str
+    f4_prefill_chunk_size: int | None
     timeout_seconds: int
     formal_quality_eligible: bool
 
@@ -194,7 +196,9 @@ class LocalLangGraphProfile:
                 self.quantization != "nf4_double_quant"
                 or self.min_total_vram_bytes != 8_000_000_000
                 or self.min_free_vram_bytes < 5_000_000_000
-                or self.max_input_tokens != 8_192
+                or self.max_input_tokens != 12_288
+                or self.f4_cache_implementation != "offloaded"
+                or self.f4_prefill_chunk_size is not None
                 or self.timeout_seconds != 3_600
                 or self.formal_quality_eligible is not False
             ):
@@ -203,6 +207,8 @@ class LocalLangGraphProfile:
             self.quantization != "none"
             or self.min_total_vram_bytes < 30_000_000_000
             or self.min_free_vram_bytes < 24_000_000_000
+            or self.f4_cache_implementation != "default_dynamic"
+            or self.f4_prefill_chunk_size is not None
             or self.timeout_seconds != 1_200
             or self.formal_quality_eligible is not True
         ):
@@ -220,6 +226,10 @@ class LocalLangGraphProfile:
             "compute_dtype": self.compute_dtype,
             "device_index": 0,
             "cpu_offload": False,
+            "default_kv_cache_implementation": "default_dynamic",
+            "f4_kv_cache_implementation": self.f4_cache_implementation,
+            "f4_kv_cache_cpu_offload": self.f4_cache_implementation == "offloaded",
+            "f4_prefill_chunk_size": self.f4_prefill_chunk_size,
             "min_total_vram_bytes": self.min_total_vram_bytes,
             "min_free_vram_bytes": self.min_free_vram_bytes,
             "max_input_tokens": self.max_input_tokens,
@@ -251,7 +261,9 @@ def local_langgraph_profile(profile_name: str) -> LocalLangGraphProfile:
             compute_dtype="bfloat16",
             min_total_vram_bytes=8_000_000_000,
             min_free_vram_bytes=5_500_000_000,
-            max_input_tokens=8_192,
+            max_input_tokens=12_288,
+            f4_cache_implementation="offloaded",
+            f4_prefill_chunk_size=None,
             timeout_seconds=3_600,
             formal_quality_eligible=False,
         )
@@ -264,6 +276,8 @@ def local_langgraph_profile(profile_name: str) -> LocalLangGraphProfile:
             min_total_vram_bytes=30_000_000_000,
             min_free_vram_bytes=24_000_000_000,
             max_input_tokens=32_768,
+            f4_cache_implementation="default_dynamic",
+            f4_prefill_chunk_size=None,
             timeout_seconds=1_200,
             formal_quality_eligible=True,
         )
@@ -284,7 +298,21 @@ def runtime_capabilities() -> dict[str, object]:
         "automatic_retry": False,
         "b_aux_consumed_by_f1_f4": False,
         "low_gpu_formal_quality_eligible": False,
+        "low_gpu_complete_context_without_truncation": True,
     }
+
+
+def _generation_memory_kwargs(
+    profile: LocalLangGraphProfile, node_id: str
+) -> dict[str, object]:
+    """Return profile-owned generation memory controls without changing content."""
+
+    profile.validate()
+    if node_id not in NODE_ORDER:
+        raise Phase4LocalQwenLangGraphError("unknown node memory profile")
+    if node_id == "F4" and profile.f4_cache_implementation == "offloaded":
+        return {"cache_implementation": "offloaded"}
+    return {}
 
 
 class _Worker:
@@ -1255,6 +1283,7 @@ def _worker_main(args: argparse.Namespace) -> int:
                         do_sample=False,
                         num_return_sequences=1,
                         use_cache=True,
+                        **_generation_memory_kwargs(profile, str(node_id)),
                     )
                 generated_only = generated[:, input_length:]
                 text_value = processor.batch_decode(
@@ -1270,6 +1299,14 @@ def _worker_main(args: argparse.Namespace) -> int:
                     "input_token_length": input_length,
                     "max_input_tokens": profile.max_input_tokens,
                     "max_new_tokens": output_cap,
+                    "cache_implementation": (
+                        profile.f4_cache_implementation
+                        if node_id == "F4"
+                        else "default_dynamic"
+                    ),
+                    "prefill_chunk_size": (
+                        profile.f4_prefill_chunk_size if node_id == "F4" else None
+                    ),
                     "output_token_length": int(generated_only.shape[1]),
                     "cuda_peak_allocated_bytes": int(torch.cuda.max_memory_allocated(0)),
                     "cuda_peak_reserved_bytes": int(torch.cuda.max_memory_reserved(0)),

@@ -24,6 +24,7 @@ from req2web_runtime.phase4_canonical_full_flow import _build_upstream  # noqa: 
 from req2web_runtime.phase4_local_qwen_langgraph_integrated import (  # noqa: E402
     HIGH_GPU_PROFILE,
     LOW_GPU_PROFILE,
+    _generation_memory_kwargs,
     local_langgraph_profile,
     run_phase4_local_qwen_langgraph_integrated,
     runtime_capabilities,
@@ -43,15 +44,35 @@ class Phase4LocalQwenLangGraphIntegratedTests(unittest.TestCase):
         high = local_langgraph_profile(HIGH_GPU_PROFILE).to_dict()
         self.assertEqual(low["quantization"], "nf4_double_quant")
         self.assertFalse(low["formal_quality_eligible"])
-        self.assertEqual(low["max_input_tokens"], 8192)
+        self.assertEqual(low["max_input_tokens"], 12288)
+        self.assertEqual(low["default_kv_cache_implementation"], "default_dynamic")
+        self.assertEqual(low["f4_kv_cache_implementation"], "offloaded")
+        self.assertTrue(low["f4_kv_cache_cpu_offload"])
+        self.assertIsNone(low["f4_prefill_chunk_size"])
         self.assertEqual(low["timeout_seconds"], 3600)
         self.assertEqual(high["quantization"], "none")
         self.assertTrue(high["formal_quality_eligible"])
+        self.assertEqual(high["f4_kv_cache_implementation"], "default_dynamic")
+        self.assertFalse(high["f4_kv_cache_cpu_offload"])
+        self.assertIsNone(high["f4_prefill_chunk_size"])
         self.assertEqual(high["timeout_seconds"], 1200)
         for profile in (low, high):
             self.assertFalse(profile["input_truncation"])
             self.assertFalse(profile["output_truncation"])
             self.assertEqual(profile["automatic_retry_limit"], 0)
+
+        self.assertEqual(
+            _generation_memory_kwargs(local_langgraph_profile(LOW_GPU_PROFILE), "F4"),
+            {"cache_implementation": "offloaded"},
+        )
+        self.assertEqual(
+            _generation_memory_kwargs(local_langgraph_profile(LOW_GPU_PROFILE), "F3"),
+            {},
+        )
+        self.assertEqual(
+            _generation_memory_kwargs(local_langgraph_profile(HIGH_GPU_PROFILE), "F4"),
+            {},
+        )
 
     def test_capability_reuses_formal_graph_and_prompt_authority(self) -> None:
         value = runtime_capabilities()
