@@ -1,4 +1,4 @@
-"""Build and validate the read-only Phase 6 reviewer replay bundle.
+"""Build and validate the read-only Req2Web Inspector replay bundle.
 
 The builder consumes only frozen Phase 5 Path 2 engineering artifacts. It
 does not invoke a model, launch a browser, rebuild F1-F4, or change any source
@@ -497,17 +497,19 @@ _INDEX_HTML = """<!doctype html>
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>Req2Web Phase 6 Inspector</title>
+  <title>Req2Web Inspector</title>
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
   <header class="site-header">
     <a class="brand" href="#top" aria-label="Req2Web Inspector home">
       <span class="brand-mark">R2W</span>
-      <span><strong>Req2Web</strong><small>Phase 6 Inspector</small></span>
+      <span><strong>Req2Web</strong><small>Inspector</small></span>
     </a>
     <nav aria-label="Inspector sections">
       <a href="#overview">Overview</a>
+      <a href="#intake">Create</a>
+      <a href="#run-history">Runs</a>
       <a href="#human-work">Human handoff</a>
       <a href="#retrieval">Retrieval</a>
       <a href="#case-inspector">Evidence</a>
@@ -519,23 +521,90 @@ _INDEX_HTML = """<!doctype html>
   <div class="app-shell" id="top">
     <section class="hero" id="overview">
       <div class="hero-copy">
-        <p class="eyebrow">REVIEWER-READY ENGINEERING REPLAY</p>
-        <h1>Inspect every step from requirement to runnable page.</h1>
-        <p class="lede">A focused, read-only workspace for twelve precomputed Req2Web evaluation rows. Review requirements, evidence, F1-F4 outputs, browser traces, retrieval candidates, and final pages without a GPU or model runtime.</p>
+        <p class="eyebrow">REQ2WEB INSPECTION CONSOLE</p>
+        <h1>Trace a requirement into a runnable page.</h1>
+        <p class="lede">Use one console to create a safe local draft, inspect each processing stage, revisit earlier runs, or replay twelve frozen evaluation rows. Full F1-F4 generation remains disconnected; the optional local semantic assistant reports its own availability and stays outside the draft path.</p>
         <div class="hero-actions">
-          <a class="button" href="#case-inspector">Inspect evidence</a>
-          <a class="button secondary" href="#human-work">View human tasks</a>
+          <a class="button" href="#intake">Create a local draft</a>
+          <a class="button secondary" href="#case-inspector">Replay frozen evidence</a>
         </div>
       </div>
       <aside class="release-card" aria-label="Release status">
-        <span class="section-kicker">Release state</span>
-        <strong>Technically reproducible</strong>
-        <p>Standalone validation and local replay are ready.</p>
+        <span class="section-kicker">Current capability</span>
+        <strong>Replay, deterministic drafts, optional local advice</strong>
+        <p>Deterministic controls call no model. When explicitly enabled, the isolated semantic assistant uses only the configured local Qwen profile and never an external service.</p>
         <div class="status-line warning"><i></i> Public license decision pending</div>
       </aside>
     </section>
 
     <main>
+    <section class="panel intake-panel" id="intake">
+      <div class="section-heading">
+        <div>
+          <span class="section-kicker">New requirement</span>
+          <h2 class="module-title">Turn an irregular request into a safe local draft <button class="info-tip" type="button" aria-label="About local draft creation" data-tooltip="Checks the raw request, shows what the system understood, retrieves local evidence, creates a deterministic PageSpec, renders a runnable page, validates structure, and packages the result. It does not run F1-F4 models or real browser acceptance.">!</button></h2>
+          <p class="muted">Write naturally. The Inspector keeps the raw text, flags uncertainty, and shows its interpretation before or during generation.</p>
+        </div>
+        <div id="live-capability" class="capability-pill pending">Checking local service</div>
+      </div>
+      <div class="intake-grid">
+        <form id="requirement-form" class="requirement-form">
+          <label class="field-label" for="requirement-input">Requirement</label>
+          <textarea id="requirement-input" maxlength="12000" rows="7" placeholder="Example: I need a page where field technicians can find an asset, report a problem, see validation errors, and retry after a failed submission."></textarea>
+          <div class="form-grid">
+            <label><span>Target device</span><select id="target-device-input"><option value="">Let Req2Web infer</option><option value="responsive_web">Responsive web</option><option value="desktop">Desktop</option><option value="mobile">Mobile</option><option value="tablet">Tablet</option><option value="web">Web</option></select></label>
+            <label><span>Task type</span><select id="task-type-input"><option value="">Let Req2Web infer</option><option value="web_application">General web application</option><option value="ecommerce">E-commerce</option><option value="location_service">Location service</option><option value="content_platform">Content platform</option><option value="social_communication">Social communication</option><option value="dashboard">Dashboard</option><option value="recognition_tool">Recognition tool</option></select></label>
+          </div>
+          <label class="field-label" for="constraints-input">Optional constraints <small>one per line</small></label>
+          <textarea id="constraints-input" maxlength="6000" rows="3" placeholder="Responsive on phones and desktop&#10;Show clear validation and recovery guidance"></textarea>
+          <div class="form-actions">
+            <button id="analyze-requirement" class="button secondary" type="button">Check understanding</button>
+            <button id="semantic-assist" class="button secondary" type="button" disabled>Run semantic assistant</button>
+            <button id="generate-draft" class="button" type="submit">Generate deterministic draft</button>
+            <button id="fill-example" class="text-button" type="button">Use an example</button>
+          </div>
+        </form>
+        <aside class="intake-side">
+          <article class="compact-module">
+            <h3 class="module-title">Requirement diagnostics <button class="info-tip" type="button" aria-label="About requirement diagnostics" data-tooltip="Detects missing actions, extremely short input, device ambiguity, multilingual publication limits, and absent constraints. Findings are advice except for unsafe or empty input.">!</button></h3>
+            <p>Fast deterministic checks help messy input fail clearly instead of failing later.</p>
+            <span class="module-status available">Available now</span>
+          </article>
+          <article class="compact-module">
+            <h3 class="module-title">Semantic requirement assistant <button class="info-tip" type="button" aria-label="About the semantic requirement assistant" data-tooltip="An optional advisory-only Qwen Agent points out ambiguity, conflicts, missing information, risks, and suggestions after deterministic requirement processing. It saves the raw response first, calls the model at most once, never rewrites canonical B, and never enters F1-F4.">!</button></h3>
+            <p>Available only when the repository service is explicitly started with a local Qwen profile. The portable replay and deterministic draft remain model-free.</p>
+            <span id="semantic-assist-status" class="module-status unavailable">Not connected</span>
+          </article>
+          <article class="compact-module">
+            <h3 class="module-title">Full model generation <button class="info-tip" type="button" aria-label="About full model generation" data-tooltip="The accepted full flow uses canonical B, the shared F1-F4 prompt authority, Phase4RealModelGraphRuntime, downstream gates, browser evidence, and semantic sidecars. This local draft mode does not imitate that model route.">!</button></h3>
+            <p>Current drafts use the existing deterministic guided/G0 route.</p>
+            <span class="module-status unavailable">Not executed</span>
+          </article>
+        </aside>
+      </div>
+      <div id="intake-result" class="intake-result" aria-live="polite"></div>
+    </section>
+
+    <section class="panel history-panel" id="run-history">
+      <div class="section-heading">
+        <div><span class="section-kicker">Local runs</span><h2 class="module-title">Open a previous run or import a package <button class="info-tip" type="button" aria-label="About local run history" data-tooltip="Lists immutable drafts and validated package imports. Each run keeps its source facts, stage statuses, failure location, validated ResultPackage, runnable page, and ZIP download when available.">!</button></h2></div>
+        <button id="refresh-runs" class="text-button" type="button">Refresh</button>
+      </div>
+      <div class="entry-strip" aria-label="Inspector entry points">
+        <span><strong>Create</strong> available</span>
+        <span><strong>Previous runs</strong> available</span>
+        <span><strong>Import a package</strong> available</span>
+        <span><strong>Frozen replay</strong> available below</span>
+      </div>
+      <form id="import-form" class="import-form">
+        <div class="import-copy"><strong class="module-title">Import a ResultPackage ZIP <button class="info-tip" type="button" aria-label="About package import" data-tooltip="Accepts only a bounded local ZIP whose result-package root passes the existing ResultPackage v1 or v2 validator. Unsafe paths, links, special files, duplicate paths, extra files, hash drift, and oversized archives fail closed.">!</button></strong><small id="import-help">The package is validated locally. Import does not rerun generation, browser checks, or semantic evaluation.</small></div>
+        <input id="import-package" class="file-input-hidden" type="file" accept=".zip,application/zip" aria-describedby="import-help import-file-name">
+        <div class="import-picker"><label class="button secondary" for="import-package">Choose ZIP</label><span id="import-file-name">No file selected</span></div>
+        <button id="import-package-button" class="button secondary" type="submit">Validate and import</button>
+      </form>
+      <div id="run-list" class="run-list"><p class="muted">Local run history is loading.</p></div>
+    </section>
+
     <section class="metrics" id="metrics" aria-label="Evidence summary"></section>
     <section class="separation-note">
       <span class="notice-label">Accounting boundary</span>
@@ -544,7 +613,7 @@ _INDEX_HTML = """<!doctype html>
 
     <section class="human-section" id="human-work">
       <div class="section-intro">
-        <div><span class="section-kicker">Human handoff</span><h2>Three decisions remain outside automation.</h2></div>
+        <div><span class="section-kicker">Human handoff</span><h2 class="module-title">Three decisions remain outside automation <button class="info-tip" type="button" aria-label="About human handoff" data-tooltip="Retrieval relevance judgment, license ownership, and authored submission materials require people. They are separate from local tool operation and do not block deterministic drafts.">!</button></h2></div>
         <p>All authorized non-human engineering is complete. These tasks require independent judgment, legal ownership, or authored submission material.</p>
       </div>
       <div class="human-grid">
@@ -577,7 +646,7 @@ _INDEX_HTML = """<!doctype html>
 
     <section class="panel retrieval-panel" id="retrieval">
       <div class="section-heading">
-        <div><span class="section-kicker">Retrieval laboratory</span><h2>Compare candidates without overstating quality.</h2><p class="muted">BM25, RRF, and TF-IDF use the same corpus, deterministic case-role queries, and result projection. Candidate differences, downstream utility, and efficiency stay separate; exploratory relevance metrics require complete model prelabels and the frozen two-human review.</p></div>
+        <div><span class="section-kicker">Retrieval laboratory</span><h2 class="module-title">Compare retrieval candidates <button class="info-tip" type="button" aria-label="About retrieval comparison" data-tooltip="BM25, RRF, and TF-IDF use the same corpus and frozen queries. Candidate overlap, downstream structural influence, speed, and later human relevance judgments are deliberately reported separately; raw backend scores are not compared.">!</button></h2><p class="muted">Candidate differences, downstream utility, and efficiency stay separate. Human-reviewed relevance is still pending.</p></div>
         <div id="retrieval-gate"></div>
       </div>
       <div id="retrieval-summary" class="retrieval-summary"></div>
@@ -593,20 +662,19 @@ _INDEX_HTML = """<!doctype html>
     </section>
 
     <section class="case-toolbar" id="case-inspector">
-      <div class="toolbar-title"><span class="section-kicker">Evidence explorer</span><strong>Select one frozen row</strong></div>
+      <div class="toolbar-title"><span class="section-kicker">Evidence explorer</span><strong class="module-title">Select one frozen row <button class="info-tip" type="button" aria-label="About the evidence explorer" data-tooltip="Replays one of twelve immutable engineering rows. It does not regenerate, repair, or relabel the historical evidence.">!</button></strong></div>
       <label for="case-select"><span class="sr-only">Evidence row</span><select id="case-select"></select></label>
       <div id="case-badges" class="badges"></div>
     </section>
 
     <section class="overview-grid">
       <article class="panel">
-        <h2>Requirement</h2>
+        <h2 class="module-title">Requirement <button class="info-tip" type="button" aria-label="About requirement evidence" data-tooltip="Shows the exact structured understanding used by the frozen row: the request summary, target device, task type, constraints, and user goals.">!</button></h2>
         <div id="requirement-summary" class="prose"></div>
         <details><summary>Exact canonical input</summary><pre id="requirement-json"></pre></details>
       </article>
       <article class="panel">
-        <h2>Evidence projection</h2>
-        <p class="muted">Project-authored, non-verbatim summaries visible to each generation node.</p>
+        <h2 class="module-title">Evidence projection <button class="info-tip" type="button" aria-label="About evidence projection" data-tooltip="Shows the small, project-authored evidence summaries that each generation step could see. It does not expose hidden reasoning or copied dataset content.">!</button></h2>
         <div id="evidence-cards" class="evidence-cards"></div>
         <details><summary>Exact projection JSON</summary><pre id="evidence-json"></pre></details>
       </article>
@@ -614,7 +682,7 @@ _INDEX_HTML = """<!doctype html>
 
     <section class="panel">
       <div class="section-heading">
-        <div><h2>F1-F4 structured outputs</h2><p class="muted">Exact validated outputs, or preserved strict JSON at the historical F4 policy boundary. The Inspector does not regenerate them.</p></div>
+        <div><h2 class="module-title">F1-F4 structured outputs <button class="info-tip" type="button" aria-label="About F1 through F4" data-tooltip="F1 defines static page structure, F2 defines states and visibility, F3 defines interactions, and F4 defines candidate acceptance checks. These are exact frozen outputs and are never regenerated here.">!</button></h2><p class="muted">Exact frozen node outputs. Details remain collapsed into scrollable evidence blocks.</p></div>
         <div id="failure-location"></div>
       </div>
       <div id="node-grid" class="node-grid"></div>
@@ -622,13 +690,18 @@ _INDEX_HTML = """<!doctype html>
 
     <section class="overview-grid">
       <article class="panel">
-        <h2>Final PageSpec</h2>
+        <h2 class="module-title">Final PageSpec <button class="info-tip" type="button" aria-label="About the final PageSpec" data-tooltip="The machine-checkable page contract consumed by the Renderer. It binds sections, components, states, interactions, constraints, evidence references, and acceptance checks.">!</button></h2>
         <pre id="page-spec-json" class="tall"></pre>
       </article>
       <article class="panel">
-        <h2>Objective browser evidence</h2>
+        <h2 class="module-title">Objective browser evidence <button class="info-tip" type="button" aria-label="About browser evidence" data-tooltip="Records real Chrome loading, element operations, state changes, PageSpec conformance, console messages, page errors, viewport, screenshot, and interaction trace. It does not decide abstract semantic quality.">!</button></h2>
         <div id="browser-summary" class="prose"></div>
-        <img id="browser-screenshot" alt="Captured Chrome result for the selected row">
+        <div class="media-heading">
+          <div><strong>Captured Chrome evidence</strong><small id="browser-viewport">Loading viewport</small></div>
+          <span>Immutable audit artifact</span>
+        </div>
+        <p class="media-note">This screenshot was captured at the audited viewport. It is evidence, not a responsive thumbnail of the wider live preview below.</p>
+        <div class="browser-capture"><img id="browser-screenshot" alt="Captured Chrome result for the selected row"></div>
         <ol id="interaction-list" class="interaction-list"></ol>
         <details><summary>Interaction trace and browser audit</summary><pre id="browser-json"></pre></details>
       </article>
@@ -636,12 +709,11 @@ _INDEX_HTML = """<!doctype html>
 
     <section class="overview-grid">
       <article class="panel">
-        <h2>Semantic sidecar</h2>
-        <p class="muted">This separate evaluator record cannot overwrite browser facts or historical first-pass accounting.</p>
+        <h2 class="module-title">Semantic sidecar <button class="info-tip" type="button" aria-label="About semantic evaluation" data-tooltip="A separately accounted evaluator checked whether concrete page evidence supported each abstract acceptance goal. Its verdicts cannot overwrite browser facts or historical first-pass accounting.">!</button></h2>
         <pre id="semantic-json"></pre>
       </article>
       <article class="panel">
-        <h2>Historical outcome</h2>
+        <h2 class="module-title">Historical outcome <button class="info-tip" type="button" aria-label="About historical outcome" data-tooltip="Preserves what happened on the original first pass. A later zero-model policy replay may make a package deliverable, but cannot rewrite an original failure as success.">!</button></h2>
         <pre id="historical-json"></pre>
         <div id="revalidation-block"></div>
       </article>
@@ -649,16 +721,33 @@ _INDEX_HTML = """<!doctype html>
 
     <section class="panel page-panel" id="final-result">
       <div class="section-heading">
-        <div><h2>Final runnable page</h2><p class="muted">The exact packaged page used by the objective browser audit.</p></div>
-        <a id="open-page" class="button" target="_blank" rel="noopener">Open page</a>
+        <div><h2 class="module-title">Final runnable page <button class="info-tip" type="button" aria-label="About the runnable page" data-tooltip="Loads the exact packaged HTML, CSS, and JavaScript. Prototype controls change the PageSpec state in place; they are not expected to navigate to a production backend or another application route.">!</button></h2><p class="muted">The exact packaged page used by the objective browser audit.</p></div>
+        <a id="open-page" class="button" target="_blank" rel="noopener">Open exact package</a>
       </div>
-      <iframe id="final-page" title="Selected Req2Web result page"></iframe>
+      <div class="preview-controls">
+        <div class="segmented-control" role="group" aria-label="Live preview viewport">
+          <button id="preview-fit" type="button" aria-pressed="true">Fit to panel</button>
+          <button id="preview-audit" type="button" aria-pressed="false">Audited viewport</button>
+        </div>
+        <span id="preview-viewport">Fit to panel</span>
+      </div>
+      <div class="preview-state" aria-live="polite">
+        <span>Live prototype state</span>
+        <strong id="preview-state-name">Loading</strong>
+        <p id="preview-state-message">The selected page has not finished loading.</p>
+      </div>
+      <div id="preview-stage" class="preview-stage">
+        <div id="preview-canvas" class="preview-canvas">
+          <iframe id="final-page" title="Selected Req2Web result page"></iframe>
+        </div>
+      </div>
+      <p id="preview-note" class="media-note">Fit-to-panel mode uses the available console width. Switch to the audited viewport for a like-for-like comparison with the captured Chrome evidence.</p>
     </section>
   </main>
   </div>
 
   <footer>
-    <div><strong>Req2Web Phase 6 Inspector</strong><p>Bounded engineering replay only. No H1/gold, formal evaluation, broad generalization, training, LoRA, production, or user-study claim.</p></div>
+    <div><strong>Req2Web Inspector</strong><p>Frozen replay evidence plus bounded local tooling. No H1/gold, formal evaluation, broad generalization, training, LoRA, production, or user-study claim.</p></div>
     <a href="#top">Back to top</a>
   </footer>
   <script src="app.js"></script>
@@ -691,7 +780,7 @@ _STYLES_CSS = """:root {
 }
 * { box-sizing: border-box; }
 html { scroll-behavior: smooth; scroll-padding-top: 92px; }
-body { margin: 0; color: var(--ink); background: var(--canvas); font-size: 15px; }
+body { max-width: 100%; margin: 0; overflow-x: clip; color: var(--ink); background: var(--canvas); font-size: 15px; }
 a { color: var(--accent); }
 .site-header { position: sticky; top: 0; z-index: 30; display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 2rem; min-height: 68px; padding: 0 clamp(1rem, 4vw, 3rem); border-bottom: 1px solid var(--line); background: rgba(255, 255, 255, .94); backdrop-filter: blur(18px); }
 .brand { display: flex; align-items: center; gap: .7rem; color: var(--ink); text-decoration: none; }
@@ -741,11 +830,72 @@ main { padding: 2rem 0 5rem; }
 .task-links a, .task-link { width: fit-content; margin: 1rem 0; padding: .46rem .65rem; border-radius: 8px; background: var(--accent-soft); color: var(--accent-dark); text-decoration: none; font-size: .76rem; font-weight: 750; }
 .panel { min-width: 0; padding: 1.4rem; border: 1px solid var(--line); border-radius: var(--radius); background: var(--card); box-shadow: var(--shadow); }
 .panel h2 { margin: .35rem 0 .7rem; font-size: 1.3rem; letter-spacing: -.025em; }
+.module-title { display: flex; min-width: 0; align-items: center; gap: .45rem; }
+.info-tip { position: relative; display: inline-grid; flex: 0 0 auto; width: 19px; height: 19px; padding: 0; place-items: center; border: 1px solid #98a2b3; border-radius: 50%; background: white; color: #475467; font: 800 11px/1 ui-sans-serif, system-ui, sans-serif; cursor: help; }
+.info-tip::after { position: absolute; top: calc(100% + 9px); left: -8px; z-index: 80; width: min(330px, 75vw); padding: .7rem .78rem; border: 1px solid var(--line-strong); border-radius: 9px; background: #101828; color: white; box-shadow: 0 10px 30px rgba(16, 24, 40, .18); content: attr(data-tooltip); font-size: .75rem; font-weight: 500; letter-spacing: 0; line-height: 1.48; opacity: 0; pointer-events: none; text-align: left; text-transform: none; transform: translateY(-3px); transition: opacity .14s ease, transform .14s ease; }
+.intake-side .info-tip::after, .overview-grid > :nth-child(2n) .info-tip::after { right: -8px; left: auto; }
+.info-tip:hover::after, .info-tip:focus-visible::after { opacity: 1; transform: translateY(0); }
+.info-tip:focus-visible { outline: 3px solid #bfdbfe; outline-offset: 2px; }
 .section-heading { display: flex; justify-content: space-between; gap: 2rem; align-items: flex-start; }
 .section-heading > div:first-child { max-width: 840px; }
 .muted { color: var(--muted); line-height: 1.55; }
 .prose { line-height: 1.68; }
 .prose p { margin: .35rem 0; }
+.intake-panel { margin-bottom: 1rem; padding: 1.6rem; }
+.capability-pill { flex: 0 0 auto; padding: .45rem .65rem; border-radius: 999px; font-size: .73rem; font-weight: 800; }
+.capability-pill.pending { background: var(--soft); color: #475467; }
+.capability-pill.available { background: var(--success-soft); color: var(--success); }
+.capability-pill.unavailable { background: var(--warning-soft); color: var(--warning); }
+.intake-grid { display: grid; grid-template-columns: minmax(0, 1.45fr) minmax(280px, .75fr); gap: 1rem; margin-top: 1.25rem; }
+.requirement-form { min-width: 0; padding: 1rem; border: 1px solid var(--line); border-radius: 12px; background: #fcfcfd; }
+.field-label, .requirement-form label { display: grid; gap: .4rem; color: #344054; font-size: .78rem; font-weight: 750; }
+.field-label small { color: var(--muted); font-weight: 500; }
+textarea, input { width: 100%; padding: .72rem .8rem; border: 1px solid var(--line-strong); border-radius: 9px; background: white; color: var(--ink); font: inherit; line-height: 1.5; resize: vertical; }
+textarea:focus, input:focus, select:focus { outline: 3px solid #bfdbfe; outline-offset: 1px; border-color: #84adff; }
+.form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: .75rem; margin: .8rem 0; }
+.form-actions { display: flex; flex-wrap: wrap; align-items: center; gap: .55rem; margin-top: .9rem; }
+.text-button { padding: .52rem .65rem; border: 0; border-radius: 8px; background: transparent; color: var(--accent-dark); font: inherit; font-size: .78rem; font-weight: 750; cursor: pointer; }
+.text-button:hover { background: var(--accent-soft); }
+.button:disabled, .text-button:disabled { cursor: not-allowed; opacity: .5; }
+.intake-side { display: grid; gap: .65rem; }
+.compact-module { padding: .85rem; border: 1px solid var(--line); border-radius: 10px; background: white; }
+.compact-module h3 { margin: 0; font-size: .9rem; }
+.compact-module p { margin: .45rem 0 .7rem; color: var(--muted); font-size: .78rem; line-height: 1.5; }
+.module-status { display: inline-flex; padding: .27rem .45rem; border-radius: 999px; font-size: .68rem; font-weight: 800; }
+.module-status.available { background: var(--success-soft); color: var(--success); }
+.module-status.unavailable { background: var(--soft); color: #667085; }
+.intake-result { margin-top: 1rem; }
+.intake-result:empty { display: none; }
+.result-box { padding: 1rem; border: 1px solid var(--line); border-radius: 10px; background: white; }
+.result-box h3 { margin: 0 0 .5rem; font-size: 1rem; }
+.finding-list { display: grid; gap: .45rem; margin: .75rem 0; padding: 0; list-style: none; }
+.finding { padding: .65rem .75rem; border-left: 3px solid #98a2b3; border-radius: 6px; background: var(--soft); color: #475467; font-size: .78rem; line-height: 1.48; }
+.finding.warning, .finding.blocking { border-left-color: #f79009; background: var(--warning-soft); }
+.finding strong { color: var(--ink); }
+.stage-list { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: .45rem; margin: .8rem 0; padding: 0; list-style: none; }
+.stage-list li { min-width: 0; padding: .55rem; border: 1px solid var(--line); border-radius: 8px; color: #475467; font-size: .72rem; line-height: 1.35; }
+.stage-list strong { display: block; margin-bottom: .2rem; color: var(--ink); overflow-wrap: anywhere; }
+.stage-list .completed { border-color: #a6f4c5; background: var(--success-soft); }
+.stage-list .failed_closed { border-color: #fedf89; background: var(--warning-soft); }
+.stage-list .not_executed { background: var(--soft); }
+.history-panel { margin: 1rem 0 3rem; }
+.entry-strip { display: flex; flex-wrap: wrap; gap: .5rem; margin: .8rem 0 1rem; }
+.entry-strip span { padding: .4rem .55rem; border: 1px solid var(--line); border-radius: 8px; color: var(--muted); font-size: .72rem; }
+.entry-strip strong { color: var(--ink); }
+.import-form { display: grid; grid-template-columns: minmax(0, 1fr) minmax(240px, .7fr) auto; align-items: end; gap: .75rem; margin: 0 0 1rem; padding: .8rem; border: 1px solid var(--line); border-radius: 10px; background: #fcfcfd; }
+.import-copy { display: grid; gap: .3rem; color: #344054; font-size: .78rem; }
+.import-copy small { color: var(--muted); line-height: 1.45; }
+.file-input-hidden { position: absolute; width: 1px; height: 1px; padding: 0; overflow: hidden; opacity: 0; pointer-events: none; }
+.import-picker { display: flex; min-width: 0; align-items: center; gap: .6rem; }
+.import-picker label { flex: 0 0 auto; margin: 0; }
+.import-picker span { min-width: 0; color: var(--muted); font-size: .74rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.run-list { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: .65rem; }
+.run-card { min-width: 0; padding: .85rem; border: 1px solid var(--line); border-radius: 10px; background: #fcfcfd; }
+.run-card h3 { margin: .45rem 0; font-size: .9rem; overflow-wrap: anywhere; }
+.run-card p { margin: .35rem 0; color: var(--muted); font-size: .75rem; line-height: 1.45; }
+.run-card .badges { margin-bottom: .45rem; }
+.run-actions { display: flex; flex-wrap: wrap; gap: .4rem; margin-top: .65rem; }
+.run-actions a, .run-actions button { padding: .4rem .52rem; border: 1px solid var(--line-strong); border-radius: 7px; background: white; color: var(--accent-dark); font: inherit; font-size: .7rem; font-weight: 750; text-decoration: none; cursor: pointer; }
 .retrieval-panel { margin: 0 0 3.2rem; padding: 1.6rem; }
 .retrieval-summary { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: .7rem; margin: 1.25rem 0; }
 .retrieval-card { min-width: 0; padding: .9rem; border: 1px solid var(--line); border-radius: 10px; background: #fcfcfd; color: #475467; line-height: 1.52; font-size: .82rem; }
@@ -780,16 +930,34 @@ pre { max-height: 430px; overflow: auto; margin: .7rem 0 0; padding: .9rem; bord
 pre.tall { max-height: 720px; }
 details { margin-top: .7rem; }
 summary { cursor: pointer; color: #344054; font-size: .82rem; font-weight: 750; }
-#browser-screenshot { display: block; width: min(100%, 430px); max-height: 520px; object-fit: contain; margin: 1rem auto; border: 1px solid var(--line); border-radius: 10px; background: white; }
+.media-heading { display: flex; justify-content: space-between; align-items: center; gap: 1rem; margin-top: 1rem; }
+.media-heading > div { display: grid; gap: .2rem; }
+.media-heading small { color: var(--muted); font-size: .74rem; }
+.media-heading > span { padding: .28rem .5rem; border-radius: 999px; background: var(--soft); color: #475467; font-size: .68rem; font-weight: 750; white-space: nowrap; }
+.media-note { margin: .55rem 0 0; color: var(--muted); font-size: .77rem; line-height: 1.5; }
+.browser-capture { display: grid; place-items: start center; width: 100%; margin: 1rem 0; padding: 1rem; overflow: auto; border: 1px solid var(--line); border-radius: 10px; background: var(--soft); }
+#browser-screenshot { display: block; width: auto; max-width: 100%; height: auto; margin: 0; border: 1px solid var(--line); border-radius: 8px; background: white; }
 .failure { max-width: 470px; padding: .75rem .85rem; border: 1px solid #fedf89; border-radius: 10px; background: var(--warning-soft); color: #7a2e0e; font-size: .8rem; line-height: 1.48; }
 .success { padding: .58rem .75rem; border: 1px solid #a6f4c5; border-radius: 10px; background: var(--success-soft); color: var(--success); font-size: .8rem; font-weight: 750; }
-.button { display: inline-block; padding: .66rem .9rem; border: 1px solid var(--accent); border-radius: 9px; background: var(--accent); color: white; text-decoration: none; font-size: .84rem; font-weight: 750; }
+.button { display: inline-block; padding: .66rem .9rem; border: 1px solid var(--accent); border-radius: 9px; background: var(--accent); color: white; text-decoration: none; font: inherit; font-size: .84rem; font-weight: 750; cursor: pointer; }
 .button:hover { background: var(--accent-dark); }
 .button.secondary { border-color: var(--line-strong); background: white; color: #344054; }
 .interaction-list { margin: .8rem 0; padding-left: 1.5rem; color: var(--muted); font-size: .82rem; line-height: 1.5; }
 .interaction-list small { display: block; overflow-wrap: anywhere; }
 .page-panel { margin-top: 1rem; }
-iframe { width: 100%; height: 760px; margin-top: 1rem; border: 1px solid var(--line); border-radius: 10px; background: white; }
+.preview-controls { display: flex; justify-content: space-between; align-items: center; gap: 1rem; margin-top: 1rem; }
+.preview-controls > span { color: var(--muted); font-size: .76rem; font-weight: 700; }
+.segmented-control { display: inline-flex; padding: 3px; border: 1px solid var(--line); border-radius: 10px; background: var(--soft); }
+.segmented-control button { min-height: 34px; padding: .4rem .72rem; border: 0; border-radius: 7px; background: transparent; color: #475467; font: inherit; font-size: .76rem; font-weight: 750; cursor: pointer; }
+.segmented-control button[aria-pressed="true"] { background: white; color: var(--accent-dark); box-shadow: 0 1px 3px rgba(16, 24, 40, .12); }
+.segmented-control button:focus-visible { outline: 3px solid #bfdbfe; outline-offset: 2px; }
+.preview-state { display: grid; grid-template-columns: auto auto minmax(0, 1fr); align-items: center; gap: .55rem 1rem; margin-top: .75rem; padding: .7rem .85rem; border: 1px solid #bfdbfe; border-radius: 10px; background: var(--accent-soft); }
+.preview-state > span { color: var(--accent-dark); font-size: .7rem; font-weight: 800; text-transform: uppercase; letter-spacing: .06em; }
+.preview-state > strong { font-size: .82rem; }
+.preview-state p { min-width: 0; margin: 0; color: #475467; font-size: .78rem; line-height: 1.45; overflow-wrap: anywhere; }
+.preview-stage { display: grid; place-items: start center; width: 100%; margin-top: .75rem; padding: 1rem; overflow: auto; border: 1px solid var(--line); border-radius: 12px; background: var(--soft); }
+.preview-canvas { position: relative; width: 100%; height: 760px; margin: 0 auto; }
+#final-page { display: block; width: 100%; height: 100%; margin: 0; border: 1px solid var(--line); border-radius: 10px; background: white; transform-origin: top left; }
 footer { display: flex; justify-content: space-between; gap: 2rem; align-items: center; padding: 2rem max(1rem, calc((100vw - 1480px) / 2)); border-top: 1px solid var(--line); background: white; color: var(--muted); font-size: .8rem; }
 footer strong { color: var(--ink); }
 footer p { margin: .25rem 0 0; }
@@ -809,6 +977,10 @@ footer a { white-space: nowrap; text-decoration: none; font-weight: 750; }
   .hero { grid-template-columns: 1fr; min-height: 0; padding: 3.5rem .2rem; }
   .release-card { max-width: 520px; }
   .section-intro, .section-heading, .control-row { flex-direction: column; align-items: stretch; }
+  .intake-grid { grid-template-columns: 1fr; }
+  .import-form { grid-template-columns: 1fr; }
+  .stage-list { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .run-list { grid-template-columns: 1fr; }
   .human-grid { grid-template-columns: 1fr; }
   .task-card { min-height: 0; border-right: 0; border-bottom: 1px solid var(--line); }
   .task-card:last-child { border-bottom: 0; }
@@ -819,17 +991,24 @@ footer a { white-space: nowrap; text-decoration: none; font-weight: 750; }
   .retrieval-summary, .details-grid, .overview-grid, .node-grid, .evidence-cards { grid-template-columns: 1fr; }
   .case-toolbar { top: 74px; grid-template-columns: 1fr; }
   .badges { display: none; }
-  iframe { height: 680px; }
+  .preview-canvas { height: 680px; }
+  .preview-state { grid-template-columns: 1fr auto; }
+  .preview-state p { grid-column: 1 / -1; }
 }
 @media (max-width: 520px) {
   .site-header { padding: 0 .75rem; }
   .local-status { display: none; }
   .hero h1 { font-size: 2.45rem; }
   .hero-actions { flex-direction: column; }
+  .form-grid, .stage-list { grid-template-columns: 1fr; }
   .button { text-align: center; }
   .metrics { grid-template-columns: 1fr; }
   .metric { min-height: 0; border-right: 0; }
   .panel, .retrieval-panel { padding: 1rem; }
+  .media-heading, .preview-controls { align-items: flex-start; flex-direction: column; }
+  .browser-capture, .preview-stage { padding: .5rem; }
+  .segmented-control { width: 100%; }
+  .segmented-control button { flex: 1; }
   footer { align-items: flex-start; flex-direction: column; }
 }
 """.encode("utf-8")
@@ -855,6 +1034,322 @@ function escapeHtml(value) {
 }
 function badge(text, warning = false) {
   return `<span class="badge${warning ? ' warn' : ''}">${text}</span>`;
+}
+
+async function requestJson(path, options = {}) {
+  const response = await fetch(path, options);
+  let value;
+  try {
+    value = await response.json();
+  } catch (error) {
+    throw new Error(`The local Inspector service did not return JSON for ${path}.`);
+  }
+  if (!response.ok) {
+    throw new Error(value.error_message || value.failure?.message || `Request failed with status ${response.status}.`);
+  }
+  return value;
+}
+
+function intakePayload() {
+  return {
+    requirement: byId('requirement-input').value,
+    target_device: byId('target-device-input').value || null,
+    task_type: byId('task-type-input').value || null,
+    constraints: byId('constraints-input').value.split(/\\r?\\n/).map(value => value.trim()).filter(Boolean),
+    retriever_backend: 'tfidf',
+    top_k: 2,
+  };
+}
+
+function findingMarkup(item) {
+  return `<li class="finding ${escapeHtml(item.severity)}"><strong>${escapeHtml(item.message)}</strong><br>${escapeHtml(item.suggestion)}</li>`;
+}
+
+function renderDiagnostics(value) {
+  const findings = value.findings.length
+    ? `<ul class="finding-list">${value.findings.map(findingMarkup).join('')}</ul>`
+    : '<p class="success">No deterministic preflight concern was found.</p>';
+  const preview = value.canonical_b_preview;
+  const previewMarkup = preview
+    ? `<p><strong>What Req2Web understood:</strong> ${escapeHtml(preview.requirement_summary)}</p><p class="muted">${preview.use_cases.length} user goals, ${preview.constraints.length} constraints, ${escapeHtml(preview.target_device)} target.</p><details><summary>Exact deterministic understanding preview</summary><pre>${escapeHtml(pretty(preview))}</pre></details>`
+    : '';
+  byId('intake-result').innerHTML = `<div class="result-box"><h3>${value.accepted_for_deterministic_draft ? 'Requirement check completed' : 'Requirement needs attention'}</h3>${findings}${previewMarkup}<p class="media-note">Semantic requirement assistant: ${escapeHtml(value.semantic_assist.status)}. Model calls: ${value.semantic_assist.call_count}.</p></div>`;
+}
+
+function renderSemanticAssist(value) {
+  const sidecar = value.sidecar || {};
+  const items = sidecar.advisory_items || [];
+  const advisory = items.length
+    ? `<ul class="finding-list">${items.map(item => `<li class="finding notice"><strong>${escapeHtml(item.advisory_kind.replaceAll('_', ' '))}</strong><br>${escapeHtml(item.statement)}</li>`).join('')}</ul>`
+    : '<p class="failure">No advisory sidecar was accepted. The deterministic requirement and draft paths are unchanged.</p>';
+  const worker = value.worker?.worker_result || {};
+  const memory = worker.cuda_peak_reserved_bytes
+    ? `<p class="muted">${escapeHtml(value.profile.profile_name)} - ${worker.input_token_length} input tokens - ${Math.round(worker.cuda_peak_reserved_bytes / 1048576)} MiB peak CUDA reservation.</p>`
+    : '';
+  byId('intake-result').innerHTML = `<div class="result-box"><h3>${value.status === 'advisory_available' ? 'Semantic advice is available' : 'Semantic assistant failed closed'}</h3>${advisory}${memory}<details><summary>Exact advisory evidence</summary><pre>${escapeHtml(pretty(value))}</pre></details><p class="media-note">Canonical requirement writeback: disabled. F1-F4 consumption: disabled. Model calls: ${sidecar.call_count || 0}. Automatic retries: 0.</p></div>`;
+}
+
+function stageMarkup(item) {
+  return `<li class="${escapeHtml(item.status)}"><strong>${escapeHtml(item.label)}</strong>${escapeHtml(item.status.replaceAll('_', ' '))}${item.detail ? `<br>${escapeHtml(item.detail)}` : ''}</li>`;
+}
+
+function renderRunTrace(record) {
+  const imported = record.status === 'completed_imported_result_package';
+  const completed = record.status === 'completed_deterministic_draft' || imported;
+  const result = record.result || {};
+  const actions = completed
+    ? `<div class="form-actions"><a class="button" href="${escapeHtml(result.entrypoint)}" target="_blank" rel="noopener">Open page</a><a class="button secondary" href="${escapeHtml(result.download)}">Download ResultPackage ZIP</a></div>`
+    : '';
+  const failure = record.failure
+    ? `<div class="failure"><strong>Failed closed at ${escapeHtml(record.failure.stage_id)}.</strong> ${escapeHtml(record.failure.message)}</div>`
+    : '';
+  const note = imported
+    ? 'This is a validated existing ResultPackage import. Generation, model, semantic Agent, and real browser stages were not rerun or inferred.'
+    : 'This is a component-level deterministic guided/G0 draft. F1-F4 model generation, semantic Agent calls, and real browser acceptance were not executed.';
+  byId('intake-result').innerHTML = `<div class="result-box"><h3>${completed ? escapeHtml(result.title) : 'Local run trace'}</h3><p>${completed ? escapeHtml(result.summary) : escapeHtml(record.status.replaceAll('_', ' '))}</p>${failure}<ul class="stage-list">${record.stages.map(stageMarkup).join('')}</ul>${actions}<details><summary>Exact local run record</summary><pre>${escapeHtml(pretty(record))}</pre></details><p class="media-note">${escapeHtml(note)}</p></div>`;
+  byId('intake-result').scrollIntoView({behavior: 'smooth', block: 'nearest'});
+}
+
+function renderRuns(records) {
+  if (!records.length) {
+    byId('run-list').innerHTML = '<p class="muted">No local draft or package import has been created yet.</p>';
+    return;
+  }
+  byId('run-list').innerHTML = records.map(record => {
+    const imported = record.status === 'completed_imported_result_package';
+    const complete = record.status === 'completed_deterministic_draft' || imported;
+    const title = record.result?.title || record.input?.requirement || record.input?.source_filename || record.run_id;
+    const detail = complete
+      ? record.result.summary
+      : record.failure?.message || record.status.replaceAll('_', ' ');
+    const actions = complete
+      ? `<a href="${escapeHtml(record.result.entrypoint)}" target="_blank" rel="noopener">Open page</a><a href="${escapeHtml(record.result.download)}">Download</a>`
+      : '';
+    const statusLabel = imported ? 'imported package ready' : (complete ? 'deterministic draft ready' : 'failed closed');
+    return `<article class="run-card"><div class="badges">${badge(statusLabel, !complete)}</div><h3>${escapeHtml(title)}</h3><p>${escapeHtml(detail)}</p><p>${escapeHtml(record.created_at || 'time unavailable')} - ${escapeHtml(record.run_id)}</p><div class="run-actions"><button type="button" data-run-id="${escapeHtml(record.run_id)}">Inspect trace</button>${actions}</div></article>`;
+  }).join('');
+  byId('run-list').querySelectorAll('[data-run-id]').forEach(button => {
+    button.addEventListener('click', async () => {
+      try {
+        renderRunTrace(await requestJson(`/api/runs/${button.dataset.runId}`));
+      } catch (error) {
+        byId('intake-result').innerHTML = `<div class="failure">${escapeHtml(error.message)}</div>`;
+      }
+    });
+  });
+}
+
+async function loadRuns() {
+  const value = await requestJson('/api/runs');
+  renderRuns(value.runs || []);
+}
+
+function setIntakeBusy(busy, label = '') {
+  byId('analyze-requirement').disabled = busy;
+  byId('semantic-assist').disabled = busy || byId('semantic-assist').dataset.available !== 'true';
+  byId('generate-draft').disabled = busy;
+  byId('import-package-button').disabled = busy;
+  if (busy) {
+    const modelAction = label.includes('semantic');
+    const detail = modelAction
+      ? 'The isolated local Qwen worker may take several minutes. It performs one call with no retry, writes raw output before parsing, and cannot alter canonical B or the draft pipeline.'
+      : 'The local deterministic pipeline is running. No model or external service is being called.';
+    byId('intake-result').innerHTML = `<div class="result-box"><h3>${escapeHtml(label)}</h3><p class="muted">${escapeHtml(detail)}</p></div>`;
+  }
+}
+
+async function initializeLiveInspector() {
+  const capability = byId('live-capability');
+  try {
+    const value = await requestJson('/api/capabilities');
+    const available = value.deterministic_guided_draft === 'available';
+    const importAvailable = value.result_package_import === 'available';
+    const semanticAvailable = value.semantic_requirement_assist === 'available_local_qwen';
+    capability.textContent = available ? 'Local drafts available' : 'Portable replay only';
+    capability.className = `capability-pill ${available ? 'available' : 'unavailable'}`;
+    byId('analyze-requirement').disabled = !available;
+    byId('generate-draft').disabled = !available;
+    byId('semantic-assist').dataset.available = String(semanticAvailable);
+    byId('semantic-assist').disabled = !semanticAvailable;
+    byId('semantic-assist-status').textContent = semanticAvailable
+      ? `Available: ${value.semantic_requirement_assist_detail.profile.profile_name}`
+      : 'Not connected';
+    byId('semantic-assist-status').className = `module-status ${semanticAvailable ? 'available' : 'unavailable'}`;
+    byId('import-package-button').disabled = !importAvailable;
+    byId('import-package').disabled = !importAvailable;
+    if (available) await loadRuns();
+    else byId('run-list').innerHTML = '<p class="muted">Run history is disabled in read-only replay mode.</p>';
+  } catch (error) {
+    capability.textContent = 'Portable replay only';
+    capability.className = 'capability-pill unavailable';
+    byId('analyze-requirement').disabled = true;
+    byId('generate-draft').disabled = true;
+    byId('semantic-assist').dataset.available = 'false';
+    byId('semantic-assist').disabled = true;
+    byId('semantic-assist-status').textContent = 'Not connected';
+    byId('semantic-assist-status').className = 'module-status unavailable';
+    byId('import-package-button').disabled = true;
+    byId('import-package').disabled = true;
+    byId('run-list').innerHTML = '<p class="muted">Start the repository Inspector server to create and revisit local drafts. The standalone reviewer bundle remains read-only.</p>';
+  }
+
+  byId('fill-example').addEventListener('click', () => {
+    byId('requirement-input').value = 'I need a field-service page where a technician can search for equipment, report a problem, see clear validation errors, retry a failed submission, and confirm the final status.';
+    byId('target-device-input').value = 'responsive_web';
+    byId('constraints-input').value = 'Support keyboard operation\\nKeep recovery guidance visible after a failed submission';
+  });
+  byId('import-package').addEventListener('change', event => {
+    byId('import-file-name').textContent = event.target.files[0]?.name || 'No file selected';
+  });
+  byId('analyze-requirement').addEventListener('click', async () => {
+    setIntakeBusy(true, 'Checking the requirement');
+    try {
+      renderDiagnostics(await requestJson('/api/intake/analyze', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(intakePayload()),
+      }));
+    } catch (error) {
+      byId('intake-result').innerHTML = `<div class="failure"><strong>Requirement check failed closed.</strong> ${escapeHtml(error.message)}</div>`;
+    } finally {
+      setIntakeBusy(false);
+    }
+  });
+  byId('semantic-assist').addEventListener('click', async () => {
+    setIntakeBusy(true, 'Running the semantic requirement assistant');
+    try {
+      renderSemanticAssist(await requestJson('/api/intake/semantic-assist', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(intakePayload()),
+      }));
+    } catch (error) {
+      byId('intake-result').innerHTML = `<div class="failure"><strong>Semantic assistant failed closed.</strong> ${escapeHtml(error.message)}<br>The deterministic requirement and draft paths remain available.</div>`;
+    } finally {
+      setIntakeBusy(false);
+    }
+  });
+  byId('requirement-form').addEventListener('submit', async event => {
+    event.preventDefault();
+    setIntakeBusy(true, 'Creating a deterministic draft');
+    try {
+      const record = await requestJson('/api/runs', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(intakePayload()),
+      });
+      renderRunTrace(record);
+      await loadRuns();
+    } catch (error) {
+      byId('intake-result').innerHTML = `<div class="failure"><strong>Draft generation failed closed.</strong> ${escapeHtml(error.message)}</div>`;
+      try { await loadRuns(); } catch (ignored) { /* Preserve the original failure. */ }
+    } finally {
+      setIntakeBusy(false);
+    }
+  });
+  byId('import-form').addEventListener('submit', async event => {
+    event.preventDefault();
+    const file = byId('import-package').files[0];
+    if (!file) {
+      byId('intake-result').innerHTML = '<div class="failure"><strong>Package import needs a ZIP file.</strong> Select one ResultPackage ZIP and try again.</div>';
+      return;
+    }
+    setIntakeBusy(true, 'Validating an existing ResultPackage');
+    try {
+      const record = await requestJson('/api/imports', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/zip',
+          'X-Req2Web-Filename': encodeURIComponent(file.name),
+        },
+        body: file,
+      });
+      renderRunTrace(record);
+      byId('import-form').reset();
+      byId('import-file-name').textContent = 'No file selected';
+      await loadRuns();
+    } catch (error) {
+      byId('intake-result').innerHTML = `<div class="failure"><strong>Package import failed closed.</strong> ${escapeHtml(error.message)}</div>`;
+    } finally {
+      setIntakeBusy(false);
+    }
+  });
+  byId('refresh-runs').addEventListener('click', async () => {
+    try { await loadRuns(); } catch (error) {
+      byId('run-list').innerHTML = `<div class="failure">${escapeHtml(error.message)}</div>`;
+    }
+  });
+}
+
+let previewMode = 'fit';
+let auditedViewport = {width: 0, height: 0};
+
+function viewportLabel(viewport) {
+  return viewport.width && viewport.height
+    ? `${viewport.width} × ${viewport.height}`
+    : 'Viewport unavailable';
+}
+
+function renderPreviewLayout() {
+  const stage = byId('preview-stage');
+  const canvas = byId('preview-canvas');
+  const frame = byId('final-page');
+  const fitButton = byId('preview-fit');
+  const auditButton = byId('preview-audit');
+  fitButton.setAttribute('aria-pressed', String(previewMode === 'fit'));
+  auditButton.setAttribute('aria-pressed', String(previewMode === 'audit'));
+
+  if (previewMode === 'audit' && auditedViewport.width && auditedViewport.height) {
+    const availableWidth = Math.max(280, stage.clientWidth - 34);
+    const scale = Math.min(1, availableWidth / auditedViewport.width);
+    canvas.style.width = `${Math.round(auditedViewport.width * scale)}px`;
+    canvas.style.height = `${Math.round(auditedViewport.height * scale)}px`;
+    frame.style.width = `${auditedViewport.width}px`;
+    frame.style.height = `${auditedViewport.height}px`;
+    frame.style.transform = `scale(${scale})`;
+    byId('preview-viewport').textContent = `${viewportLabel(auditedViewport)} audited viewport · ${Math.round(scale * 100)}% display scale`;
+    byId('preview-note').textContent = 'Audited-viewport mode uses the same responsive breakpoint as the captured Chrome evidence. Display scaling changes only its size inside the console.';
+    return;
+  }
+
+  canvas.style.width = '100%';
+  canvas.style.height = window.innerWidth <= 820 ? '680px' : '760px';
+  frame.style.width = '100%';
+  frame.style.height = '100%';
+  frame.style.transform = 'none';
+  byId('preview-viewport').textContent = 'Fit to panel';
+  byId('preview-note').textContent = 'Fit-to-panel mode uses the available console width. Switch to the audited viewport for a like-for-like comparison with the captured Chrome evidence.';
+}
+
+function setPreviewMode(mode) {
+  previewMode = mode;
+  renderPreviewLayout();
+}
+
+function refreshPreviewState() {
+  const frame = byId('final-page');
+  try {
+    const page = frame.contentDocument;
+    const state = page?.getElementById('page-state');
+    const stateName = state?.dataset.stateName || page?.body?.dataset.stateName || 'Ready';
+    const message = state?.querySelector('.state-message')?.textContent || 'The packaged page is loaded. Actions update this state in place.';
+    byId('preview-state-name').textContent = stateName;
+    byId('preview-state-message').textContent = message;
+  } catch (error) {
+    byId('preview-state-name').textContent = 'Unavailable';
+    byId('preview-state-message').textContent = 'The live state cannot be read from this page context.';
+  }
+}
+
+function connectPreviewStateMonitor() {
+  const frame = byId('final-page');
+  refreshPreviewState();
+  const page = frame.contentDocument;
+  if (!page || page.documentElement.dataset.inspectorMonitorAttached === 'true') return;
+  page.documentElement.dataset.inspectorMonitorAttached = 'true';
+  ['click', 'change', 'submit'].forEach(eventName => {
+    page.addEventListener(eventName, () => window.setTimeout(refreshPreviewState, 0));
+  });
 }
 
 function renderMetrics(counts) {
@@ -944,8 +1439,16 @@ async function showCase(item) {
   byId('semantic-json').textContent = pretty(semantic);
   byId('historical-json').textContent = pretty(record.historical_source);
   byId('browser-screenshot').src = a.browser_screenshot;
+  auditedViewport = {
+    width: Number(browserAudit.viewport?.width || 0),
+    height: Number(browserAudit.viewport?.height || 0),
+  };
+  byId('browser-viewport').textContent = viewportLabel(auditedViewport);
+  byId('preview-state-name').textContent = 'Loading';
+  byId('preview-state-message').textContent = 'The selected page has not finished loading.';
   byId('final-page').src = a.final_page;
   byId('open-page').href = a.final_page;
+  renderPreviewLayout();
   byId('case-badges').innerHTML = [
     badge(record.historical_first_pass.passed ? 'historical first-pass' : 'historical fail-closed', !record.historical_first_pass.passed),
     badge('delivery available'), badge('browser pass'), badge('semantic 2/2 supported'),
@@ -990,6 +1493,11 @@ async function main() {
     `<option value="${item.execution_index - 1}">${String(item.execution_index).padStart(2, '0')} · ${item.case_id} · ${item.condition_id}</option>`
   ).join('');
   select.addEventListener('change', () => showCase(catalog.cases[Number(select.value)]));
+  byId('preview-fit').addEventListener('click', () => setPreviewMode('fit'));
+  byId('preview-audit').addEventListener('click', () => setPreviewMode('audit'));
+  byId('final-page').addEventListener('load', connectPreviewStateMonitor);
+  window.addEventListener('resize', renderPreviewLayout);
+  await initializeLiveInspector();
   await showCase(catalog.cases[0]);
 }
 
@@ -999,15 +1507,29 @@ main().catch(error => {
 """.encode("utf-8")
 
 
-_README_MD = """# Req2Web Phase 6 Reviewer Replay
+_README_MD = """# Req2Web Inspector
 
-This directory is a self-contained, read-only replay of twelve frozen Phase 5
-engineering rows. It lets a reviewer inspect the requirement, evidence
+This directory is the self-contained, read-only reviewer replay for the single
+Req2Web Inspector. It replays twelve frozen Phase 5 engineering rows and lets
+a reviewer inspect the requirement, evidence
 projection, validated F1-F4 outputs, preserved failure location, final
 PageSpec, objective Chrome evidence, semantic sidecar, screenshot, interaction
 trace, runnable final page, and a deterministic BM25/RRF/TF-IDF retrieval
 comparison with a blinded metric protocol and descriptive local efficiency
 evidence.
+
+When served from the repository with `scripts/run_req2web_inspector.py`, the
+same interface also accepts irregular requirements, runs deterministic input
+diagnostics, creates component-level guided/G0 drafts, keeps immutable local
+run history, imports strictly validated existing ResultPackage v1/v2 ZIP files,
+and exports validated ResultPackage v2 ZIP files. Imported packages are not
+rerun or relabeled. Deterministic diagnostics, drafts, and imports call no
+model or external service. A repository operator may explicitly enable the
+isolated advisory-only local Qwen requirement assistant; it writes raw output
+first, makes at most one call, never writes back to canonical B, and never
+enters F1-F4. The extracted reviewer bundle keeps that control visibly
+disconnected. F1-F4 model generation, semantic acceptance, and real browser
+acceptance for new drafts remain explicitly not executed.
 
 No GPU, model, hidden material, network connection, or browser automation is
 required. The replay does not regenerate or repair any evidence.
@@ -1017,8 +1539,8 @@ required. The replay does not regenerate or repair any evidence.
 From the repository root:
 
 ```powershell
-python scripts/run_phase6_inspector.py --validate-only
-python scripts/run_phase6_inspector.py
+python scripts/run_req2web_inspector.py --validate-only
+python scripts/run_req2web_inspector.py
 ```
 
 Then open `http://127.0.0.1:8765/`.
@@ -1029,6 +1551,10 @@ With only this directory and Python available:
 python validate_bundle.py
 python serve_bundle.py --port 8765
 ```
+
+The extracted reviewer directory is intentionally read-only. Its Create and
+Runs panels explain that repository service capabilities are unavailable while
+all frozen replay functions continue to work.
 
 ## Interpretation
 
@@ -1060,7 +1586,7 @@ must make an explicit license decision before publication.
 """.encode("utf-8")
 
 
-_HUMAN_TASKS_MD = """# Req2Web Phase 6 Human Tasks
+_HUMAN_TASKS_MD = """# Req2Web Inspector Human Tasks
 
 Only human judgment, ownership decisions, and authored submission material
 remain. Do not calculate metrics manually and do not edit generated evidence.

@@ -1,4 +1,4 @@
-"""Build and validate a deterministic, license-gated Phase 6 release candidate."""
+"""Build and validate a deterministic, license-gated Inspector candidate."""
 
 from __future__ import annotations
 
@@ -16,8 +16,8 @@ PHASE6_RELEASE_CANDIDATE_SCHEMA_VERSION = (
     "req2web.phase6.release_candidate.v1"
 )
 PHASE6_RELEASE_STATUS_SCHEMA_VERSION = "req2web.phase6.release_status.v1"
-ARCHIVE_NAME = "Req2Web-Phase6-reviewer.zip"
-ARCHIVE_ROOT = "Req2Web-Phase6-reviewer"
+ARCHIVE_NAME = "Req2Web-Inspector-reviewer.zip"
+ARCHIVE_ROOT = "Req2Web-Inspector-reviewer"
 FIXED_ZIP_TIMESTAMP = (1980, 1, 1, 0, 0, 0)
 
 
@@ -195,7 +195,7 @@ def validate_deterministic_reviewer_zip(
     }
 
 
-_REPRODUCE_MD = f"""# Req2Web Phase 6 Reproduction
+_REPRODUCE_MD = f"""# Req2Web Inspector Reproduction
 
 This candidate is a precomputed, local-only reviewer replay. It requires only
 Python 3 and does not require a GPU, model, network connection, hidden material,

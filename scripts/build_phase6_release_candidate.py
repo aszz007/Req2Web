@@ -1,4 +1,4 @@
-"""Build or validate the deterministic Phase 6 release candidate."""
+"""Build or validate the deterministic Req2Web Inspector candidate."""
 
 from __future__ import annotations
 
@@ -30,12 +30,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--reviewer-root",
         type=Path,
-        default=ROOT / "release" / "phase6_reviewer_v8",
+        default=ROOT / "release" / "phase6_reviewer_v10",
     )
     parser.add_argument(
         "--output-root",
         type=Path,
-        default=ROOT / "release" / "phase6_release_candidate_v8",
+        default=ROOT / "release" / "phase6_release_candidate_v10",
     )
     parser.add_argument("--validate-only", action="store_true")
     return parser

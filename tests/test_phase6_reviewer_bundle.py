@@ -23,7 +23,7 @@ from req2web_inspector.phase6_replay import (  # noqa: E402
 class Phase6ReviewerBundleTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
-        cls.bundle_root = ROOT / "release" / "phase6_reviewer_v8"
+        cls.bundle_root = ROOT / "release" / "phase6_reviewer_v10"
         cls.manifest = validate_phase6_reviewer_bundle(cls.bundle_root)
 
     def test_frozen_counts_and_separate_ledgers(self) -> None:
@@ -131,6 +131,46 @@ class Phase6ReviewerBundleTests(unittest.TestCase):
             text = (self.bundle_root / relative).read_text(encoding="utf-8")
             self.assertNotIn("https://", text)
             self.assertNotIn("http://", text)
+
+    def test_single_inspector_has_viewport_comparison_and_state_monitor(self) -> None:
+        page = (self.bundle_root / "index.html").read_text(encoding="utf-8")
+        styles = (self.bundle_root / "styles.css").read_text(encoding="utf-8")
+        script = (self.bundle_root / "app.js").read_text(encoding="utf-8")
+        self.assertIn("<title>Req2Web Inspector</title>", page)
+        self.assertNotIn("Phase 6 Inspector", page)
+        self.assertIn('id="preview-fit"', page)
+        self.assertIn('id="preview-audit"', page)
+        self.assertIn('id="preview-state-name"', page)
+        self.assertIn('id="browser-viewport"', page)
+        self.assertIn(".browser-capture", styles)
+        self.assertIn("function renderPreviewLayout()", script)
+        self.assertIn("function connectPreviewStateMonitor()", script)
+
+    def test_single_inspector_has_compact_user_entry_and_explanations(self) -> None:
+        page = (self.bundle_root / "index.html").read_text(encoding="utf-8")
+        styles = (self.bundle_root / "styles.css").read_text(encoding="utf-8")
+        script = (self.bundle_root / "app.js").read_text(encoding="utf-8")
+        self.assertIn('id="requirement-form"', page)
+        self.assertIn('id="run-history"', page)
+        self.assertIn('id="import-form"', page)
+        self.assertIn('id="import-package"', page)
+        self.assertIn("Choose ZIP", page)
+        self.assertIn("No file selected", page)
+        self.assertIn("Semantic requirement assistant", page)
+        self.assertIn("not connected", page.lower())
+        self.assertIn('id="semantic-assist"', page)
+        self.assertGreaterEqual(page.count('class="info-tip"'), 12)
+        self.assertIn(".info-tip:hover::after", styles)
+        self.assertIn(".info-tip:focus-visible::after", styles)
+        self.assertIn("overflow-x: clip", styles)
+        self.assertIn(".intake-side .info-tip::after", styles)
+        self.assertIn("function initializeLiveInspector()", script)
+        self.assertIn("/api/intake/analyze", script)
+        self.assertIn("/api/intake/semantic-assist", script)
+        self.assertIn("/api/runs", script)
+        self.assertIn("/api/imports", script)
+        self.assertIn(".split(/\\r?\\n/)", script)
+        self.assertIn("Support keyboard operation\\nKeep recovery guidance", script)
 
     def test_standalone_validator_uses_only_the_bundle(self) -> None:
         completed = subprocess.run(

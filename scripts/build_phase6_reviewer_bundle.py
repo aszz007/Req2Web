@@ -1,4 +1,4 @@
-"""Build the precomputed, read-only Phase 6 reviewer bundle."""
+"""Build the precomputed, read-only Req2Web Inspector bundle."""
 
 from __future__ import annotations
 
@@ -30,7 +30,7 @@ DEFAULT_SEMANTIC_ROOT = Path(
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description=(
-            "Build a self-contained Phase 6 reviewer replay from validated "
+            "Build a self-contained Req2Web Inspector replay from validated "
             "Phase 5 Path 2 artifacts. This command never calls a model, "
             "launches a browser, or reads H1/gold."
         )
@@ -93,7 +93,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--output-root",
         type=Path,
-        default=ROOT / "release" / "phase6_reviewer_v8",
+        default=ROOT / "release" / "phase6_reviewer_v10",
     )
     return parser
 

@@ -172,6 +172,17 @@ class PageRendererTest(unittest.TestCase):
             markup = result.index_html.read_text(encoding="utf-8")
             self.assertIn(f'data-renderer-kind="{component_type}"', markup)
 
+    def test_form_requires_input_before_running_its_interaction(self) -> None:
+        self.ecommerce_spec.components[0].component_type = "form"
+        result = self.renderer.render(self.ecommerce_spec, self.root / "required-form")
+        markup = result.index_html.read_text(encoding="utf-8")
+        script = result.app_js.read_text(encoding="utf-8")
+        self.assertIn('class="compact-form" novalidate', markup)
+        self.assertIn('placeholder="Enter required information" required', markup)
+        self.assertIn('requiredInput.setAttribute("aria-invalid", "true")', script)
+        self.assertIn("Enter the required information before submitting.", script)
+        self.assertIn("runForComponent(form.dataset.interactionForm)", script)
+
     def test_interactions_states_and_feedback_are_in_runtime_logic(self) -> None:
         result = self.renderer.render(self.pet_spec, self.root / "runtime")
         script = result.app_js.read_text(encoding="utf-8")
@@ -183,6 +194,7 @@ class PageRendererTest(unittest.TestCase):
             self.assertIn(state.state_id, script)
             self.assertIn(state.name, script)
         self.assertIn("feedback.textContent", script)
+        self.assertIn("inlineFeedback.textContent", script)
         self.assertIn("applyState(interaction.target_state_id", script)
 
     def test_error_and_recovery_controls_render_from_page_spec(self) -> None:
@@ -229,13 +241,28 @@ class PageRendererTest(unittest.TestCase):
         )
 
     def test_unknown_component_type_uses_visible_fallback(self) -> None:
-        component = self.ecommerce_spec.components[0]
+        trigger_component_id = self.ecommerce_spec.interactions[0].trigger_component_id
+        component = next(
+            item
+            for item in self.ecommerce_spec.components
+            if item.component_id == trigger_component_id
+        )
         component.component_type = "custom_chart"
         result = self.renderer.render(self.ecommerce_spec, self.root / "fallback")
         markup = result.index_html.read_text(encoding="utf-8")
         self.assertIn('data-component-type="custom_chart"', markup)
         self.assertIn('data-renderer-kind="fallback"', markup)
         self.assertIn("Generic control: custom_chart", markup)
+        self.assertIn(f">{component.label}</button>", markup)
+        self.assertIn('class="action-feedback" aria-live="polite"', markup)
+        self.assertNotIn(">Run action</button>", markup)
+
+    def test_mobile_layout_wraps_long_visible_text(self) -> None:
+        result = self.renderer.render(self.pet_spec, self.root / "mobile-wrap")
+        styles = result.styles_css.read_text(encoding="utf-8")
+        self.assertIn(".page-meta dd", styles)
+        self.assertIn("overflow-wrap: anywhere", styles)
+        self.assertIn(".action-feedback:empty { display: none; }", styles)
 
     def test_english_publication_render_contains_no_cjk_text(self) -> None:
         spec = build_spec(

@@ -234,9 +234,9 @@ class DeterministicPageRenderer:
                 f' data-interaction-form="{component_id}"' if has_interaction else ""
             )
             content = [
-                f'          <form class="compact-form"{form_trigger}>',
+                f'          <form class="compact-form" novalidate{form_trigger}>',
                 f'            <label for="input-{component_id}">{label}</label>',
-                f'            <input id="input-{component_id}" type="text" placeholder="Enter required information">',
+                f'            <input id="input-{component_id}" type="text" placeholder="Enter required information" required>',
                 "            <button type=\"submit\">Submit</button>",
                 "          </form>",
             ]
@@ -267,8 +267,13 @@ class DeterministicPageRenderer:
             ]
             if has_interaction:
                 content.append(
-                    f'          <button class="secondary-button" type="button"{trigger}>Run action</button>'
+                    f'          <button class="secondary-button" type="button"{trigger}>{label}</button>'
                 )
+
+        if has_interaction and component.component_type != "status_panel":
+            content.append(
+                '          <output class="action-feedback" aria-live="polite"></output>'
+            )
 
         renderer_kind = (
             component.component_type
@@ -339,6 +344,13 @@ let currentStateId = PAGE_DATA.initial_state_id;
 function updateFeedback(interaction) {{
   const triggerRoot = document.getElementById(interaction.trigger_component_id);
   const section = triggerRoot ? triggerRoot.closest("[data-section-id]") : null;
+  const inlineFeedback = triggerRoot
+    ? triggerRoot.querySelector(".action-feedback")
+    : null;
+  if (inlineFeedback) {{
+    inlineFeedback.textContent = interaction.user_feedback;
+    inlineFeedback.dataset.interactionId = interaction.interaction_id;
+  }}
   const localFeedback = section
     ? section.querySelector('[data-component-type="status_panel"] .component-feedback')
     : null;
@@ -412,6 +424,20 @@ document.addEventListener("submit", (event) => {{
     return;
   }}
   event.preventDefault();
+  const requiredInput = form.querySelector("input[required], textarea[required], select[required]");
+  const component = form.closest("[data-component-id]");
+  const inlineFeedback = component ? component.querySelector(".action-feedback") : null;
+  if (requiredInput && !requiredInput.value.trim()) {{
+    requiredInput.setAttribute("aria-invalid", "true");
+    if (inlineFeedback) {{
+      inlineFeedback.textContent = "Enter the required information before submitting.";
+    }}
+    requiredInput.focus();
+    return;
+  }}
+  if (requiredInput) {{
+    requiredInput.removeAttribute("aria-invalid");
+  }}
   runForComponent(form.dataset.interactionForm);
 }});
 
@@ -474,7 +500,7 @@ button { cursor: pointer; }
   background: rgba(255,255,255,.86);
   box-shadow: 0 24px 70px rgba(45,55,90,.12);
 }
-.hero-copy { max-width: 720px; }
+.hero-copy { max-width: 720px; min-width: 0; }
 .eyebrow, .section-kicker {
   margin: 0 0 8px;
   color: var(--accent);
@@ -486,9 +512,9 @@ button { cursor: pointer; }
 h1 { margin: 0; font-size: clamp(2rem, 5vw, 4.2rem); line-height: 1.02; }
 .summary { margin: 18px 0 0; color: var(--muted); font-size: 1.05rem; line-height: 1.75; }
 .page-meta { display: grid; gap: 10px; min-width: 170px; margin: 0; }
-.page-meta div { padding: 13px 15px; border-radius: 14px; background: var(--surface-soft); }
+.page-meta div { min-width: 0; padding: 13px 15px; border-radius: 14px; background: var(--surface-soft); }
 .page-meta dt { color: var(--muted); font-size: .72rem; }
-.page-meta dd { margin: 3px 0 0; font-weight: 800; }
+.page-meta dd { min-width: 0; margin: 3px 0 0; font-weight: 800; overflow-wrap: anywhere; }
 .page-state {
   grid-column: 1 / -1;
   display: grid;
@@ -502,7 +528,7 @@ h1 { margin: 0; font-size: clamp(2rem, 5vw, 4.2rem); line-height: 1.02; }
   color: #364152;
 }
 .state-dot { width: 10px; height: 10px; border-radius: 50%; background: var(--accent); }
-.state-message { color: var(--muted); }
+.state-message { min-width: 0; color: var(--muted); overflow-wrap: anywhere; }
 
 .section-list { display: grid; gap: 20px; margin-top: 20px; }
 .page-section {
@@ -515,8 +541,9 @@ h1 { margin: 0; font-size: clamp(2rem, 5vw, 4.2rem); line-height: 1.02; }
   background: var(--surface);
   box-shadow: 0 12px 35px rgba(45,55,90,.07);
 }
-.section-heading h2 { margin: 0; font-size: 1.35rem; }
-.section-kicker { line-height: 1.5; text-transform: none; letter-spacing: .03em; }
+.section-heading, .component-copy { min-width: 0; }
+.section-heading h2 { margin: 0; font-size: 1.35rem; overflow-wrap: anywhere; }
+.section-kicker { line-height: 1.5; text-transform: none; letter-spacing: .03em; overflow-wrap: anywhere; }
 .component-list { display: grid; gap: 12px; }
 .component {
   display: grid;
@@ -526,8 +553,8 @@ h1 { margin: 0; font-size: clamp(2rem, 5vw, 4.2rem); line-height: 1.02; }
   border-radius: 16px;
   background: #fbfcff;
 }
-.component-copy h3 { margin: 0; font-size: 1rem; }
-.component-copy p { margin: 5px 0 0; color: var(--muted); line-height: 1.55; }
+.component-copy h3 { margin: 0; font-size: 1rem; overflow-wrap: anywhere; }
+.component-copy p { margin: 5px 0 0; color: var(--muted); line-height: 1.55; overflow-wrap: anywhere; }
 
 input[type="text"], input[type="search"] {
   width: 100%;
@@ -547,6 +574,7 @@ button, .file-control {
   background: var(--accent);
   font-weight: 750;
   text-align: center;
+  overflow-wrap: anywhere;
 }
 button:hover, button:focus-visible, .file-control:hover { background: var(--accent-strong); }
 .secondary-button { color: var(--accent-strong); background: #e8eaff; }
@@ -565,9 +593,12 @@ button:hover, button:focus-visible, .file-control:hover { background: var(--acce
 .location-preview span { position: absolute; z-index: 1; width: 18px; height: 18px; border: 5px solid var(--accent); border-radius: 50% 50% 50% 0; transform: rotate(-45deg); left: 50%; top: 42%; }
 .component-status_panel { background: #f5f7ff; }
 .component-feedback { display: block; color: var(--muted); line-height: 1.6; }
+.action-feedback { display: block; color: var(--accent-strong); font-size: .86rem; font-weight: 700; line-height: 1.5; overflow-wrap: anywhere; }
+.action-feedback:empty { display: none; }
 .component-fallback { border-style: dashed; border-color: #d19a35; }
-.fallback-note { margin: 0; color: var(--empty); font-weight: 750; }
+.fallback-note { margin: 0; color: var(--empty); font-weight: 750; overflow-wrap: anywhere; }
 .page-footer { display: flex; justify-content: space-between; gap: 12px; padding: 18px 4px 0; color: var(--muted); font-size: .78rem; }
+.page-footer span { min-width: 0; overflow-wrap: anywhere; }
 .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0; }
 
 body[data-state-name="success"] .page-state { color: #075c44; background: #dff7ed; }
