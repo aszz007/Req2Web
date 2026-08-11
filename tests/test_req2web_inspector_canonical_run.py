@@ -217,6 +217,82 @@ class CanonicalInspectorRunStoreTests(unittest.TestCase):
         ):
             store.artifact_path(record["run_id"], "evidence/other.json")
 
+    def test_objective_browser_failure_blocks_semantic_agent_without_calling_it(self) -> None:
+        case = synthetic_commerce_b_input()
+        semantic_called = False
+
+        def browser_objective_fail(**kwargs):
+            output_root = Path(kwargs["output_root"])
+            output_root.mkdir()
+            (output_root / "browser_execution_report.json").write_text(
+                "{}", encoding="utf-8"
+            )
+            (output_root / "case_browser_audit.json").write_text(
+                "{}", encoding="utf-8"
+            )
+            return {
+                "browser_status": "fail",
+                "browser_execution_status": "pass",
+                "page_spec_conformance_status": "fail",
+                "real_browser_executed": True,
+            }
+
+        def semantic_must_not_run(**_kwargs):
+            nonlocal semantic_called
+            semantic_called = True
+            raise AssertionError("semantic Agent crossed the objective browser gate")
+
+        store = CanonicalInspectorRunStore(
+            root=self.root / "runs-objective-fail",
+            index_dir=ROOT / "data/processed/rag",
+            model_root=self.model_root,
+            integrity_evidence=self.evidence,
+            requirement_assist_runner=self._assist,
+            browser_runner=browser_objective_fail,
+            semantic_runner=semantic_must_not_run,
+            _raw_node_generator=self._raw_node_generator,
+        )
+        inventory = {
+            "inventory_identity": {
+                "identity_kind": "canonical_json",
+                "sha256": "sha256:" + ("d" * 64),
+                "byte_length": 1,
+                "revision": "test.inventory.v1",
+            }
+        }
+        with patch(
+            "req2web_runtime.phase4_local_qwen_langgraph_integrated.validate_model_inventory_metadata",
+            return_value=inventory,
+        ):
+            created = store.create(
+                {
+                    "requirement": case["requirement"],
+                    "target_device": case["target_device"],
+                    "task_type": case["task_type"],
+                    "constraints": case["constraints"],
+                    "confirm_local_model_action": True,
+                    "run_requirement_assist": True,
+                    "run_browser_acceptance": True,
+                    "run_semantic_acceptance": True,
+                }
+            )
+            record = store.wait(created["run_id"], timeout=30)
+
+        statuses = {
+            item["stage_id"]: item["status"] for item in record["stages"]
+        }
+        self.assertEqual(statuses["browser"], "fail")
+        self.assertEqual(
+            statuses["semantic"],
+            "not_executed_objective_browser_gate",
+        )
+        self.assertFalse(semantic_called)
+        self.assertFalse(record["semantic"]["semantic_alignment_executed"])
+        self.assertEqual(
+            record["semantic"]["page_spec_conformance_status"],
+            "fail",
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

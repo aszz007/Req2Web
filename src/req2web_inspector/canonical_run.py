@@ -625,6 +625,30 @@ class CanonicalInspectorRunStore:
                         "semantic",
                         "not_executed_browser_evidence_unavailable",
                     )
+                elif (
+                    browser_audit.get("browser_execution_status") != "pass"
+                    or browser_audit.get("page_spec_conformance_status") != "pass"
+                ):
+                    record["semantic"] = {
+                        "status": "not_executed_objective_browser_gate",
+                        "semantic_alignment_executed": False,
+                        "automatic_retry_count": 0,
+                        "reason": (
+                            "Semantic acceptance cannot override unavailable or "
+                            "failed objective browser/PageSpec evidence."
+                        ),
+                        "browser_execution_status": browser_audit.get(
+                            "browser_execution_status"
+                        ),
+                        "page_spec_conformance_status": browser_audit.get(
+                            "page_spec_conformance_status"
+                        ),
+                    }
+                    _set_stage(
+                        record,
+                        "semantic",
+                        "not_executed_objective_browser_gate",
+                    )
                 else:
                     try:
                         semantic = self.semantic_runner(
