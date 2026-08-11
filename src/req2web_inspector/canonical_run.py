@@ -496,11 +496,25 @@ class CanonicalInspectorRunStore:
                 ),
             )
             attempts_root = run_dir / "canonical" / "attempts"
+            record["node_evidence"] = {}
             for node_id in NODE_ORDER:
                 attempt_path = attempts_root / node_id / "attempt_result.json"
                 if attempt_path.is_file():
                     attempt = _read_json(attempt_path, f"{node_id} attempt")
                     _set_stage(record, node_id, str(attempt["status"]))
+                    output_path = attempts_root / node_id / "validated_node_output.json"
+                    record["node_evidence"][node_id] = {
+                        "attempt": (
+                            f"/api/canonical-runs/{run_id}/evidence/"
+                            f"node-{node_id}-attempt.json"
+                        ),
+                        "output": (
+                            f"/api/canonical-runs/{run_id}/evidence/"
+                            f"node-{node_id}-output.json"
+                            if output_path.is_file()
+                            else None
+                        ),
+                    }
                 else:
                     _set_stage(record, node_id, "not_started")
             graph_completed = summary["agent_chain_completed"] is True
@@ -528,6 +542,9 @@ class CanonicalInspectorRunStore:
                 "entrypoint": f"/api/canonical-runs/{run_id}/package/page/index.html",
                 "download": f"/api/canonical-runs/{run_id}/download",
                 "record": f"/api/canonical-runs/{run_id}",
+                "page_spec": (
+                    f"/api/canonical-runs/{run_id}/package/internal/page_spec.json"
+                ),
             }
             self._save(run_id, record)
 
@@ -559,6 +576,18 @@ class CanonicalInspectorRunStore:
                         "real_browser_executed": browser_audit[
                             "real_browser_executed"
                         ],
+                        "interaction_count": len(browser_audit.get("interactions", [])),
+                        "console_error_count": sum(
+                            isinstance(item, Mapping) and item.get("type") == "error"
+                            for item in browser_audit.get("console_messages", [])
+                        ),
+                        "page_error_count": len(browser_audit.get("page_errors", [])),
+                        "screenshot": (
+                            f"/api/canonical-runs/{run_id}/evidence/browser-screenshot.png"
+                        ),
+                        "audit": (
+                            f"/api/canonical-runs/{run_id}/evidence/browser-audit.json"
+                        ),
                     }
                     _set_stage(record, "browser", str(browser_audit["browser_status"]))
                 except Exception as exc:
@@ -587,7 +616,17 @@ class CanonicalInspectorRunStore:
                             profile_name=self.semantic_profile_name,
                             confirm_model_action=True,
                         )
-                        record["semantic"] = semantic
+                        record["semantic"] = {
+                            **semantic,
+                            "summary": (
+                                f"/api/canonical-runs/{run_id}/evidence/semantic-summary.json"
+                            ),
+                            "result": (
+                                f"/api/canonical-runs/{run_id}/evidence/semantic-result.json"
+                                if (run_dir / "semantic" / "semantic_alignment_result.json").is_file()
+                                else None
+                            ),
+                        }
                         _set_stage(record, "semantic", str(semantic["status"]))
                     except Exception as exc:
                         record["semantic_failure"] = {
@@ -630,6 +669,40 @@ class CanonicalInspectorRunStore:
         record = self.get(run_id)
         if relative == "result-package.zip":
             selected = run_dir / relative
+        elif relative.startswith("evidence/"):
+            evidence_paths = {
+                "evidence/browser-screenshot.png": run_dir
+                / "browser"
+                / "browser_screenshot.png",
+                "evidence/browser-audit.json": run_dir
+                / "browser"
+                / "case_browser_audit.json",
+                "evidence/browser-execution.json": run_dir
+                / "browser"
+                / "browser_execution_report.json",
+                "evidence/semantic-summary.json": run_dir
+                / "semantic"
+                / "run_summary.json",
+                "evidence/semantic-result.json": run_dir
+                / "semantic"
+                / "semantic_alignment_result.json",
+            }
+            for node_id in NODE_ORDER:
+                evidence_paths[f"evidence/node-{node_id}-attempt.json"] = (
+                    run_dir / "canonical" / "attempts" / node_id / "attempt_result.json"
+                )
+                evidence_paths[f"evidence/node-{node_id}-output.json"] = (
+                    run_dir
+                    / "canonical"
+                    / "attempts"
+                    / node_id
+                    / "validated_node_output.json"
+                )
+            selected = evidence_paths.get(relative)
+            if selected is None:
+                raise InspectorCanonicalRunError(
+                    "canonical evidence artifact is unsupported"
+                )
         elif relative.startswith("package/"):
             package_relative = record.get("result", {}).get("package_relative_path")
             if not isinstance(package_relative, str):

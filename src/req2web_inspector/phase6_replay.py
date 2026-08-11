@@ -1116,6 +1116,18 @@ function renderRunTrace(record, scroll = true) {
   const actions = result.entrypoint
     ? `<div class="form-actions"><a class="button" href="${escapeHtml(result.entrypoint)}" target="_blank" rel="noopener">Open page</a><a class="button secondary" href="${escapeHtml(result.download)}">Download ResultPackage ZIP</a></div>`
     : '';
+  const evidenceLinks = [
+    result.page_spec ? `<a href="${escapeHtml(result.page_spec)}" target="_blank" rel="noopener">PageSpec</a>` : '',
+    ...Object.entries(record.node_evidence || {}).flatMap(([nodeId, evidence]) => [
+      evidence.output ? `<a href="${escapeHtml(evidence.output)}" target="_blank" rel="noopener">${escapeHtml(nodeId)} output</a>` : '',
+      evidence.attempt ? `<a href="${escapeHtml(evidence.attempt)}" target="_blank" rel="noopener">${escapeHtml(nodeId)} attempt</a>` : '',
+    ]),
+    record.browser?.screenshot ? `<a href="${escapeHtml(record.browser.screenshot)}" target="_blank" rel="noopener">Browser screenshot</a>` : '',
+    record.browser?.audit ? `<a href="${escapeHtml(record.browser.audit)}" target="_blank" rel="noopener">Browser audit</a>` : '',
+    record.semantic?.result ? `<a href="${escapeHtml(record.semantic.result)}" target="_blank" rel="noopener">Semantic result</a>` : '',
+    record.semantic?.summary ? `<a href="${escapeHtml(record.semantic.summary)}" target="_blank" rel="noopener">Semantic summary</a>` : '',
+  ].filter(Boolean).join('');
+  const evidenceActions = evidenceLinks ? `<div class="run-actions evidence-actions">${evidenceLinks}</div>` : '';
   const failure = record.failure
     ? `<div class="failure"><strong>Failed closed at ${escapeHtml(record.failure.stage_id)}.</strong> ${escapeHtml(record.failure.message)}</div>`
     : '';
@@ -1126,7 +1138,7 @@ function renderRunTrace(record, scroll = true) {
       : 'This is a component-level deterministic guided/G0 draft. F1-F4 model generation, semantic Agent calls, and real browser acceptance were not executed.';
   const title = result.title || record.input?.requirement || 'Local run trace';
   const detail = result.summary || result.selected_delivery_kind || record.status.replaceAll('_', ' ');
-  byId('intake-result').innerHTML = `<div class="result-box"><h3>${escapeHtml(title)}</h3><p>${escapeHtml(detail)}</p>${failure}<ul class="stage-list">${record.stages.map(stageMarkup).join('')}</ul>${actions}<details><summary>Exact local run record</summary><pre>${escapeHtml(pretty(record))}</pre></details><p class="media-note">${escapeHtml(note)}</p></div>`;
+  byId('intake-result').innerHTML = `<div class="result-box"><h3>${escapeHtml(title)}</h3><p>${escapeHtml(detail)}</p>${failure}<ul class="stage-list">${record.stages.map(stageMarkup).join('')}</ul>${actions}${evidenceActions}<details><summary>Exact local run record</summary><pre>${escapeHtml(pretty(record))}</pre></details><p class="media-note">${escapeHtml(note)}</p></div>`;
   if (scroll) byId('intake-result').scrollIntoView({behavior: 'smooth', block: 'nearest'});
 }
 

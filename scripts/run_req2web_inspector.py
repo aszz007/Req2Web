@@ -187,6 +187,12 @@ class _InspectorHandler(SimpleHTTPRequestHandler):
                     download_name=f"{run_id}-result-package.zip",
                 )
                 return True
+            if len(parts) == 5 and parts[3] == "evidence":
+                relative = "evidence/" + parts[4]
+                self._send_file(
+                    self.canonical_run_store.artifact_path(run_id, relative)
+                )
+                return True
             if len(parts) >= 5 and parts[3] == "package":
                 relative = "package/" + "/".join(parts[4:])
                 self._send_file(
@@ -323,7 +329,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--bundle-root",
         type=Path,
-        default=ROOT / "release" / "phase6_reviewer_v11",
+        default=ROOT / "release" / "phase6_reviewer_v12",
     )
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8765)

@@ -191,6 +191,31 @@ class CanonicalInspectorRunStoreTests(unittest.TestCase):
         self.assertTrue(
             store.artifact_path(record["run_id"], "result-package.zip").is_file()
         )
+        self.assertTrue(
+            store.artifact_path(
+                record["run_id"], "evidence/browser-screenshot.png"
+            ).is_file()
+        )
+        self.assertTrue(
+            store.artifact_path(
+                record["run_id"], "evidence/browser-audit.json"
+            ).is_file()
+        )
+        self.assertTrue(
+            store.artifact_path(
+                record["run_id"], "evidence/node-F1-output.json"
+            ).is_file()
+        )
+        self.assertTrue(
+            store.artifact_path(
+                record["run_id"], "evidence/semantic-summary.json"
+            ).is_file()
+        )
+        with self.assertRaisesRegex(
+            InspectorCanonicalRunError,
+            "unsupported",
+        ):
+            store.artifact_path(record["run_id"], "evidence/other.json")
 
 
 if __name__ == "__main__":
