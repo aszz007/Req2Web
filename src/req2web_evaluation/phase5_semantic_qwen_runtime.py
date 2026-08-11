@@ -871,6 +871,26 @@ def _terminate_worker(process: subprocess.Popen[bytes]) -> None:
         process.wait(timeout=10)
 
 
+def _semantic_worker_environment(profile: SemanticQwenProfile) -> dict[str, str]:
+    environment = os.environ.copy()
+    src_root = str(Path(__file__).resolve().parents[1])
+    environment["PYTHONPATH"] = (
+        src_root
+        if not environment.get("PYTHONPATH")
+        else src_root + os.pathsep + environment["PYTHONPATH"]
+    )
+    environment.update(
+        {
+            "PYTHONUNBUFFERED": "1",
+            "HF_HUB_OFFLINE": "1",
+            "TRANSFORMERS_OFFLINE": "1",
+            "CUDA_VISIBLE_DEVICES": "0",
+            "PYTORCH_CUDA_ALLOC_CONF": profile.cuda_allocator_config,
+        }
+    )
+    return environment
+
+
 def run_phase5_semantic_qwen(
     *,
     audit_root: Path,
@@ -994,14 +1014,7 @@ def run_phase5_semantic_qwen(
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         cwd=str(Path.cwd()),
-        env={
-            **os.environ,
-            "PYTHONUNBUFFERED": "1",
-            "HF_HUB_OFFLINE": "1",
-            "TRANSFORMERS_OFFLINE": "1",
-            "CUDA_VISIBLE_DEVICES": "0",
-            "PYTORCH_CUDA_ALLOC_CONF": profile.cuda_allocator_config,
-        },
+        env=_semantic_worker_environment(profile),
         start_new_session=(os.name != "nt"),
         creationflags=creationflags,
     )

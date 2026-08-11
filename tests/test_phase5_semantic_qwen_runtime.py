@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 import sys
 import unittest
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 SRC = ROOT / "src"
@@ -15,6 +17,7 @@ from req2web_evaluation.phase5_semantic_qwen_runtime import (  # noqa: E402
     LOW_GPU_PROFILE,
     MODEL_ID,
     Phase5SemanticQwenRuntimeError,
+    _semantic_worker_environment,
     prepare_phase5_semantic_case,
     run_phase5_semantic_qwen,
     semantic_qwen_runtime_profile,
@@ -61,6 +64,23 @@ ENGLISH_PACKAGE_ROOT = (
 
 
 class Phase5SemanticQwenRuntimeTest(unittest.TestCase):
+    def test_worker_environment_prepends_repository_src_for_module_launch(self) -> None:
+        profile = semantic_qwen_runtime_profile(LOW_GPU_PROFILE)
+        with patch.dict(os.environ, {"PYTHONPATH": "existing-worker-path"}):
+            environment = _semantic_worker_environment(profile)
+
+        self.assertEqual(
+            environment["PYTHONPATH"].split(os.pathsep),
+            [str(SRC), "existing-worker-path"],
+        )
+        self.assertEqual(environment["HF_HUB_OFFLINE"], "1")
+        self.assertEqual(environment["TRANSFORMERS_OFFLINE"], "1")
+        self.assertEqual(environment["CUDA_VISIBLE_DEVICES"], "0")
+        self.assertEqual(
+            environment["PYTORCH_CUDA_ALLOC_CONF"],
+            profile.cuda_allocator_config,
+        )
+
     def test_profiles_separate_low_smoke_and_high_quality_runtime(self) -> None:
         low = semantic_qwen_runtime_profile(LOW_GPU_PROFILE).to_dict()
         high = semantic_qwen_runtime_profile(HIGH_GPU_PROFILE).to_dict()
