@@ -201,11 +201,23 @@ class CanonicalInspectorRunStoreTests(unittest.TestCase):
                 record["run_id"], "evidence/browser-audit.json"
             ).is_file()
         )
+        self.assertTrue(record["browser"]["execution"].endswith(".json"))
+        self.assertTrue(
+            store.artifact_path(
+                record["run_id"], "evidence/browser-execution.json"
+            ).is_file()
+        )
         self.assertTrue(
             store.artifact_path(
                 record["run_id"], "evidence/node-F1-output.json"
             ).is_file()
         )
+        self.assertTrue(record["node_evidence"]["F1"]["raw"].endswith(".bin"))
+        raw_path = store.artifact_path(
+            record["run_id"], "evidence/node-F1-raw.bin"
+        )
+        self.assertTrue(raw_path.is_file())
+        self.assertIsInstance(json.loads(raw_path.read_bytes()), dict)
         self.assertTrue(
             store.artifact_path(
                 record["run_id"], "evidence/semantic-summary.json"

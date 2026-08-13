@@ -23,7 +23,7 @@ from req2web_inspector.phase6_replay import (  # noqa: E402
 class Phase6ReviewerBundleTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
-        cls.bundle_root = ROOT / "release" / "phase6_reviewer_v14"
+        cls.bundle_root = ROOT / "release" / "phase6_reviewer_v15"
         cls.manifest = validate_phase6_reviewer_bundle(cls.bundle_root)
 
     def test_frozen_counts_and_separate_ledgers(self) -> None:
@@ -169,6 +169,8 @@ class Phase6ReviewerBundleTests(unittest.TestCase):
         self.assertIn("function outcomeSummaryMarkup(record, imported, canonical)", script)
         self.assertIn("model failed; deterministic package ready", script)
         self.assertIn("The raw model result was rejected", script)
+        self.assertIn("raw response</a>", script)
+        self.assertIn("Browser execution</a>", script)
         self.assertIn("A same-input deterministic package is available", script)
         self.assertIn(".outcome-summary", styles)
         self.assertIn("/api/intake/analyze", script)

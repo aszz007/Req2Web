@@ -93,7 +93,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--output-root",
         type=Path,
-        default=ROOT / "release" / "phase6_reviewer_v14",
+        default=ROOT / "release" / "phase6_reviewer_v15",
     )
     return parser
 

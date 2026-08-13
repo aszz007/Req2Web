@@ -1135,7 +1135,7 @@ function canonicalOutcomeItems(record) {
   const model = modelAvailable
     ? {tone: 'success', title: 'Model result accepted', detail: 'F1-F4 and composition produced the selected model package.'}
     : graphFailure.failure_stage
-      ? {tone: 'warning', title: `Failed closed at ${graphFailure.failure_stage}`, detail: 'The raw model result was rejected and is not counted as model success.'}
+      ? {tone: 'warning', title: `Failed closed at ${graphFailure.failure_stage}`, detail: graphFailure.message_code || 'The raw model result was rejected and is not counted as model success.'}
       : {tone: 'neutral', title: stageStatus(record, 'model').replaceAll('_', ' '), detail: 'No accepted model-generated package is recorded.'};
   const delivery = deliveryReady
     ? {
@@ -1197,12 +1197,17 @@ function renderRunTrace(record, scroll = true) {
     : '';
   const evidenceLinks = [
     result.page_spec ? `<a href="${escapeHtml(result.page_spec)}" target="_blank" rel="noopener">PageSpec</a>` : '',
-    ...Object.entries(record.node_evidence || {}).flatMap(([nodeId, evidence]) => [
-      evidence.output ? `<a href="${escapeHtml(evidence.output)}" target="_blank" rel="noopener">${escapeHtml(nodeId)} output</a>` : '',
-      evidence.attempt ? `<a href="${escapeHtml(evidence.attempt)}" target="_blank" rel="noopener">${escapeHtml(nodeId)} attempt</a>` : '',
-    ]),
+    ...Object.entries(record.node_evidence || {}).flatMap(([nodeId, evidence]) => {
+      const raw = evidence.raw || evidence.attempt?.replace(/-attempt\\.json$/, '-raw.bin');
+      return [
+        evidence.output ? `<a href="${escapeHtml(evidence.output)}" target="_blank" rel="noopener">${escapeHtml(nodeId)} output</a>` : '',
+        evidence.attempt ? `<a href="${escapeHtml(evidence.attempt)}" target="_blank" rel="noopener">${escapeHtml(nodeId)} attempt</a>` : '',
+        raw ? `<a href="${escapeHtml(raw)}" target="_blank" rel="noopener">${escapeHtml(nodeId)} raw response</a>` : '',
+      ];
+    }),
     record.browser?.screenshot ? `<a href="${escapeHtml(record.browser.screenshot)}" target="_blank" rel="noopener">Browser screenshot</a>` : '',
     record.browser?.audit ? `<a href="${escapeHtml(record.browser.audit)}" target="_blank" rel="noopener">Browser audit</a>` : '',
+    record.browser?.execution || record.browser?.audit ? `<a href="${escapeHtml(record.browser?.execution || record.browser.audit.replace(/browser-audit\\.json$/, 'browser-execution.json'))}" target="_blank" rel="noopener">Browser execution</a>` : '',
     record.semantic?.result ? `<a href="${escapeHtml(record.semantic.result)}" target="_blank" rel="noopener">Semantic result</a>` : '',
     record.semantic?.summary ? `<a href="${escapeHtml(record.semantic.summary)}" target="_blank" rel="noopener">Semantic summary</a>` : '',
   ].filter(Boolean).join('');

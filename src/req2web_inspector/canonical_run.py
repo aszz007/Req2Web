@@ -474,6 +474,13 @@ class CanonicalInspectorRunStore:
                             / node_id
                             / "validated_node_output.json"
                         )
+                        raw_path = (
+                            run_dir
+                            / "canonical"
+                            / "attempts"
+                            / node_id
+                            / "raw_response.bin"
+                        )
                         record.setdefault("node_evidence", {})[node_id] = {
                             "attempt": (
                                 f"/api/canonical-runs/{run_id}/evidence/"
@@ -483,6 +490,12 @@ class CanonicalInspectorRunStore:
                                 f"/api/canonical-runs/{run_id}/evidence/"
                                 f"node-{node_id}-output.json"
                                 if output_path.is_file()
+                                else None
+                            ),
+                            "raw": (
+                                f"/api/canonical-runs/{run_id}/evidence/"
+                                f"node-{node_id}-raw.bin"
+                                if raw_path.is_file()
                                 else None
                             ),
                         }
@@ -522,6 +535,7 @@ class CanonicalInspectorRunStore:
                     attempt = _read_json(attempt_path, f"{node_id} attempt")
                     _set_stage(record, node_id, str(attempt["status"]))
                     output_path = attempts_root / node_id / "validated_node_output.json"
+                    raw_path = attempts_root / node_id / "raw_response.bin"
                     record["node_evidence"][node_id] = {
                         "attempt": (
                             f"/api/canonical-runs/{run_id}/evidence/"
@@ -531,6 +545,12 @@ class CanonicalInspectorRunStore:
                             f"/api/canonical-runs/{run_id}/evidence/"
                             f"node-{node_id}-output.json"
                             if output_path.is_file()
+                            else None
+                        ),
+                        "raw": (
+                            f"/api/canonical-runs/{run_id}/evidence/"
+                            f"node-{node_id}-raw.bin"
+                            if raw_path.is_file()
                             else None
                         ),
                     }
@@ -606,6 +626,10 @@ class CanonicalInspectorRunStore:
                         ),
                         "audit": (
                             f"/api/canonical-runs/{run_id}/evidence/browser-audit.json"
+                        ),
+                        "execution": (
+                            f"/api/canonical-runs/{run_id}/evidence/"
+                            "browser-execution.json"
                         ),
                     }
                     _set_stage(record, "browser", str(browser_audit["browser_status"]))
@@ -740,6 +764,13 @@ class CanonicalInspectorRunStore:
                     / "attempts"
                     / node_id
                     / "validated_node_output.json"
+                )
+                evidence_paths[f"evidence/node-{node_id}-raw.bin"] = (
+                    run_dir
+                    / "canonical"
+                    / "attempts"
+                    / node_id
+                    / "raw_response.bin"
                 )
             selected = evidence_paths.get(relative)
             if selected is None:
