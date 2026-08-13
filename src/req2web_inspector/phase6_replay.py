@@ -892,6 +892,14 @@ textarea:focus, input:focus, select:focus { outline: 3px solid #bfdbfe; outline-
 .stage-list li[class*="completed"], .stage-list .validated, .stage-list .pass, .stage-list li[class*="result_package"] { border-color: #a6f4c5; background: var(--success-soft); }
 .stage-list li[class*="failed"], .stage-list li[class*="not_completed"] { border-color: #fedf89; background: var(--warning-soft); }
 .stage-list .not_executed { background: var(--soft); }
+.outcome-summary { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: .55rem; margin: .85rem 0; }
+.outcome-card { min-width: 0; padding: .7rem; border: 1px solid var(--line); border-radius: 9px; background: #fcfcfd; }
+.outcome-card > span { display: block; margin-bottom: .35rem; color: var(--muted); font-size: .65rem; font-weight: 850; letter-spacing: .06em; text-transform: uppercase; }
+.outcome-card strong { display: block; color: var(--ink); font-size: .78rem; line-height: 1.35; overflow-wrap: anywhere; }
+.outcome-card small { display: block; margin-top: .35rem; color: var(--muted); font-size: .68rem; line-height: 1.42; }
+.outcome-card.success { border-color: #a6f4c5; background: var(--success-soft); }
+.outcome-card.warning { border-color: #fedf89; background: var(--warning-soft); }
+.outcome-card.neutral { background: var(--soft); }
 .history-panel { margin: 1rem 0 3rem; }
 .entry-strip { display: flex; flex-wrap: wrap; gap: .5rem; margin: .8rem 0 1rem; }
 .entry-strip span { padding: .4rem .55rem; border: 1px solid var(--line); border-radius: 8px; color: var(--muted); font-size: .72rem; }
@@ -995,7 +1003,7 @@ footer a { white-space: nowrap; text-decoration: none; font-weight: 750; }
   .canonical-controls { grid-template-columns: 1fr 1fr; }
   .canonical-controls > div, .canonical-controls .button { grid-column: 1 / -1; }
   .import-form { grid-template-columns: 1fr; }
-  .stage-list { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .stage-list, .outcome-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .run-list { grid-template-columns: 1fr; }
   .human-grid { grid-template-columns: 1fr; }
   .task-card { min-height: 0; border-right: 0; border-bottom: 1px solid var(--line); }
@@ -1016,7 +1024,7 @@ footer a { white-space: nowrap; text-decoration: none; font-weight: 750; }
   .local-status { display: none; }
   .hero h1 { font-size: 2.45rem; }
   .hero-actions { flex-direction: column; }
-  .form-grid, .stage-list { grid-template-columns: 1fr; }
+  .form-grid, .stage-list, .outcome-summary { grid-template-columns: 1fr; }
   .button { text-align: center; }
   .metrics { grid-template-columns: 1fr; }
   .metric { min-height: 0; border-right: 0; }
@@ -1109,6 +1117,77 @@ function stageMarkup(item) {
   return `<li class="${escapeHtml(item.status)}"><strong>${escapeHtml(item.label)}</strong>${escapeHtml(item.status.replaceAll('_', ' '))}${item.detail ? `<br>${escapeHtml(item.detail)}` : ''}</li>`;
 }
 
+function stageStatus(record, stageId) {
+  return (record.stages || []).find(item => item.stage_id === stageId)?.status || 'not_recorded';
+}
+
+function canonicalOutcomeItems(record) {
+  const summary = record.canonical_summary || {};
+  const result = record.result || {};
+  const graphFailure = summary.graph_failure || {};
+  const modelAvailable = result.model_result_available === true || summary.model_result_available === true;
+  const deliveryReady = Boolean(result.entrypoint);
+  const selectedDelivery = result.selected_delivery_kind || summary.selected_delivery_kind || 'not available';
+  const browserStatus = record.browser?.browser_execution_status || stageStatus(record, 'browser');
+  const pageSpecStatus = record.browser?.page_spec_conformance_status;
+  const semanticStatus = record.semantic?.status || stageStatus(record, 'semantic');
+
+  const model = modelAvailable
+    ? {tone: 'success', title: 'Model result accepted', detail: 'F1-F4 and composition produced the selected model package.'}
+    : graphFailure.failure_stage
+      ? {tone: 'warning', title: `Failed closed at ${graphFailure.failure_stage}`, detail: 'The raw model result was rejected and is not counted as model success.'}
+      : {tone: 'neutral', title: stageStatus(record, 'model').replaceAll('_', ' '), detail: 'No accepted model-generated package is recorded.'};
+  const delivery = deliveryReady
+    ? {
+        tone: 'success',
+        title: selectedDelivery === 'deterministic_g0_result_package_v2' ? 'Deterministic G0 ready' : 'ResultPackage ready',
+        detail: selectedDelivery === 'deterministic_g0_result_package_v2'
+          ? 'A same-input deterministic package is available; this does not change the model failure.'
+          : selectedDelivery.replaceAll('_', ' '),
+      }
+    : {tone: 'warning', title: 'No package available', detail: stageStatus(record, 'package').replaceAll('_', ' ')};
+  const browser = browserStatus === 'pass' && pageSpecStatus === 'pass'
+    ? {tone: 'success', title: 'Real Chrome passed', detail: 'Browser execution and PageSpec conformance both passed.'}
+    : browserStatus === 'not_requested' || browserStatus.startsWith('not_executed') || browserStatus === 'not_recorded'
+      ? {tone: 'neutral', title: 'Not run', detail: browserStatus.replaceAll('_', ' ')}
+      : {tone: 'warning', title: 'Did not pass', detail: `${browserStatus.replaceAll('_', ' ')}${pageSpecStatus ? `; PageSpec ${pageSpecStatus}` : ''}`};
+  const semantic = semanticStatus === 'semantic_alignment_complete_pending_owner_review'
+    ? {tone: 'success', title: 'Completed; review pending', detail: 'The semantic sidecar completed. Its verdict remains separate from browser and delivery facts.'}
+    : semanticStatus === 'not_requested' || semanticStatus.startsWith('not_executed') || semanticStatus === 'not_recorded'
+      ? {tone: 'neutral', title: 'Not run', detail: semanticStatus.replaceAll('_', ' ')}
+      : semanticStatus === 'failed_closed'
+        ? {tone: 'warning', title: 'Failed closed', detail: 'No semantic success is inferred.'}
+        : {tone: 'neutral', title: semanticStatus.replaceAll('_', ' '), detail: 'Open the semantic evidence for the exact verdict.'};
+  return [
+    {label: 'Model generation', ...model},
+    {label: 'Deliverable package', ...delivery},
+    {label: 'Objective browser', ...browser},
+    {label: 'Semantic sidecar', ...semantic},
+  ];
+}
+
+function nonCanonicalOutcomeItems(record, imported) {
+  const deliveryReady = Boolean(record.result?.entrypoint);
+  return [
+    {label: 'Model generation', tone: 'neutral', title: 'Not run', detail: imported ? 'This package was imported.' : 'This draft uses deterministic components only.'},
+    {label: 'Deliverable package', tone: deliveryReady ? 'success' : 'warning', title: deliveryReady ? 'ResultPackage ready' : 'No package available', detail: imported ? 'The imported package passed local validation.' : 'The deterministic draft is available locally.'},
+    {label: 'Objective browser', tone: 'neutral', title: 'Not rerun', detail: 'No real-browser result is inferred for this entry.'},
+    {label: 'Semantic sidecar', tone: 'neutral', title: 'Not run', detail: 'No semantic verdict is inferred for this entry.'},
+  ];
+}
+
+function outcomeSummaryMarkup(record, imported, canonical) {
+  const items = canonical ? canonicalOutcomeItems(record) : nonCanonicalOutcomeItems(record, imported);
+  return `<div class="outcome-summary" role="list" aria-label="Run outcome summary">${items.map(item => `<article class="outcome-card ${escapeHtml(item.tone)}" role="listitem"><span>${escapeHtml(item.label)}</span><strong>${escapeHtml(item.title)}</strong><small>${escapeHtml(item.detail)}</small></article>`).join('')}</div>`;
+}
+
+function canonicalHistoryStatus(record) {
+  if (record.status === 'queued' || record.status === 'running') return record.status;
+  if (record.result?.entrypoint && record.result?.model_result_available === false) return 'model failed; deterministic package ready';
+  if (record.result?.entrypoint) return 'package ready';
+  return 'failed closed; no package';
+}
+
 function renderRunTrace(record, scroll = true) {
   const imported = record.status === 'completed_imported_result_package';
   const canonical = record.mode === 'canonical_local_qwen_full_flow';
@@ -1138,7 +1217,8 @@ function renderRunTrace(record, scroll = true) {
       : 'This is a component-level deterministic guided/G0 draft. F1-F4 model generation, semantic Agent calls, and real browser acceptance were not executed.';
   const title = result.title || record.input?.requirement || 'Local run trace';
   const detail = result.summary || result.selected_delivery_kind || record.status.replaceAll('_', ' ');
-  byId('intake-result').innerHTML = `<div class="result-box"><h3>${escapeHtml(title)}</h3><p>${escapeHtml(detail)}</p>${failure}<ul class="stage-list">${record.stages.map(stageMarkup).join('')}</ul>${actions}${evidenceActions}<details><summary>Exact local run record</summary><pre>${escapeHtml(pretty(record))}</pre></details><p class="media-note">${escapeHtml(note)}</p></div>`;
+  const outcomeSummary = outcomeSummaryMarkup(record, imported, canonical);
+  byId('intake-result').innerHTML = `<div class="result-box"><h3>${escapeHtml(title)}</h3><p>${escapeHtml(detail)}</p>${outcomeSummary}${failure}<details><summary>Detailed stage trace</summary><ul class="stage-list">${(record.stages || []).map(stageMarkup).join('')}</ul></details>${actions}${evidenceActions}<details><summary>Exact local run record</summary><pre>${escapeHtml(pretty(record))}</pre></details><p class="media-note">${escapeHtml(note)}</p></div>`;
   if (scroll) byId('intake-result').scrollIntoView({behavior: 'smooth', block: 'nearest'});
 }
 
@@ -1159,7 +1239,7 @@ function renderRuns(records) {
     const actions = record.result?.entrypoint
       ? `<a href="${escapeHtml(record.result.entrypoint)}" target="_blank" rel="noopener">Open page</a><a href="${escapeHtml(record.result.download)}">Download</a>`
       : '';
-    const statusLabel = imported ? 'imported package ready' : canonical ? record.status.replaceAll('_', ' ') : (complete ? 'deterministic draft ready' : 'failed closed');
+    const statusLabel = imported ? 'imported package ready' : canonical ? canonicalHistoryStatus(record) : (complete ? 'deterministic draft ready' : 'failed closed');
     const recordUrl = canonical ? `/api/canonical-runs/${record.run_id}` : `/api/runs/${record.run_id}`;
     return `<article class="run-card"><div class="badges">${badge(statusLabel, !complete && record.status !== 'running' && record.status !== 'queued')}</div><h3>${escapeHtml(title)}</h3><p>${escapeHtml(detail)}</p><p>${escapeHtml(record.created_at || 'time unavailable')} - ${escapeHtml(record.run_id)}</p><div class="run-actions"><button type="button" data-record-url="${escapeHtml(recordUrl)}">Inspect trace</button>${actions}</div></article>`;
   }).join('');
