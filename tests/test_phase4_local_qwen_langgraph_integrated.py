@@ -27,6 +27,7 @@ from req2web_runtime.phase4_local_qwen_langgraph_integrated import (  # noqa: E4
     HIGH_GPU_PROFILE,
     INTEGRITY_GPU_PROFILE,
     LOW_GPU_PROFILE,
+    _F3RequiredKeyOrderLogitsProcessor,
     _RequiredEmptyRefsLogitsProcessor,
     _generation_memory_kwargs,
     local_langgraph_profile,
@@ -61,6 +62,7 @@ class Phase4LocalQwenLangGraphIntegratedTests(unittest.TestCase):
         self.assertEqual(integrity["f4_kv_cache_implementation"], "offloaded")
         self.assertTrue(integrity["f4_kv_cache_cpu_offload"])
         self.assertTrue(integrity["f4_required_empty_refs_decoding"])
+        self.assertTrue(integrity["f3_required_key_order_decoding"])
         self.assertEqual(integrity["timeout_seconds"], 7200)
         self.assertEqual(high["quantization"], "none")
         self.assertTrue(high["formal_quality_eligible"])
@@ -68,6 +70,8 @@ class Phase4LocalQwenLangGraphIntegratedTests(unittest.TestCase):
         self.assertFalse(high["f4_kv_cache_cpu_offload"])
         self.assertFalse(low["f4_required_empty_refs_decoding"])
         self.assertFalse(high["f4_required_empty_refs_decoding"])
+        self.assertFalse(low["f3_required_key_order_decoding"])
+        self.assertFalse(high["f3_required_key_order_decoding"])
         self.assertIsNone(high["f4_prefill_chunk_size"])
         self.assertEqual(high["timeout_seconds"], 1200)
         for profile in (low, integrity, high):
@@ -131,6 +135,36 @@ class Phase4LocalQwenLangGraphIntegratedTests(unittest.TestCase):
         self.assertEqual(processor.application_count, 1)
         released = processor(torch.tensor([[0, 2]]), scores)
         self.assertTrue(torch.equal(released, scores))
+
+    def test_integrity_processor_enforces_existing_f3_key_order(self) -> None:
+        class FakeTokenizer:
+            token_text = {
+                0: '{"interactions":[{"local_id":"x","entity_type":"interaction",'
+                '"trigger_component_local_id":"c","source_state_local_id":"s",',
+                1: '"target_state_local_id":',
+                2: '"action":',
+                3: '"work",',
+                4: '"user_feedback":',
+            }
+
+            def get_vocab(self):
+                return {str(key): key for key in self.token_text}
+
+            def decode(self, values, **_kwargs):
+                return "".join(self.token_text[int(value)] for value in values)
+
+        processor = _F3RequiredKeyOrderLogitsProcessor(
+            tokenizer=FakeTokenizer(),
+            prompt_length=0,
+        )
+        scores = torch.zeros((1, 5))
+        constrained = processor(torch.tensor([[0]]), scores)
+        self.assertTrue(torch.isneginf(constrained[0, 1]))
+        self.assertFalse(torch.isneginf(constrained[0, 2]))
+        self.assertEqual(processor.application_count, 1)
+        next_key = processor(torch.tensor([[0, 2, 3]]), scores)
+        self.assertFalse(torch.isneginf(next_key[0, 1]))
+        self.assertTrue(torch.isneginf(next_key[0, 4]))
 
     def test_scripted_raw_probe_traverses_formal_graph_and_delivers_package(self) -> None:
         case = synthetic_commerce_b_input()

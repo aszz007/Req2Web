@@ -59,7 +59,7 @@ from req2web_runtime.phase4_local_qwen import (
 
 SCHEMA_PREFIX = "req2web.phase4.local_qwen_langgraph_integrated"
 RUN_SCHEMA_VERSION = f"{SCHEMA_PREFIX}.run.v1"
-PROFILE_SCHEMA_VERSION = f"{SCHEMA_PREFIX}.profile.v4"
+PROFILE_SCHEMA_VERSION = f"{SCHEMA_PREFIX}.profile.v5"
 PRE_CALL_SCHEMA_VERSION = f"{SCHEMA_PREFIX}.pre_call.v1"
 ATTEMPT_SCHEMA_VERSION = f"{SCHEMA_PREFIX}.attempt.v1"
 LEDGER_SCHEMA_VERSION = f"{SCHEMA_PREFIX}.call_ledger.v1"
@@ -179,6 +179,7 @@ class LocalLangGraphProfile:
     max_input_tokens: int
     f4_cache_implementation: str
     f4_prefill_chunk_size: int | None
+    f3_required_key_order_decoding: bool
     f4_required_empty_refs_decoding: bool
     timeout_seconds: int
     formal_quality_eligible: bool
@@ -201,6 +202,7 @@ class LocalLangGraphProfile:
                 or self.max_input_tokens != 12_288
                 or self.f4_cache_implementation != "offloaded"
                 or self.f4_prefill_chunk_size is not None
+                or self.f3_required_key_order_decoding is not False
                 or self.f4_required_empty_refs_decoding is not False
                 or self.timeout_seconds != 3_600
                 or self.formal_quality_eligible is not False
@@ -214,6 +216,7 @@ class LocalLangGraphProfile:
                 or self.max_input_tokens != 12_288
                 or self.f4_cache_implementation != "offloaded"
                 or self.f4_prefill_chunk_size is not None
+                or self.f3_required_key_order_decoding is not True
                 or self.f4_required_empty_refs_decoding is not True
                 or self.timeout_seconds != 7_200
                 or self.formal_quality_eligible is not False
@@ -227,6 +230,7 @@ class LocalLangGraphProfile:
             or self.min_free_vram_bytes < 24_000_000_000
             or self.f4_cache_implementation != "default_dynamic"
             or self.f4_prefill_chunk_size is not None
+            or self.f3_required_key_order_decoding is not False
             or self.f4_required_empty_refs_decoding is not False
             or self.timeout_seconds != 1_200
             or self.formal_quality_eligible is not True
@@ -249,6 +253,9 @@ class LocalLangGraphProfile:
             "f4_kv_cache_implementation": self.f4_cache_implementation,
             "f4_kv_cache_cpu_offload": self.f4_cache_implementation == "offloaded",
             "f4_prefill_chunk_size": self.f4_prefill_chunk_size,
+            "f3_required_key_order_decoding": (
+                self.f3_required_key_order_decoding
+            ),
             "f4_required_empty_refs_decoding": (
                 self.f4_required_empty_refs_decoding
             ),
@@ -286,6 +293,7 @@ def local_langgraph_profile(profile_name: str) -> LocalLangGraphProfile:
             max_input_tokens=12_288,
             f4_cache_implementation="offloaded",
             f4_prefill_chunk_size=None,
+            f3_required_key_order_decoding=False,
             f4_required_empty_refs_decoding=False,
             timeout_seconds=3_600,
             formal_quality_eligible=False,
@@ -301,6 +309,7 @@ def local_langgraph_profile(profile_name: str) -> LocalLangGraphProfile:
             max_input_tokens=12_288,
             f4_cache_implementation="offloaded",
             f4_prefill_chunk_size=None,
+            f3_required_key_order_decoding=True,
             f4_required_empty_refs_decoding=True,
             timeout_seconds=7_200,
             formal_quality_eligible=False,
@@ -316,6 +325,7 @@ def local_langgraph_profile(profile_name: str) -> LocalLangGraphProfile:
             max_input_tokens=32_768,
             f4_cache_implementation="default_dynamic",
             f4_prefill_chunk_size=None,
+            f3_required_key_order_decoding=False,
             f4_required_empty_refs_decoding=False,
             timeout_seconds=1_200,
             formal_quality_eligible=True,
@@ -435,6 +445,164 @@ class _RequiredEmptyRefsLogitsProcessor:
         if not allowed:
             raise Phase4LocalQwenLangGraphError(
                 "empty-refs decoding has no legal next token"
+            )
+        constrained = scores.new_full(scores.shape, float("-inf"))
+        constrained[:, allowed] = scores[:, allowed]
+        self.application_count += 1
+        return constrained
+
+
+class _F3RequiredKeyOrderLogitsProcessor:
+    """Keep F3 object keys in the exact prompt-owned order during decoding.
+
+    The processor acts only while an interaction object's next key is being
+    written. It cannot choose or alter any interaction value, row, state,
+    trigger, action, feedback, or completed raw byte.
+    """
+
+    _KEY_ORDER = (
+        "local_id",
+        "entity_type",
+        "trigger_component_local_id",
+        "source_state_local_id",
+        "action",
+        "target_state_local_id",
+        "user_feedback",
+        "refs",
+    )
+
+    def __init__(self, *, tokenizer: object, prompt_length: int) -> None:
+        if prompt_length < 0:
+            raise Phase4LocalQwenLangGraphError(
+                "F3 key-order decoding prompt length is invalid"
+            )
+        self.tokenizer = tokenizer
+        self.prompt_length = prompt_length
+        self.application_count = 0
+        vocabulary = getattr(tokenizer, "get_vocab", lambda: {})()
+        if not isinstance(vocabulary, Mapping) or not vocabulary:
+            raise Phase4LocalQwenLangGraphError(
+                "F3 key-order decoding tokenizer vocabulary is unavailable"
+            )
+        self._token_text: dict[int, str] = {}
+        for token_id in vocabulary.values():
+            if not isinstance(token_id, int) or token_id < 0:
+                continue
+            try:
+                decoded = tokenizer.decode(
+                    [token_id],
+                    skip_special_tokens=False,
+                    clean_up_tokenization_spaces=False,
+                )
+            except (TypeError, ValueError):
+                continue
+            if isinstance(decoded, str):
+                self._token_text[token_id] = decoded
+        if not self._token_text:
+            raise Phase4LocalQwenLangGraphError(
+                "F3 key-order decoding tokenizer vocabulary could not be decoded"
+            )
+
+    @staticmethod
+    def _compact(value: str) -> str:
+        return "".join(value.split())
+
+    @staticmethod
+    def _open_interaction_segment(generated_text: str) -> str | None:
+        in_string = False
+        escaped = False
+        object_depth = 0
+        interaction_start: int | None = None
+        for position, character in enumerate(generated_text):
+            if in_string:
+                if escaped:
+                    escaped = False
+                elif character == "\\":
+                    escaped = True
+                elif character == '"':
+                    in_string = False
+                continue
+            if character == '"':
+                in_string = True
+            elif character == "{":
+                object_depth += 1
+                if object_depth == 2:
+                    interaction_start = position + 1
+            elif character == "}":
+                if object_depth == 2:
+                    interaction_start = None
+                object_depth -= 1
+        if object_depth == 2 and interaction_start is not None:
+            return generated_text[interaction_start:]
+        return None
+
+    @classmethod
+    def _pending_key_prefix(cls, generated_text: str) -> tuple[str, str] | None:
+        segment = cls._open_interaction_segment(generated_text)
+        if segment is None:
+            return None
+        in_string = False
+        escaped = False
+        array_depth = 0
+        object_depth = 0
+        last_field_start = 0
+        field_index = 0
+        has_top_level_colon = False
+        for position, character in enumerate(segment):
+            if in_string:
+                if escaped:
+                    escaped = False
+                elif character == "\\":
+                    escaped = True
+                elif character == '"':
+                    in_string = False
+                continue
+            if character == '"':
+                in_string = True
+            elif character == "[":
+                array_depth += 1
+            elif character == "]":
+                array_depth -= 1
+            elif character == "{":
+                object_depth += 1
+            elif character == "}":
+                object_depth -= 1
+            elif array_depth == 0 and object_depth == 0:
+                if character == ":":
+                    has_top_level_colon = True
+                elif character == ",":
+                    field_index += 1
+                    last_field_start = position + 1
+                    has_top_level_colon = False
+        if has_top_level_colon or field_index >= len(cls._KEY_ORDER):
+            return None
+        prefix = cls._compact(segment[last_field_start:])
+        expected = json.dumps(cls._KEY_ORDER[field_index]) + ":"
+        if expected.startswith(prefix):
+            return prefix, expected
+        return None
+
+    def __call__(self, input_ids: object, scores: object) -> object:
+        sequence = input_ids[0, self.prompt_length :].tolist()
+        generated_text = self.tokenizer.decode(
+            sequence,
+            skip_special_tokens=True,
+            clean_up_tokenization_spaces=False,
+        )
+        if not isinstance(generated_text, str):
+            return scores
+        pending = self._pending_key_prefix(generated_text)
+        if pending is None:
+            return scores
+        prefix, expected = pending
+        allowed: list[int] = []
+        for token_id, token_text in self._token_text.items():
+            candidate = prefix + self._compact(token_text)
+            if expected.startswith(candidate) or candidate.startswith(expected):
+                allowed.append(token_id)
+        if not allowed:
+            raise Phase4LocalQwenLangGraphError(
+                "F3 key-order decoding has no legal next token"
             )
         constrained = scores.new_full(scores.shape, float("-inf"))
         constrained[:, allowed] = scores[:, allowed]
@@ -1404,6 +1572,17 @@ def _worker_main(args: argparse.Namespace) -> int:
                 )
                 else None
             )
+            f3_key_order_processor = (
+                _F3RequiredKeyOrderLogitsProcessor(
+                    tokenizer=tokenizer,
+                    prompt_length=input_length,
+                )
+                if (
+                    node_id == "F3"
+                    and profile.f3_required_key_order_decoding
+                )
+                else None
+            )
             _write_json(
                 attempt_root / "generation_started.json",
                 {
@@ -1417,13 +1596,18 @@ def _worker_main(args: argparse.Namespace) -> int:
             torch.cuda.reset_peak_memory_stats(0)
             torch.manual_seed(0)
             torch.cuda.manual_seed_all(0)
+            decoding_processors = [
+                processor
+                for processor in (f3_key_order_processor, empty_refs_processor)
+                if processor is not None
+            ]
             decoding_controls = (
                 {
                     "logits_processor": transformers.LogitsProcessorList(
-                        [empty_refs_processor]
+                        decoding_processors
                     )
                 }
-                if empty_refs_processor is not None
+                if decoding_processors
                 else {}
             )
             try:
@@ -1464,6 +1648,11 @@ def _worker_main(args: argparse.Namespace) -> int:
                     "empty_refs_constraint_application_count": (
                         empty_refs_processor.application_count
                         if empty_refs_processor is not None
+                        else 0
+                    ),
+                    "f3_key_order_constraint_application_count": (
+                        f3_key_order_processor.application_count
+                        if f3_key_order_processor is not None
                         else 0
                     ),
                     "cuda_peak_allocated_bytes": int(torch.cuda.max_memory_allocated(0)),
