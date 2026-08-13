@@ -433,6 +433,7 @@ document.addEventListener("submit", (event) => {{
       inlineFeedback.textContent = "Enter the required information before submitting.";
     }}
     requiredInput.focus();
+    runForComponent(form.dataset.interactionForm);
     return;
   }}
   if (requiredInput) {{

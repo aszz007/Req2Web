@@ -8,6 +8,8 @@ import unittest
 from unittest.mock import patch
 import uuid
 
+import torch
+
 
 ROOT = Path(__file__).resolve().parents[1]
 SRC = ROOT / "src"
@@ -23,7 +25,9 @@ from req2web_orchestration.phase4_graph import (  # noqa: E402
 from req2web_runtime.phase4_canonical_full_flow import _build_upstream  # noqa: E402
 from req2web_runtime.phase4_local_qwen_langgraph_integrated import (  # noqa: E402
     HIGH_GPU_PROFILE,
+    INTEGRITY_GPU_PROFILE,
     LOW_GPU_PROFILE,
+    _RequiredEmptyRefsLogitsProcessor,
     _generation_memory_kwargs,
     local_langgraph_profile,
     run_phase4_local_qwen_langgraph_integrated,
@@ -41,6 +45,7 @@ class Phase4LocalQwenLangGraphIntegratedTests(unittest.TestCase):
 
     def test_profiles_separate_low_gpu_debug_from_high_gpu_quality(self) -> None:
         low = local_langgraph_profile(LOW_GPU_PROFILE).to_dict()
+        integrity = local_langgraph_profile(INTEGRITY_GPU_PROFILE).to_dict()
         high = local_langgraph_profile(HIGH_GPU_PROFILE).to_dict()
         self.assertEqual(low["quantization"], "nf4_double_quant")
         self.assertFalse(low["formal_quality_eligible"])
@@ -50,13 +55,22 @@ class Phase4LocalQwenLangGraphIntegratedTests(unittest.TestCase):
         self.assertTrue(low["f4_kv_cache_cpu_offload"])
         self.assertIsNone(low["f4_prefill_chunk_size"])
         self.assertEqual(low["timeout_seconds"], 3600)
+        self.assertEqual(integrity["quantization"], "nf4_single_quant")
+        self.assertFalse(integrity["formal_quality_eligible"])
+        self.assertEqual(integrity["max_input_tokens"], 12288)
+        self.assertEqual(integrity["f4_kv_cache_implementation"], "offloaded")
+        self.assertTrue(integrity["f4_kv_cache_cpu_offload"])
+        self.assertTrue(integrity["f4_required_empty_refs_decoding"])
+        self.assertEqual(integrity["timeout_seconds"], 7200)
         self.assertEqual(high["quantization"], "none")
         self.assertTrue(high["formal_quality_eligible"])
         self.assertEqual(high["f4_kv_cache_implementation"], "default_dynamic")
         self.assertFalse(high["f4_kv_cache_cpu_offload"])
+        self.assertFalse(low["f4_required_empty_refs_decoding"])
+        self.assertFalse(high["f4_required_empty_refs_decoding"])
         self.assertIsNone(high["f4_prefill_chunk_size"])
         self.assertEqual(high["timeout_seconds"], 1200)
-        for profile in (low, high):
+        for profile in (low, integrity, high):
             self.assertFalse(profile["input_truncation"])
             self.assertFalse(profile["output_truncation"])
             self.assertEqual(profile["automatic_retry_limit"], 0)
@@ -70,6 +84,12 @@ class Phase4LocalQwenLangGraphIntegratedTests(unittest.TestCase):
             {},
         )
         self.assertEqual(
+            _generation_memory_kwargs(
+                local_langgraph_profile(INTEGRITY_GPU_PROFILE), "F4"
+            ),
+            {"cache_implementation": "offloaded"},
+        )
+        self.assertEqual(
             _generation_memory_kwargs(local_langgraph_profile(HIGH_GPU_PROFILE), "F4"),
             {},
         )
@@ -80,6 +100,37 @@ class Phase4LocalQwenLangGraphIntegratedTests(unittest.TestCase):
         self.assertTrue(value["one_call_per_node"])
         self.assertFalse(value["automatic_retry"])
         self.assertFalse(value["b_aux_consumed_by_f1_f4"])
+
+    def test_integrity_processor_enforces_existing_empty_refs_constant(self) -> None:
+        class FakeTokenizer:
+            token_text = {
+                0: '"refs":[',
+                1: " ",
+                2: "]",
+                3: "{",
+                4: "}],",
+                5: ",",
+            }
+
+            def get_vocab(self):
+                return {str(key): key for key in self.token_text}
+
+            def decode(self, values, **_kwargs):
+                return "".join(self.token_text[int(value)] for value in values)
+
+        processor = _RequiredEmptyRefsLogitsProcessor(
+            tokenizer=FakeTokenizer(),
+            prompt_length=0,
+        )
+        scores = torch.zeros((1, 6))
+        constrained = processor(torch.tensor([[0]]), scores)
+        self.assertTrue(torch.isneginf(constrained[0, 3]))
+        self.assertTrue(torch.isneginf(constrained[0, 4]))
+        self.assertFalse(torch.isneginf(constrained[0, 1]))
+        self.assertFalse(torch.isneginf(constrained[0, 2]))
+        self.assertEqual(processor.application_count, 1)
+        released = processor(torch.tensor([[0, 2]]), scores)
+        self.assertTrue(torch.equal(released, scores))
 
     def test_scripted_raw_probe_traverses_formal_graph_and_delivers_package(self) -> None:
         case = synthetic_commerce_b_input()

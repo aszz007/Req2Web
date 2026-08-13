@@ -29,6 +29,7 @@ from req2web_inspector.live_draft import (  # noqa: E402
 )
 from req2web_inspector.semantic_assist import (  # noqa: E402
     HIGH_GPU_PROFILE,
+    LOCAL_INTEGRITY_PROFILE,
     LOCAL_LOW_GPU_PROFILE,
     SemanticRequirementAssistError,
     SemanticRequirementAssistStore,
@@ -37,6 +38,7 @@ from req2web_inspector.semantic_assist import (  # noqa: E402
 
 
 CANONICAL_LOW_GPU_PROFILE = "local_low_gpu_nf4"
+CANONICAL_INTEGRITY_PROFILE = "local_integrity_nf4"
 CANONICAL_HIGH_GPU_PROFILE = "high_gpu_bf16"
 
 
@@ -370,9 +372,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--semantic-profile",
-        choices=(LOCAL_LOW_GPU_PROFILE, HIGH_GPU_PROFILE),
+        choices=(LOCAL_LOW_GPU_PROFILE, LOCAL_INTEGRITY_PROFILE, HIGH_GPU_PROFILE),
         default=LOCAL_LOW_GPU_PROFILE,
-        help="Select low-GPU NF4 or high-GPU BF16 execution.",
+        help=(
+            "Select low-GPU double-quantized NF4, local integrity NF4, or "
+            "high-GPU BF16 execution."
+        ),
     )
     parser.add_argument(
         "--semantic-assist-root",
@@ -400,9 +405,16 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--canonical-profile",
-        choices=(CANONICAL_LOW_GPU_PROFILE, CANONICAL_HIGH_GPU_PROFILE),
+        choices=(
+            CANONICAL_LOW_GPU_PROFILE,
+            CANONICAL_INTEGRITY_PROFILE,
+            CANONICAL_HIGH_GPU_PROFILE,
+        ),
         default=CANONICAL_LOW_GPU_PROFILE,
-        help="Select the low-GPU debug or high-GPU quality generation profile.",
+        help=(
+            "Select low-GPU debug, local integrity, or high-GPU quality "
+            "generation."
+        ),
     )
     parser.add_argument(
         "--canonical-run-root",

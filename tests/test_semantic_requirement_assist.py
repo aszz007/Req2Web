@@ -17,6 +17,7 @@ if str(SRC) not in sys.path:
 from req2web_inspector.semantic_assist import (  # noqa: E402
     CLOSED_API_PROVIDER,
     HIGH_GPU_PROFILE,
+    LOCAL_INTEGRITY_PROFILE,
     LOCAL_LOW_GPU_PROFILE,
     SemanticRequirementAssistError,
     SemanticRequirementAssistStore,
@@ -77,8 +78,10 @@ def _raw() -> bytes:
 class SemanticRequirementAssistTests(unittest.TestCase):
     def test_profiles_keep_precision_and_completeness_separate(self) -> None:
         low = semantic_assist_profile(LOCAL_LOW_GPU_PROFILE).to_dict()
+        integrity = semantic_assist_profile(LOCAL_INTEGRITY_PROFILE).to_dict()
         high = semantic_assist_profile(HIGH_GPU_PROFILE).to_dict()
         self.assertEqual(low["quantization"], "nf4_double_quant")
+        self.assertEqual(integrity["quantization"], "nf4_single_quant")
         self.assertEqual(high["quantization"], "none")
         self.assertEqual(low["max_new_tokens"], 1_280)
         self.assertEqual(high["max_new_tokens"], 2_048)
@@ -86,7 +89,9 @@ class SemanticRequirementAssistTests(unittest.TestCase):
         self.assertEqual(high["compute_dtype"], "bfloat16")
         self.assertFalse(low["formal_quality_eligible"])
         self.assertTrue(high["formal_quality_eligible"])
-        for profile in (low, high):
+        self.assertEqual(integrity["timeout_seconds"], 1_800)
+        self.assertFalse(integrity["formal_quality_eligible"])
+        for profile in (low, integrity, high):
             self.assertFalse(profile["input_truncation"])
             self.assertFalse(profile["output_truncation"])
             self.assertTrue(profile["complete_json_required"])

@@ -172,7 +172,7 @@ class PageRendererTest(unittest.TestCase):
             markup = result.index_html.read_text(encoding="utf-8")
             self.assertIn(f'data-renderer-kind="{component_type}"', markup)
 
-    def test_form_requires_input_before_running_its_interaction(self) -> None:
+    def test_form_reports_empty_input_and_runs_pagespec_interaction(self) -> None:
         self.ecommerce_spec.components[0].component_type = "form"
         result = self.renderer.render(self.ecommerce_spec, self.root / "required-form")
         markup = result.index_html.read_text(encoding="utf-8")
@@ -181,7 +181,10 @@ class PageRendererTest(unittest.TestCase):
         self.assertIn('placeholder="Enter required information" required', markup)
         self.assertIn('requiredInput.setAttribute("aria-invalid", "true")', script)
         self.assertIn("Enter the required information before submitting.", script)
-        self.assertIn("runForComponent(form.dataset.interactionForm)", script)
+        self.assertEqual(
+            script.count("runForComponent(form.dataset.interactionForm)"),
+            2,
+        )
 
     def test_interactions_states_and_feedback_are_in_runtime_logic(self) -> None:
         result = self.renderer.render(self.pet_spec, self.root / "runtime")

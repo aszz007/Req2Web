@@ -59,7 +59,7 @@ from req2web_runtime.phase4_local_qwen import (
 
 SCHEMA_PREFIX = "req2web.phase4.local_qwen_langgraph_integrated"
 RUN_SCHEMA_VERSION = f"{SCHEMA_PREFIX}.run.v1"
-PROFILE_SCHEMA_VERSION = f"{SCHEMA_PREFIX}.profile.v2"
+PROFILE_SCHEMA_VERSION = f"{SCHEMA_PREFIX}.profile.v4"
 PRE_CALL_SCHEMA_VERSION = f"{SCHEMA_PREFIX}.pre_call.v1"
 ATTEMPT_SCHEMA_VERSION = f"{SCHEMA_PREFIX}.attempt.v1"
 LEDGER_SCHEMA_VERSION = f"{SCHEMA_PREFIX}.call_ledger.v1"
@@ -67,8 +67,9 @@ SUPERVISOR_SCHEMA_VERSION = f"{SCHEMA_PREFIX}.supervisor.v1"
 WORKER_PROTOCOL = f"{SCHEMA_PREFIX}.worker.v1"
 ROOT_MARKER = ".req2web-phase4-local-qwen-langgraph-root"
 LOW_GPU_PROFILE = "local_low_gpu_nf4"
+INTEGRITY_GPU_PROFILE = "local_integrity_nf4"
 HIGH_GPU_PROFILE = "high_gpu_bf16"
-PROFILE_NAMES = (LOW_GPU_PROFILE, HIGH_GPU_PROFILE)
+PROFILE_NAMES = (LOW_GPU_PROFILE, INTEGRITY_GPU_PROFILE, HIGH_GPU_PROFILE)
 NODE_OUTPUT_TOKEN_CAPS = {
     "F1": 3_072,
     "F2": 2_048,
@@ -167,7 +168,7 @@ def _safe_root(path: Path) -> Path:
 
 @dataclass(frozen=True)
 class LocalLangGraphProfile:
-    """One exact low-GPU debug or high-GPU quality execution profile."""
+    """One exact local integration, local integrity, or quality profile."""
 
     profile_name: str
     quantization: str
@@ -178,6 +179,7 @@ class LocalLangGraphProfile:
     max_input_tokens: int
     f4_cache_implementation: str
     f4_prefill_chunk_size: int | None
+    f4_required_empty_refs_decoding: bool
     timeout_seconds: int
     formal_quality_eligible: bool
 
@@ -199,16 +201,33 @@ class LocalLangGraphProfile:
                 or self.max_input_tokens != 12_288
                 or self.f4_cache_implementation != "offloaded"
                 or self.f4_prefill_chunk_size is not None
+                or self.f4_required_empty_refs_decoding is not False
                 or self.timeout_seconds != 3_600
                 or self.formal_quality_eligible is not False
             ):
                 raise Phase4LocalQwenLangGraphError("low-GPU profile drifted")
+        elif self.profile_name == INTEGRITY_GPU_PROFILE:
+            if (
+                self.quantization != "nf4_single_quant"
+                or self.min_total_vram_bytes != 8_000_000_000
+                or self.min_free_vram_bytes < 6_000_000_000
+                or self.max_input_tokens != 12_288
+                or self.f4_cache_implementation != "offloaded"
+                or self.f4_prefill_chunk_size is not None
+                or self.f4_required_empty_refs_decoding is not True
+                or self.timeout_seconds != 7_200
+                or self.formal_quality_eligible is not False
+            ):
+                raise Phase4LocalQwenLangGraphError(
+                    "local integrity profile drifted"
+                )
         elif (
             self.quantization != "none"
             or self.min_total_vram_bytes < 30_000_000_000
             or self.min_free_vram_bytes < 24_000_000_000
             or self.f4_cache_implementation != "default_dynamic"
             or self.f4_prefill_chunk_size is not None
+            or self.f4_required_empty_refs_decoding is not False
             or self.timeout_seconds != 1_200
             or self.formal_quality_eligible is not True
         ):
@@ -230,6 +249,9 @@ class LocalLangGraphProfile:
             "f4_kv_cache_implementation": self.f4_cache_implementation,
             "f4_kv_cache_cpu_offload": self.f4_cache_implementation == "offloaded",
             "f4_prefill_chunk_size": self.f4_prefill_chunk_size,
+            "f4_required_empty_refs_decoding": (
+                self.f4_required_empty_refs_decoding
+            ),
             "min_total_vram_bytes": self.min_total_vram_bytes,
             "min_free_vram_bytes": self.min_free_vram_bytes,
             "max_input_tokens": self.max_input_tokens,
@@ -264,7 +286,23 @@ def local_langgraph_profile(profile_name: str) -> LocalLangGraphProfile:
             max_input_tokens=12_288,
             f4_cache_implementation="offloaded",
             f4_prefill_chunk_size=None,
+            f4_required_empty_refs_decoding=False,
             timeout_seconds=3_600,
+            formal_quality_eligible=False,
+        )
+    elif profile_name == INTEGRITY_GPU_PROFILE:
+        profile = LocalLangGraphProfile(
+            profile_name=profile_name,
+            quantization="nf4_single_quant",
+            dtype="bfloat16",
+            compute_dtype="bfloat16",
+            min_total_vram_bytes=8_000_000_000,
+            min_free_vram_bytes=6_250_000_000,
+            max_input_tokens=12_288,
+            f4_cache_implementation="offloaded",
+            f4_prefill_chunk_size=None,
+            f4_required_empty_refs_decoding=True,
+            timeout_seconds=7_200,
             formal_quality_eligible=False,
         )
     elif profile_name == HIGH_GPU_PROFILE:
@@ -278,6 +316,7 @@ def local_langgraph_profile(profile_name: str) -> LocalLangGraphProfile:
             max_input_tokens=32_768,
             f4_cache_implementation="default_dynamic",
             f4_prefill_chunk_size=None,
+            f4_required_empty_refs_decoding=False,
             timeout_seconds=1_200,
             formal_quality_eligible=True,
         )
@@ -293,7 +332,7 @@ def runtime_capabilities() -> dict[str, object]:
         "workflow_runtime": REAL_MODEL_GRAPH_REVISION,
         "prompt_authority_identity": copy.deepcopy(PROMPT_AUTHORITY_IDENTITY),
         "model_id": QWEN_MODEL_ID,
-        "profiles": [LOW_GPU_PROFILE, HIGH_GPU_PROFILE],
+        "profiles": [LOW_GPU_PROFILE, INTEGRITY_GPU_PROFILE, HIGH_GPU_PROFILE],
         "one_call_per_node": True,
         "automatic_retry": False,
         "b_aux_consumed_by_f1_f4": False,
@@ -313,6 +352,94 @@ def _generation_memory_kwargs(
     if node_id == "F4" and profile.f4_cache_implementation == "offloaded":
         return {"cache_implementation": "offloaded"}
     return {}
+
+
+class _RequiredEmptyRefsLogitsProcessor:
+    """Enforce the prompt-owned ``refs: []`` constant during local decoding.
+
+    The processor is deliberately narrow: it activates only after the model has
+    already emitted an exact ``\"refs\"`` member name and only while the compact
+    ``:[]`` constant is incomplete. It cannot change descriptions, use-case
+    references, state choices, IDs, array order, or any completed raw bytes.
+    """
+
+    _KEY = '"refs"'
+    _TARGET = ":[]"
+
+    def __init__(self, *, tokenizer: object, prompt_length: int) -> None:
+        if prompt_length < 0:
+            raise Phase4LocalQwenLangGraphError(
+                "empty-refs decoding prompt length is invalid"
+            )
+        self.tokenizer = tokenizer
+        self.prompt_length = prompt_length
+        self.application_count = 0
+        vocabulary = getattr(tokenizer, "get_vocab", lambda: {})()
+        if not isinstance(vocabulary, Mapping) or not vocabulary:
+            raise Phase4LocalQwenLangGraphError(
+                "empty-refs decoding tokenizer vocabulary is unavailable"
+            )
+        self._token_text: dict[int, str] = {}
+        for token_id in vocabulary.values():
+            if not isinstance(token_id, int) or token_id < 0:
+                continue
+            try:
+                decoded = tokenizer.decode(
+                    [token_id],
+                    skip_special_tokens=False,
+                    clean_up_tokenization_spaces=False,
+                )
+            except (TypeError, ValueError):
+                continue
+            if isinstance(decoded, str):
+                self._token_text[token_id] = decoded
+        if not self._token_text:
+            raise Phase4LocalQwenLangGraphError(
+                "empty-refs decoding tokenizer vocabulary could not be decoded"
+            )
+
+    @staticmethod
+    def _compact(value: str) -> str:
+        return "".join(value.split())
+
+    def _incomplete_suffix(self, generated_text: str) -> str | None:
+        position = generated_text.rfind(self._KEY)
+        if position < 0:
+            return None
+        compact = self._compact(generated_text[position + len(self._KEY) :])
+        if compact.startswith(self._TARGET):
+            return None
+        if self._TARGET.startswith(compact):
+            return compact
+        return None
+
+    def __call__(self, input_ids: object, scores: object) -> object:
+        sequence = input_ids[0, self.prompt_length :].tolist()
+        generated_text = self.tokenizer.decode(
+            sequence,
+            skip_special_tokens=True,
+            clean_up_tokenization_spaces=False,
+        )
+        if not isinstance(generated_text, str):
+            return scores
+        compact = self._incomplete_suffix(generated_text)
+        if compact is None:
+            return scores
+        allowed: list[int] = []
+        for token_id, token_text in self._token_text.items():
+            candidate = compact + self._compact(token_text)
+            if self._TARGET.startswith(candidate) or candidate.startswith(
+                self._TARGET
+            ):
+                allowed.append(token_id)
+        if not allowed:
+            raise Phase4LocalQwenLangGraphError(
+                "empty-refs decoding has no legal next token"
+            )
+        constrained = scores.new_full(scores.shape, float("-inf"))
+        constrained[:, allowed] = scores[:, allowed]
+        self.application_count += 1
+        return constrained
 
 
 class _Worker:
@@ -1149,18 +1276,23 @@ def _worker_main(args: argparse.Namespace) -> int:
             "low_cpu_mem_usage": True,
             "attn_implementation": "sdpa",
         }
-        if profile.quantization == "nf4_double_quant":
+        if profile.quantization in {"nf4_double_quant", "nf4_single_quant"}:
             load_kwargs["quantization_config"] = transformers.BitsAndBytesConfig(
                 load_in_4bit=True,
                 bnb_4bit_quant_type="nf4",
-                bnb_4bit_use_double_quant=True,
+                bnb_4bit_use_double_quant=(
+                    profile.quantization == "nf4_double_quant"
+                ),
                 bnb_4bit_compute_dtype=torch.bfloat16,
             )
         model = transformers.AutoModelForImageTextToText.from_pretrained(
             str(model_root), **load_kwargs
         )
         model.eval()
-        if profile.quantization == "nf4_double_quant" and getattr(model, "is_loaded_in_4bit", False) is not True:
+        if (
+            profile.quantization in {"nf4_double_quant", "nf4_single_quant"}
+            and getattr(model, "is_loaded_in_4bit", False) is not True
+        ):
             raise Phase4LocalQwenLangGraphError("model did not load in four-bit mode")
         attention = _install_f4_memory_efficient_attention(
             SimpleNamespace(_model=model, _torch=torch)
@@ -1261,6 +1393,17 @@ def _worker_main(args: argparse.Namespace) -> int:
                     )
                 ]
             )
+            empty_refs_processor = (
+                _RequiredEmptyRefsLogitsProcessor(
+                    tokenizer=tokenizer,
+                    prompt_length=input_length,
+                )
+                if (
+                    node_id == "F4"
+                    and profile.f4_required_empty_refs_decoding
+                )
+                else None
+            )
             _write_json(
                 attempt_root / "generation_started.json",
                 {
@@ -1274,11 +1417,21 @@ def _worker_main(args: argparse.Namespace) -> int:
             torch.cuda.reset_peak_memory_stats(0)
             torch.manual_seed(0)
             torch.cuda.manual_seed_all(0)
+            decoding_controls = (
+                {
+                    "logits_processor": transformers.LogitsProcessorList(
+                        [empty_refs_processor]
+                    )
+                }
+                if empty_refs_processor is not None
+                else {}
+            )
             try:
                 with torch.inference_mode():
                     generated = model.generate(
                         **encoded,
                         stopping_criteria=stopping,
+                        **decoding_controls,
                         max_new_tokens=output_cap,
                         do_sample=False,
                         num_return_sequences=1,
@@ -1308,6 +1461,11 @@ def _worker_main(args: argparse.Namespace) -> int:
                         profile.f4_prefill_chunk_size if node_id == "F4" else None
                     ),
                     "output_token_length": int(generated_only.shape[1]),
+                    "empty_refs_constraint_application_count": (
+                        empty_refs_processor.application_count
+                        if empty_refs_processor is not None
+                        else 0
+                    ),
                     "cuda_peak_allocated_bytes": int(torch.cuda.max_memory_allocated(0)),
                     "cuda_peak_reserved_bytes": int(torch.cuda.max_memory_reserved(0)),
                 }
@@ -1373,6 +1531,7 @@ if __name__ == "__main__":
 
 __all__ = [
     "HIGH_GPU_PROFILE",
+    "INTEGRITY_GPU_PROFILE",
     "LOW_GPU_PROFILE",
     "LocalLangGraphProfile",
     "Phase4LocalQwenLangGraphError",

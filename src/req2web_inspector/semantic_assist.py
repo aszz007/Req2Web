@@ -31,13 +31,14 @@ from req2web_runtime.phase4_local_qwen import (
 )
 
 
-PROFILE_SCHEMA_VERSION = "req2web.semantic_requirement_assist.profile.v2"
+PROFILE_SCHEMA_VERSION = "req2web.semantic_requirement_assist.profile.v3"
 PROMPT_SCHEMA_VERSION = "req2web.semantic_requirement_assist.prompt.v2"
 RUN_SCHEMA_VERSION = "req2web.semantic_requirement_assist.run.v2"
 SIDECAR_REVISION = "req2web.semantic_requirement_assist.b_aux.v1"
 STORE_SCHEMA_VERSION = "req2web.semantic_requirement_assist.store.v1"
 STORE_MARKER = ".req2web-semantic-assist-store.json"
 LOCAL_LOW_GPU_PROFILE = "local_low_gpu_nf4"
+LOCAL_INTEGRITY_PROFILE = "local_integrity_nf4"
 HIGH_GPU_PROFILE = "high_gpu_bf16"
 LOCAL_PROVIDER = "local_qwen"
 CLOSED_API_PROVIDER = "closed_api_reserved"
@@ -176,7 +177,11 @@ class SemanticAssistProfile:
     formal_quality_eligible: bool
 
     def validate(self) -> None:
-        if self.profile_name not in {LOCAL_LOW_GPU_PROFILE, HIGH_GPU_PROFILE}:
+        if self.profile_name not in {
+            LOCAL_LOW_GPU_PROFILE,
+            LOCAL_INTEGRITY_PROFILE,
+            HIGH_GPU_PROFILE,
+        }:
             raise SemanticRequirementAssistError("unknown semantic-assist profile")
         if (
             self.dtype != "bfloat16"
@@ -197,6 +202,16 @@ class SemanticAssistProfile:
             ):
                 raise SemanticRequirementAssistError(
                     "local semantic-assist profile drifted"
+                )
+        elif self.profile_name == LOCAL_INTEGRITY_PROFILE:
+            if (
+                self.quantization != "nf4_single_quant"
+                or self.min_total_vram_bytes != 8_000_000_000
+                or self.min_free_vram_bytes < 6_000_000_000
+                or self.formal_quality_eligible is not False
+            ):
+                raise SemanticRequirementAssistError(
+                    "local integrity semantic-assist profile drifted"
                 )
         elif (
             self.quantization != "none"
@@ -257,6 +272,19 @@ def semantic_assist_profile(profile_name: str) -> SemanticAssistProfile:
             timeout_seconds=1_200,
             formal_quality_eligible=False,
         )
+    elif profile_name == LOCAL_INTEGRITY_PROFILE:
+        profile = SemanticAssistProfile(
+            profile_name=profile_name,
+            quantization="nf4_single_quant",
+            dtype="bfloat16",
+            compute_dtype="bfloat16",
+            min_total_vram_bytes=8_000_000_000,
+            min_free_vram_bytes=6_250_000_000,
+            max_input_tokens=8_192,
+            max_new_tokens=1_280,
+            timeout_seconds=1_800,
+            formal_quality_eligible=False,
+        )
     elif profile_name == HIGH_GPU_PROFILE:
         profile = SemanticAssistProfile(
             profile_name=profile_name,
@@ -283,7 +311,11 @@ def provider_capabilities() -> dict[str, object]:
         LOCAL_PROVIDER: {
             "status": "implemented_explicit_local_action",
             "model_id": QWEN_MODEL_ID,
-            "profiles": [LOCAL_LOW_GPU_PROFILE, HIGH_GPU_PROFILE],
+            "profiles": [
+                LOCAL_LOW_GPU_PROFILE,
+                LOCAL_INTEGRITY_PROFILE,
+                HIGH_GPU_PROFILE,
+            ],
         },
         CLOSED_API_PROVIDER: {
             "status": "reserved_not_connected",
@@ -870,20 +902,23 @@ def _worker_execute(args: argparse.Namespace) -> int:
             "low_cpu_mem_usage": True,
             "attn_implementation": "sdpa",
         }
-        if profile.quantization == "nf4_double_quant":
+        if profile.quantization in {"nf4_double_quant", "nf4_single_quant"}:
             load_kwargs["quantization_config"] = transformers.BitsAndBytesConfig(
                 load_in_4bit=True,
                 bnb_4bit_quant_type="nf4",
-                bnb_4bit_use_double_quant=True,
+                bnb_4bit_use_double_quant=(
+                    profile.quantization == "nf4_double_quant"
+                ),
                 bnb_4bit_compute_dtype=torch.bfloat16,
             )
         model = transformers.AutoModelForImageTextToText.from_pretrained(
             str(model_root), **load_kwargs
         )
         model.eval()
-        if profile.quantization == "nf4_double_quant" and getattr(
-            model, "is_loaded_in_4bit", False
-        ) is not True:
+        if (
+            profile.quantization in {"nf4_double_quant", "nf4_single_quant"}
+            and getattr(model, "is_loaded_in_4bit", False) is not True
+        ):
             raise SemanticRequirementAssistError(
                 "local semantic model did not load in four-bit mode"
             )
@@ -1014,7 +1049,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--work-root", type=Path, required=True)
     parser.add_argument(
         "--profile",
-        choices=(LOCAL_LOW_GPU_PROFILE, HIGH_GPU_PROFILE),
+        choices=(LOCAL_LOW_GPU_PROFILE, LOCAL_INTEGRITY_PROFILE, HIGH_GPU_PROFILE),
         required=True,
     )
     return parser
@@ -1032,6 +1067,7 @@ if __name__ == "__main__":
 __all__ = [
     "CLOSED_API_PROVIDER",
     "HIGH_GPU_PROFILE",
+    "LOCAL_INTEGRITY_PROFILE",
     "LOCAL_LOW_GPU_PROFILE",
     "LOCAL_PROVIDER",
     "SemanticAssistProfile",
