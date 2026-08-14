@@ -206,12 +206,14 @@ class Phase4LocalQwenLangGraphIntegratedTests(unittest.TestCase):
                 upstream_context=upstream["context"],
                 upstream_guidance=upstream["guidance"],
                 upstream_binding=upstream["receipt"],
+                profile_name=HIGH_GPU_PROFILE,
                 confirm_one_local_langgraph_run=True,
                 b_aux_sidecar={"advisory_marker": "must-not-enter-f1-f4"},
                 _raw_node_generator=raw_node_generator,
             )
 
         self.assertTrue(summary["agent_chain_completed"])
+        self.assertIn("high-GPU BF16 development run", summary["claim_boundary"])
         self.assertIn(
             summary["status"],
             {

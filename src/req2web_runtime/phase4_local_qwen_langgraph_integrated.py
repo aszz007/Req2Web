@@ -1394,8 +1394,15 @@ def run_phase4_local_qwen_langgraph_integrated(
         "manual_f1_f4_loop_used": False,
         "formal_quality_claimed": False,
         "claim_boundary": (
-            "local quantized integration run; deterministic G0 availability is "
-            "reported separately and is not raw-model success"
+            (
+                "bounded high-GPU BF16 development run; deterministic G0 "
+                "availability is reported separately and is not raw-model success"
+            )
+            if profile.profile_name == HIGH_GPU_PROFILE
+            else (
+                "local quantized integration run; deterministic G0 availability "
+                "is reported separately and is not raw-model success"
+            )
         ),
     }
     _write_json(root / "local_langgraph_run_summary.json", summary)
