@@ -21,6 +21,7 @@ import uuid
 import zipfile
 
 from req2web_evaluation.phase5_semantic_qwen_runtime import (
+    HIGH_GPU_PROFILE as SEMANTIC_HIGH_GPU_PROFILE,
     LOW_GPU_PROFILE as SEMANTIC_LOW_GPU_PROFILE,
     run_phase5_semantic_qwen,
 )
@@ -168,6 +169,13 @@ class CanonicalInspectorRunStore:
             strict=True
         )
         self.profile = local_langgraph_profile(profile_name)
+        if semantic_profile_name not in {
+            SEMANTIC_LOW_GPU_PROFILE,
+            SEMANTIC_HIGH_GPU_PROFILE,
+        }:
+            raise InspectorCanonicalRunError(
+                "canonical semantic profile is invalid"
+            )
         self.semantic_profile_name = semantic_profile_name
         self.requirement_assist_runner = requirement_assist_runner
         self.browser_runner = browser_runner

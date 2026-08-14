@@ -5914,12 +5914,24 @@ def _file_sha256(path: Path) -> str:
 
 
 def validate_model_inventory_metadata(
-    *, model_root: Path, integrity_evidence: Path
+    *,
+    model_root: Path,
+    integrity_evidence: Path,
+    allow_relocated_model_root: bool = False,
 ) -> dict[str, object]:
-    """Live-hash the complete existing model inventory against prior evidence."""
+    """Live-hash the complete existing model inventory against prior evidence.
+
+    Relocation is opt-in for an exact model copy on another machine. The
+    evidence identity, complete path set, byte lengths, and every file hash
+    remain mandatory; only the absolute installation directory may differ.
+    """
 
     if not isinstance(model_root, Path) or not isinstance(integrity_evidence, Path):
         raise Phase4LocalQwenContractError("model root/evidence must be Path objects")
+    if type(allow_relocated_model_root) is not bool:
+        raise Phase4LocalQwenContractError(
+            "allow_relocated_model_root must be a boolean"
+        )
     if not model_root.is_dir() or not integrity_evidence.is_file():
         raise Phase4LocalQwenContractError("model root or integrity evidence is missing")
     data = _exact(
@@ -5939,7 +5951,10 @@ def validate_model_inventory_metadata(
     ):
         raise Phase4LocalQwenContractError("model integrity identity drifted")
     evidence_root = Path(_text(data["root"], "local_integrity_evidence.root"))
-    if evidence_root.resolve() != model_root.resolve():
+    if (
+        evidence_root.resolve() != model_root.resolve()
+        and not allow_relocated_model_root
+    ):
         raise Phase4LocalQwenContractError("integrity evidence model root drifted")
     if data["missing"] != [] or data["extra"] != []:
         raise Phase4LocalQwenContractError("integrity evidence has missing/extra files")

@@ -1272,6 +1272,46 @@ class Phase4LocalQwenTests(unittest.TestCase):
                 integrity_evidence=evidence_path,
             )
 
+    def test_model_inventory_relocation_requires_opt_in_and_exact_live_hashes(self):
+        parent = (
+            Path.cwd()
+            / ".p4-03-test-results"
+            / f"relocation-{len(self._test_roots)}"
+        )
+        parent.mkdir(parents=True, exist_ok=False)
+        self._test_roots.append(parent)
+        model_root, evidence_path = _write_fake_integrity(parent)
+        relocated_root = parent / "relocated-model"
+        shutil.copytree(model_root, relocated_root)
+
+        with self.assertRaisesRegex(
+            Phase4LocalQwenContractError,
+            "integrity evidence model root drifted",
+        ):
+            validate_model_inventory_metadata(
+                model_root=relocated_root,
+                integrity_evidence=evidence_path,
+            )
+
+        inventory = validate_model_inventory_metadata(
+            model_root=relocated_root,
+            integrity_evidence=evidence_path,
+            allow_relocated_model_root=True,
+        )
+        self.assertEqual(inventory["file_count"], 3)
+        self.assertTrue(inventory["weight_bytes_hashed"])
+
+        (relocated_root / "weights.bin").write_bytes(b"changed")
+        with self.assertRaisesRegex(
+            Phase4LocalQwenContractError,
+            "live model content hash drifted",
+        ):
+            validate_model_inventory_metadata(
+                model_root=relocated_root,
+                integrity_evidence=evidence_path,
+                allow_relocated_model_root=True,
+            )
+
     def test_prompt_and_backend_include_exact_actual_input(self):
         _, policies, profile, _, _ = _binding_profile_manifest()
         actual_input = b'{"actual":"node-input"}'

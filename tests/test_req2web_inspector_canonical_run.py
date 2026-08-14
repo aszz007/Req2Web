@@ -19,6 +19,9 @@ from req2web_inspector.canonical_run import (  # noqa: E402
     CanonicalInspectorRunStore,
     InspectorCanonicalRunError,
 )
+from req2web_evaluation.phase5_semantic_qwen_runtime import (  # noqa: E402
+    HIGH_GPU_PROFILE as SEMANTIC_HIGH_GPU_PROFILE,
+)
 from req2web_orchestration.phase4_graph import (  # noqa: E402
     phase4_synthetic_fixture_output,
     synthetic_commerce_b_input,
@@ -26,6 +29,32 @@ from req2web_orchestration.phase4_graph import (  # noqa: E402
 
 
 class CanonicalInspectorRunStoreTests(unittest.TestCase):
+    def test_rejects_unknown_semantic_acceptance_profile(self) -> None:
+        with self.assertRaisesRegex(
+            InspectorCanonicalRunError,
+            "canonical semantic profile is invalid",
+        ):
+            CanonicalInspectorRunStore(
+                root=self.root / "invalid-semantic-profile",
+                index_dir=ROOT / "data/processed/rag",
+                model_root=self.model_root,
+                integrity_evidence=self.evidence,
+                semantic_profile_name="high_gpu_bf16",
+            )
+
+    def test_accepts_high_gpu_semantic_acceptance_profile(self) -> None:
+        store = CanonicalInspectorRunStore(
+            root=self.root / "high-semantic-profile",
+            index_dir=ROOT / "data/processed/rag",
+            model_root=self.model_root,
+            integrity_evidence=self.evidence,
+            semantic_profile_name=SEMANTIC_HIGH_GPU_PROFILE,
+        )
+        self.assertEqual(
+            store.capability()["semantic_profile_name"],
+            SEMANTIC_HIGH_GPU_PROFILE,
+        )
+
     def setUp(self) -> None:
         self.root = ROOT / f".inspector-canonical-test-{uuid.uuid4().hex}"
         self.root.mkdir()

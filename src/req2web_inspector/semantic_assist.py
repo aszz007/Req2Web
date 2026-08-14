@@ -857,6 +857,7 @@ def _worker_execute(args: argparse.Namespace) -> int:
         inventory = validate_model_inventory_metadata(
             model_root=model_root,
             integrity_evidence=evidence,
+            allow_relocated_model_root=True,
         )
         prompt = _read_json(work_root / "prompt.json", "semantic prompt")
         expected_prompt = build_semantic_assist_prompt(

@@ -937,6 +937,7 @@ def run_phase4_local_qwen_langgraph_integrated(
     inventory = validate_model_inventory_metadata(
         model_root=model_root,
         integrity_evidence=integrity_evidence,
+        allow_relocated_model_root=True,
     )
     portable_state = phase4_create_portable_authority_state(selected_b)
     materials = build_phase4_actual_context_delivery_materials(
@@ -1416,6 +1417,7 @@ def _worker_main(args: argparse.Namespace) -> int:
         inventory = validate_model_inventory_metadata(
             model_root=model_root,
             integrity_evidence=evidence,
+            allow_relocated_model_root=True,
         )
         import torch
         import transformers

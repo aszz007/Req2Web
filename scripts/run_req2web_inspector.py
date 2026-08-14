@@ -35,6 +35,10 @@ from req2web_inspector.semantic_assist import (  # noqa: E402
     SemanticRequirementAssistStore,
     provider_capabilities,
 )
+from req2web_evaluation.phase5_semantic_qwen_runtime import (  # noqa: E402
+    HIGH_GPU_PROFILE as SEMANTIC_HIGH_GPU_PROFILE,
+    LOW_GPU_PROFILE as SEMANTIC_LOW_GPU_PROFILE,
+)
 
 
 CANONICAL_LOW_GPU_PROFILE = "local_low_gpu_nf4"
@@ -417,6 +421,15 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
+        "--canonical-semantic-profile",
+        choices=(SEMANTIC_LOW_GPU_PROFILE, SEMANTIC_HIGH_GPU_PROFILE),
+        help=(
+            "Select the separate semantic acceptance precision. By default, "
+            "high-GPU generation uses high-GPU semantic acceptance and local "
+            "generation uses the local smoke profile."
+        ),
+    )
+    parser.add_argument(
         "--canonical-run-root",
         type=Path,
         default=ROOT / "outputs" / "req2web_inspector_canonical_runs",
@@ -525,6 +538,14 @@ def main(argv: list[str] | None = None) -> int:
                 model_root=model_root,
                 integrity_evidence=integrity_evidence,
                 profile_name=args.canonical_profile,
+                semantic_profile_name=(
+                    args.canonical_semantic_profile
+                    or (
+                        SEMANTIC_HIGH_GPU_PROFILE
+                        if args.canonical_profile == CANONICAL_HIGH_GPU_PROFILE
+                        else SEMANTIC_LOW_GPU_PROFILE
+                    )
+                ),
                 requirement_assist_runner=(
                     None
                     if semantic_assist_store is None
