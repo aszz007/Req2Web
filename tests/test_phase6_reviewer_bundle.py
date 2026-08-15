@@ -23,7 +23,7 @@ from req2web_inspector.phase6_replay import (  # noqa: E402
 class Phase6ReviewerBundleTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
-        cls.bundle_root = ROOT / "release" / "phase6_reviewer_v15"
+        cls.bundle_root = ROOT / "release" / "phase6_reviewer_v16"
         cls.manifest = validate_phase6_reviewer_bundle(cls.bundle_root)
 
     def test_frozen_counts_and_separate_ledgers(self) -> None:
@@ -144,7 +144,9 @@ class Phase6ReviewerBundleTests(unittest.TestCase):
         self.assertIn('id="browser-viewport"', page)
         self.assertIn(".browser-capture", styles)
         self.assertIn("function renderPreviewLayout()", script)
+        self.assertIn("function applyPreviewSafetyStyles()", script)
         self.assertIn("function connectPreviewStateMonitor()", script)
+        self.assertIn("req2web-inspector-preview-safety", script)
 
     def test_single_inspector_has_compact_user_entry_and_explanations(self) -> None:
         page = (self.bundle_root / "index.html").read_text(encoding="utf-8")
@@ -164,6 +166,8 @@ class Phase6ReviewerBundleTests(unittest.TestCase):
         self.assertIn(".info-tip:focus-visible::after", styles)
         self.assertIn("overflow-x: clip", styles)
         self.assertIn(".intake-side .info-tip::after", styles)
+        self.assertIn(".intake-side { grid-template-columns: repeat(3, minmax(0, 1fr)); }", styles)
+        self.assertIn("select { width: 100%; min-width: 0;", styles)
         self.assertIn("function initializeLiveInspector()", script)
         self.assertIn("function canonicalOutcomeItems(record)", script)
         self.assertIn("function outcomeSummaryMarkup(record, imported, canonical)", script)

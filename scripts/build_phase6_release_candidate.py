@@ -30,12 +30,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--reviewer-root",
         type=Path,
-        default=ROOT / "release" / "phase6_reviewer_v15",
+        default=ROOT / "release" / "phase6_reviewer_v16",
     )
     parser.add_argument(
         "--output-root",
         type=Path,
-        default=ROOT / "release" / "phase6_release_candidate_v15",
+        default=ROOT / "release" / "phase6_release_candidate_v16",
     )
     parser.add_argument("--validate-only", action="store_true")
     return parser
