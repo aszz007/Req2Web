@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Req2Web Luna relevance review</title>
+    <link rel="stylesheet" href="styles.css">
+  </head>
+  <body>
+    <header class="topbar">
+      <div>
+        <p class="eyebrow">REQ2WEB · RETRIEVAL REVIEW</p>
+        <h1>Review Luna's completed labels</h1>
+        <p class="subtitle">Confirm each suggestion or correct only the items that deviate.</p>
+      </div>
+      <button id="export-button" class="primary" type="button">Export reviewed JSON</button>
+    </header>
+    <main>
+      <section class="summary" aria-label="Review progress">
+        <div><span id="reviewed-count">0</span><small>reviewed</small></div>
+        <div><span id="remaining-count">420</span><small>remaining</small></div>
+        <div><span id="corrected-count">0</span><small>corrected</small></div>
+        <div class="progress-wrap"><div id="progress-bar" class="progress-bar"></div></div>
+      </section>
+      <section class="filters" aria-label="Review filters">
+        <label>Status<select id="status-filter"><option value="all">All items</option><option value="pending">Pending</option><option value="corrected">Corrected</option><option value="low">Low confidence</option></select></label>
+        <label>Case<select id="case-filter"><option value="all">All cases</option></select></label>
+        <label>Role<select id="role-filter"><option value="all">All roles</option></select></label>
+        <button id="previous-button" type="button">Previous</button>
+        <button id="next-button" type="button">Next</button>
+      </section>
+      <section id="empty-state" class="empty" hidden>No items match the current filters.</section>
+      <article id="review-card" class="review-card">
+        <div class="card-head">
+          <div><p id="position" class="eyebrow"></p><h2 id="candidate-title"></h2></div>
+          <span id="confidence" class="confidence"></span>
+        </div>
+        <div class="context-grid">
+          <section><h3>Application and role</h3><div id="judgment-context"></div></section>
+          <section><h3>Candidate evidence</h3><div id="candidate-evidence"></div></section>
+        </div>
+        <section class="luna-panel">
+          <h3>Luna suggestion</h3>
+          <p id="luna-rationale"></p>
+        </section>
+        <section class="grade-panel">
+          <h3>Final relevance</h3>
+          <div id="grade-buttons" class="grade-buttons"></div>
+          <p id="grade-help" class="grade-help"></p>
+        </section>
+        <div class="actions">
+          <button id="confirm-button" class="primary" type="button">Confirm and show next</button>
+          <button id="clear-button" type="button">Mark pending</button>
+        </div>
+      </article>
+    </main>
+    <script src="review_data.js"></script>
+    <script src="app.js"></script>
+  </body>
+</html>
