@@ -64,9 +64,17 @@
     const evidence = item.candidate.evidence;
     byId("candidate-evidence").innerHTML = `<dl class="facts"><dt>Document</dt><dd>${escapeHtml(item.candidate.doc_id)}</dd><dt>Dataset</dt><dd>${escapeHtml(item.candidate.dataset)} / ${escapeHtml(item.candidate.subset)}</dd>${factsHtml(evidence.structured_facts)}</dl><p class="excerpt">${escapeHtml(evidence.content_excerpt)}</p>`;
     byId("luna-rationale").textContent = judgment.rationale;
-    byId("grade-buttons").innerHTML = [0,1,2,3].map((grade) => `<button type="button" data-grade="${grade}" class="${grade === selectedGrade ? "selected" : ""}">${grade}<br><small>${escapeHtml(scale[String(grade)])}</small></button>`).join("");
+    byId("grade-buttons").innerHTML = [0,1,2,3].map((grade) => `<button type="button" data-grade="${grade}" aria-pressed="${grade === selectedGrade}" class="${grade === selectedGrade ? "selected" : ""}">${grade}<br><small>${escapeHtml(scale[String(grade)])}</small></button>`).join("");
     byId("grade-help").textContent = saved ? `Saved as ${saved.review_status}.` : `Luna selected ${judgment.suggested_relevance}; change it only if the evidence warrants a correction.`;
-    byId("grade-buttons").querySelectorAll("button").forEach((button) => button.addEventListener("click", () => { selectedGrade = Number(button.dataset.grade); render(); }));
+    byId("grade-buttons").querySelectorAll("button").forEach((button) => button.addEventListener("click", () => {
+      selectedGrade = Number(button.dataset.grade);
+      byId("grade-buttons").querySelectorAll("button").forEach((candidate) => {
+        const isSelected = Number(candidate.dataset.grade) === selectedGrade;
+        candidate.classList.toggle("selected", isSelected);
+        candidate.setAttribute("aria-pressed", String(isSelected));
+      });
+      byId("grade-help").textContent = `Selected ${selectedGrade}; click Confirm and show next to save this decision.`;
+    }));
   };
   const move = (offset) => { if (!visible.length) return; cursor = (cursor + offset + visible.length) % visible.length; render(); window.scrollTo({top: 0, behavior: "smooth"}); };
   byId("confirm-button").addEventListener("click", () => {
