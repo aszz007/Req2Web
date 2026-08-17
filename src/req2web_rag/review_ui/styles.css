@@ -33,7 +33,7 @@ select { min-width: 150px; border: 1px solid var(--line); border-radius: 10px; b
 .card-head { display: flex; justify-content: space-between; gap: 16px; align-items: start; border-bottom: 1px solid var(--line); padding-bottom: 18px; }
 .confidence { flex: none; border-radius: 999px; background: #eef3ff; color: #244fa8; padding: 7px 11px; font-size: 12px; font-weight: 800; }
 .context-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.25fr); gap: 18px; margin: 20px 0; }
-.context-grid > section, .luna-panel, .reannotation-panel, .grade-panel { min-width: 0; border: 1px solid var(--line); border-radius: 14px; padding: 18px; }
+.context-grid > section, .luna-panel, .reannotation-panel, .independent-review-panel, .grade-panel { min-width: 0; border: 1px solid var(--line); border-radius: 14px; padding: 18px; }
 .context-grid p, .luna-panel p { line-height: 1.58; overflow-wrap: anywhere; }
 .facts { display: grid; grid-template-columns: minmax(110px, .35fr) minmax(0, 1fr); gap: 7px 12px; margin: 0; }
 .facts dt { color: var(--muted); font-size: 12px; font-weight: 700; }
@@ -55,6 +55,18 @@ select { min-width: 150px; border: 1px solid var(--line); border-radius: 10px; b
 .reannotation-panel summary { cursor: pointer; color: var(--blue); font-weight: 700; }
 .independent-rationales { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-top: 12px; }
 .independent-rationales p { margin: 0; padding: 12px; border-radius: 10px; background: white; line-height: 1.5; }
+.independent-review-panel { margin-top: 16px; border-color: #c9d8ff; background: #f8faff; }
+.independent-review-head { display: flex; align-items: start; justify-content: space-between; gap: 16px; }
+.independent-review-head h3 { margin-bottom: 10px; }
+.panel-label { margin-bottom: 4px; color: var(--blue); font-size: 11px; font-weight: 800; letter-spacing: .1em; }
+.independent-grade { flex: none; border-radius: 999px; padding: 7px 11px; font-size: 12px; font-weight: 800; }
+.independent-grade.grade-0 { color: #9b1c1c; background: #fff0f0; }
+.independent-grade.grade-1 { color: #8a4b08; background: #fff7e6; }
+.independent-grade.grade-2 { color: #244fa8; background: #eef3ff; }
+.independent-grade.grade-3 { color: #08765b; background: #eafaf4; }
+.independent-review-panel > p:not(.grade-help) { line-height: 1.55; }
+.independent-meta { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0; }
+.independent-meta span { border: 1px solid var(--line); border-radius: 999px; background: white; padding: 6px 9px; color: var(--muted); font-size: 12px; font-weight: 700; }
 .grade-panel { margin-top: 16px; }
 .grade-buttons { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
 .grade-buttons button { min-height: 62px; font-weight: 800; }

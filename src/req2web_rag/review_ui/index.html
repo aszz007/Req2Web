@@ -4,7 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Req2Web Luna relevance review</title>
-    <link rel="stylesheet" href="styles.css?v=20260817-3">
+    <link rel="stylesheet" href="styles.css?v=20260818-1">
   </head>
   <body>
     <header class="topbar">
@@ -28,6 +28,7 @@
         <label>Case<select id="case-filter"><option value="all">All cases</option></select></label>
         <label>Role<select id="role-filter"><option value="all">All roles</option></select></label>
         <label>Three-run agreement<select id="attention-filter"><option value="all">All priorities</option><option value="high">Review carefully</option><option value="medium">Normal review</option><option value="low">Quick consistency check</option></select></label>
+        <label>Strict review<select id="independent-filter"><option value="all">All recommendations</option><option value="strong">Strong Luna disagreement</option><option value="different">Any Luna disagreement</option><option value="zero">Recommended 0</option><option value="limited">Limited evidence</option></select></label>
         <button id="previous-button" type="button">Previous</button>
         <button id="next-button" type="button">Next</button>
       </section>
@@ -51,6 +52,16 @@
           <p id="agreement-summary" class="grade-help"></p>
           <details><summary>Show the two independent rationales</summary><div id="independent-rationales" class="independent-rationales"></div></details>
         </section>
+        <section id="independent-review-panel" class="independent-review-panel" hidden>
+          <div class="independent-review-head">
+            <div><p class="panel-label">STRICT EVIDENCE REVIEW</p><h3>Independent recommendation</h3></div>
+            <span id="independent-grade" class="independent-grade"></span>
+          </div>
+          <p id="independent-rationale"></p>
+          <div class="independent-meta"><span id="independent-quality"></span><span id="independent-comparison"></span></div>
+          <button id="use-independent-button" type="button">Select this recommendation</button>
+          <p class="grade-help">This is advisory. It changes only the current selection; Confirm saves your decision.</p>
+        </section>
         <section class="grade-panel">
           <h3>Final relevance</h3>
           <div id="grade-buttons" class="grade-buttons"></div>
@@ -64,6 +75,7 @@
     </main>
     <script src="review_data.js"></script>
     <script src="reannotation_data.js"></script>
-    <script src="app.js?v=20260817-4"></script>
+    <script src="independent_review_data.js"></script>
+    <script src="app.js?v=20260818-1"></script>
   </body>
 </html>

@@ -4,6 +4,8 @@
   if (!data || !Array.isArray(data.items)) throw new Error("Review data is unavailable.");
   const reannotation = window.REQ2WEB_LUNA_REANNOTATION;
   const recheckById = new Map((reannotation?.items || []).map((item) => [item.item_id, item]));
+  const independentReview = window.REQ2WEB_INDEPENDENT_REVIEW;
+  const independentById = new Map((independentReview?.items || []).map((item) => [item.item_id, item]));
   const storageKey = `req2web-luna-review:${data.source_luna_prelabels_sha256}`;
   const scale = data.relevance_scale;
   const state = JSON.parse(localStorage.getItem(storageKey) || "{}");
@@ -36,11 +38,17 @@
     const caseId = byId("case-filter").value;
     const role = byId("role-filter").value;
     const attention = byId("attention-filter").value;
+    const independentFilter = byId("independent-filter").value;
     visible = data.items.filter((item) => {
       const row = entry(item);
+      const independent = independentById.get(item.item_id);
       if (caseId !== "all" && item.case_id !== caseId) return false;
       if (role !== "all" && item.role !== role) return false;
       if (attention !== "all" && recheckById.get(item.item_id)?.attention_priority !== attention) return false;
+      if (independentFilter === "strong" && (!independent || independent.absolute_delta < 2)) return false;
+      if (independentFilter === "different" && (!independent || independent.absolute_delta < 1)) return false;
+      if (independentFilter === "zero" && independent?.recommended_relevance !== 0) return false;
+      if (independentFilter === "limited" && !["minimal_gesture_trace", "generic_responsive_prototype_metadata", "issue_only_without_fix_content", "path_only_implementation_stub"].includes(independent?.evidence_quality)) return false;
       if (status === "unreviewed" && row) return false;
       if (status === "pending" && row?.review_status !== "pending") return false;
       if (status === "corrected" && row?.review_status !== "corrected") return false;
@@ -85,6 +93,15 @@
       byId("agreement-summary").textContent = `${priorityCopy[1]} Majority: ${recheck.majority_grade ?? "none"}.`;
       byId("independent-rationales").innerHTML = [recheck.independent_run_2, recheck.independent_run_3].map((row, index) => `<p><strong>Run ${index + 2}: ${row.suggested_relevance} · ${escapeHtml(row.confidence)}</strong><br>${escapeHtml(row.rationale)}</p>`).join("");
     }
+    const independent = independentById.get(item.item_id);
+    byId("independent-review-panel").hidden = !independent;
+    if (independent) {
+      byId("independent-grade").textContent = `Recommended ${independent.recommended_relevance}`;
+      byId("independent-grade").className = `independent-grade grade-${independent.recommended_relevance}`;
+      byId("independent-rationale").textContent = independent.rationale;
+      byId("independent-quality").textContent = `Evidence: ${independent.evidence_quality.replaceAll("_", " ")}`;
+      byId("independent-comparison").textContent = `Luna ${independent.luna_relevance} → strict ${independent.recommended_relevance}`;
+    }
     byId("grade-buttons").innerHTML = [0,1,2,3].map((grade) => `<button type="button" data-grade="${grade}" aria-pressed="${grade === selectedGrade}" class="${grade === selectedGrade ? "selected" : ""}">${grade}<br><small>${escapeHtml(scale[String(grade)])}</small></button>`).join("");
     byId("grade-help").textContent = saved?.review_status === "pending"
       ? `Marked pending. Luna's suggested grade ${judgment.suggested_relevance} is selected until you resolve this item.`
@@ -100,6 +117,16 @@
       });
       byId("grade-help").textContent = `Selected ${selectedGrade}; click Confirm and show next to save this decision.`;
     }));
+    byId("use-independent-button").onclick = () => {
+      if (!independent) return;
+      selectedGrade = independent.recommended_relevance;
+      byId("grade-buttons").querySelectorAll("button").forEach((button) => {
+        const isSelected = Number(button.dataset.grade) === selectedGrade;
+        button.classList.toggle("selected", isSelected);
+        button.setAttribute("aria-pressed", String(isSelected));
+      });
+      byId("grade-help").textContent = `Selected strict recommendation ${selectedGrade}; click Confirm and show next to save your decision.`;
+    };
   };
   const move = (offset) => { if (!visible.length) return; cursor = (cursor + offset + visible.length) % visible.length; render(); };
   byId("confirm-button").addEventListener("click", () => {
@@ -119,7 +146,7 @@
   });
   byId("previous-button").addEventListener("click", () => move(-1));
   byId("next-button").addEventListener("click", () => move(1));
-  ["status-filter", "case-filter", "role-filter", "attention-filter"].forEach((id) => byId(id).addEventListener("change", () => refreshVisible()));
+  ["status-filter", "case-filter", "role-filter", "attention-filter", "independent-filter"].forEach((id) => byId(id).addEventListener("change", () => refreshVisible()));
   byId("export-button").addEventListener("click", () => {
     const items = data.items.map((item) => {
       const row = entry(item);
