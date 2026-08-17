@@ -94,7 +94,7 @@
       byId("grade-help").textContent = `Selected ${selectedGrade}; click Confirm and show next to save this decision.`;
     }));
   };
-  const move = (offset) => { if (!visible.length) return; cursor = (cursor + offset + visible.length) % visible.length; render(); window.scrollTo({top: 0, behavior: "smooth"}); };
+  const move = (offset) => { if (!visible.length) return; cursor = (cursor + offset + visible.length) % visible.length; render(); };
   byId("confirm-button").addEventListener("click", () => {
     const item = visible[cursor];
     const luna = item.luna_judgment.suggested_relevance;
