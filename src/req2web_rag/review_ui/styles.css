@@ -21,7 +21,7 @@ h3 { font-size: 15px; margin-bottom: 12px; }
 .eyebrow { margin-bottom: 7px; color: var(--blue); font-size: 12px; font-weight: 800; letter-spacing: .12em; }
 .subtitle, .grade-help, .meta { color: var(--muted); }
 main { width: min(1240px, calc(100% - 32px)); margin: 24px auto 56px; }
-.summary { display: grid; grid-template-columns: repeat(3, minmax(110px, 1fr)); gap: 12px; padding: 18px; background: white; border: 1px solid var(--line); border-radius: 16px; }
+.summary { display: grid; grid-template-columns: repeat(4, minmax(110px, 1fr)); gap: 12px; padding: 18px; background: white; border: 1px solid var(--line); border-radius: 16px; }
 .summary span { display: block; font-size: 28px; font-weight: 800; }
 .summary small { color: var(--muted); }
 .progress-wrap { grid-column: 1 / -1; height: 7px; overflow: hidden; background: #e8edf6; border-radius: 999px; }
@@ -63,6 +63,7 @@ select { min-width: 150px; border: 1px solid var(--line); border-radius: 10px; b
 .actions { display: flex; gap: 10px; justify-content: flex-end; margin-top: 18px; }
 @media (max-width: 800px) {
   .topbar { align-items: stretch; flex-direction: column; }
+  .summary { grid-template-columns: repeat(2, minmax(110px, 1fr)); }
   .context-grid { grid-template-columns: 1fr; }
   .grade-buttons { grid-template-columns: repeat(2, 1fr); }
   .independent-rationales { grid-template-columns: 1fr; }

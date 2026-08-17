@@ -4,7 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Req2Web Luna relevance review</title>
-    <link rel="stylesheet" href="styles.css?v=20260817-2">
+    <link rel="stylesheet" href="styles.css?v=20260817-3">
   </head>
   <body>
     <header class="topbar">
@@ -19,11 +19,12 @@
       <section class="summary" aria-label="Review progress">
         <div><span id="reviewed-count">0</span><small>reviewed</small></div>
         <div><span id="remaining-count">420</span><small>remaining</small></div>
+        <div><span id="pending-count">0</span><small>pending</small></div>
         <div><span id="corrected-count">0</span><small>corrected</small></div>
         <div class="progress-wrap"><div id="progress-bar" class="progress-bar"></div></div>
       </section>
       <section class="filters" aria-label="Review filters">
-        <label>Status<select id="status-filter"><option value="all">All items</option><option value="pending">Pending</option><option value="corrected">Corrected</option><option value="low">Low confidence</option></select></label>
+        <label>Status<select id="status-filter"><option value="all">All items</option><option value="unreviewed">Unreviewed</option><option value="pending">Pending</option><option value="corrected">Corrected</option><option value="low">Low confidence</option></select></label>
         <label>Case<select id="case-filter"><option value="all">All cases</option></select></label>
         <label>Role<select id="role-filter"><option value="all">All roles</option></select></label>
         <label>Three-run agreement<select id="attention-filter"><option value="all">All priorities</option><option value="high">Review carefully</option><option value="medium">Normal review</option><option value="low">Quick consistency check</option></select></label>
@@ -57,12 +58,12 @@
         </section>
         <div class="actions">
           <button id="confirm-button" class="primary" type="button">Confirm and show next</button>
-          <button id="clear-button" type="button">Mark pending</button>
+          <button id="clear-button" type="button">Mark pending and show next</button>
         </div>
       </article>
     </main>
     <script src="review_data.js"></script>
     <script src="reannotation_data.js"></script>
-    <script src="app.js?v=20260817-3"></script>
+    <script src="app.js?v=20260817-4"></script>
   </body>
 </html>

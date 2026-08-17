@@ -17,9 +17,11 @@
   const stats = () => {
     const values = Object.values(state);
     const reviewed = values.filter((row) => row && Number.isInteger(row.final_relevance)).length;
+    const pending = values.filter((row) => row?.review_status === "pending").length;
     const corrected = values.filter((row) => row?.review_status === "corrected").length;
     byId("reviewed-count").textContent = reviewed;
     byId("remaining-count").textContent = data.item_count - reviewed;
+    byId("pending-count").textContent = pending;
     byId("corrected-count").textContent = corrected;
     byId("progress-bar").style.width = `${reviewed / data.item_count * 100}%`;
   };
@@ -39,7 +41,8 @@
       if (caseId !== "all" && item.case_id !== caseId) return false;
       if (role !== "all" && item.role !== role) return false;
       if (attention !== "all" && recheckById.get(item.item_id)?.attention_priority !== attention) return false;
-      if (status === "pending" && row) return false;
+      if (status === "unreviewed" && row) return false;
+      if (status === "pending" && row?.review_status !== "pending") return false;
       if (status === "corrected" && row?.review_status !== "corrected") return false;
       if (status === "low" && item.luna_judgment.confidence !== "low") return false;
       return true;
@@ -58,7 +61,7 @@
     const item = visible[cursor];
     const judgment = item.luna_judgment;
     const saved = entry(item);
-    selectedGrade = saved?.final_relevance ?? judgment.suggested_relevance;
+    selectedGrade = Number.isInteger(saved?.final_relevance) ? saved.final_relevance : judgment.suggested_relevance;
     byId("position").textContent = `${cursor + 1} of ${visible.length} · ${item.case_id} · ${item.role.replaceAll("_", " ")}`;
     byId("candidate-title").textContent = item.candidate.evidence.source_title || item.candidate.title || item.candidate.doc_id;
     byId("confidence").textContent = `${judgment.confidence} confidence`;
@@ -83,7 +86,11 @@
       byId("independent-rationales").innerHTML = [recheck.independent_run_2, recheck.independent_run_3].map((row, index) => `<p><strong>Run ${index + 2}: ${row.suggested_relevance} · ${escapeHtml(row.confidence)}</strong><br>${escapeHtml(row.rationale)}</p>`).join("");
     }
     byId("grade-buttons").innerHTML = [0,1,2,3].map((grade) => `<button type="button" data-grade="${grade}" aria-pressed="${grade === selectedGrade}" class="${grade === selectedGrade ? "selected" : ""}">${grade}<br><small>${escapeHtml(scale[String(grade)])}</small></button>`).join("");
-    byId("grade-help").textContent = saved ? `Saved as ${saved.review_status}.` : `Luna selected ${judgment.suggested_relevance}; change it only if the evidence warrants a correction.`;
+    byId("grade-help").textContent = saved?.review_status === "pending"
+      ? `Marked pending. Luna's suggested grade ${judgment.suggested_relevance} is selected until you resolve this item.`
+      : saved
+        ? `Saved as ${saved.review_status}.`
+        : `Luna selected ${judgment.suggested_relevance}; change it only if the evidence warrants a correction.`;
     byId("grade-buttons").querySelectorAll("button").forEach((button) => button.addEventListener("click", () => {
       selectedGrade = Number(button.dataset.grade);
       byId("grade-buttons").querySelectorAll("button").forEach((candidate) => {
@@ -101,20 +108,26 @@
     state[item.item_id] = { final_relevance: selectedGrade, review_status: selectedGrade === luna ? "confirmed" : "corrected" };
     save();
     const priorId = item.item_id;
-    if (byId("status-filter").value === "pending") refreshVisible(); else { move(1); stats(); }
+    if (["pending", "unreviewed"].includes(byId("status-filter").value)) refreshVisible(); else { move(1); stats(); }
     if (!entry(item)) refreshVisible(priorId);
   });
-  byId("clear-button").addEventListener("click", () => { const item = visible[cursor]; delete state[item.item_id]; save(); render(); });
+  byId("clear-button").addEventListener("click", () => {
+    const item = visible[cursor];
+    state[item.item_id] = { review_status: "pending" };
+    save();
+    if (["unreviewed", "corrected"].includes(byId("status-filter").value)) refreshVisible(); else { move(1); stats(); }
+  });
   byId("previous-button").addEventListener("click", () => move(-1));
   byId("next-button").addEventListener("click", () => move(1));
   ["status-filter", "case-filter", "role-filter", "attention-filter"].forEach((id) => byId(id).addEventListener("change", () => refreshVisible()));
   byId("export-button").addEventListener("click", () => {
     const items = data.items.map((item) => {
       const row = entry(item);
-      return row ? { item_id: item.item_id, luna_relevance: item.luna_judgment.suggested_relevance, final_relevance: row.final_relevance, review_status: row.review_status } : null;
+      return Number.isInteger(row?.final_relevance) ? { item_id: item.item_id, luna_relevance: item.luna_judgment.suggested_relevance, final_relevance: row.final_relevance, review_status: row.review_status } : null;
     });
     const reviewed = items.filter(Boolean).length;
-    if (reviewed !== data.item_count) { alert(`Review all ${data.item_count} items before export. ${data.item_count - reviewed} remain.`); return; }
+    const pending = data.items.filter((item) => entry(item)?.review_status === "pending").length;
+    if (reviewed !== data.item_count) { alert(`Resolve all ${data.item_count} items before export. ${data.item_count - reviewed} remain, including ${pending} marked pending.`); return; }
     const packet = { schema_version: data.schema_version, status: "completed", source_request_sha256: data.source_request_sha256, source_luna_prelabels_sha256: data.source_luna_prelabels_sha256, reviewer_role: "project_owner", item_count: data.item_count, items };
     const blob = new Blob([JSON.stringify(packet, null, 2) + "\n"], {type: "application/json"});
     const link = document.createElement("a"); link.href = URL.createObjectURL(blob); link.download = "req2web_retrieval_review_completed.json"; link.click(); URL.revokeObjectURL(link.href);
