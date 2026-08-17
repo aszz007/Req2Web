@@ -3,3 +3,4 @@ p4-05-stability-full-direct-20260805-g/** -text
 docs/phase4_exit_phase5_entry_handoff.md -text
 release/phase6_reviewer_v*/** -text
 outputs/phase6_retrieval_luna_review_v1/** -text
+outputs/phase6_retrieval_luna_reannotation_v1/** -text

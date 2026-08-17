@@ -4,7 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Req2Web Luna relevance review</title>
-    <link rel="stylesheet" href="styles.css">
+    <link rel="stylesheet" href="styles.css?v=20260817-2">
   </head>
   <body>
     <header class="topbar">
@@ -26,6 +26,7 @@
         <label>Status<select id="status-filter"><option value="all">All items</option><option value="pending">Pending</option><option value="corrected">Corrected</option><option value="low">Low confidence</option></select></label>
         <label>Case<select id="case-filter"><option value="all">All cases</option></select></label>
         <label>Role<select id="role-filter"><option value="all">All roles</option></select></label>
+        <label>Three-run agreement<select id="attention-filter"><option value="all">All priorities</option><option value="high">Review carefully</option><option value="medium">Normal review</option><option value="low">Quick consistency check</option></select></label>
         <button id="previous-button" type="button">Previous</button>
         <button id="next-button" type="button">Next</button>
       </section>
@@ -43,6 +44,12 @@
           <h3>Luna suggestion</h3>
           <p id="luna-rationale"></p>
         </section>
+        <section id="reannotation-panel" class="reannotation-panel" hidden>
+          <div class="reannotation-head"><h3>Independent Luna checks</h3><span id="attention-badge" class="attention-badge"></span></div>
+          <div id="three-run-grades" class="three-run-grades"></div>
+          <p id="agreement-summary" class="grade-help"></p>
+          <details><summary>Show the two independent rationales</summary><div id="independent-rationales" class="independent-rationales"></div></details>
+        </section>
         <section class="grade-panel">
           <h3>Final relevance</h3>
           <div id="grade-buttons" class="grade-buttons"></div>
@@ -55,6 +62,7 @@
       </article>
     </main>
     <script src="review_data.js"></script>
-    <script src="app.js?v=20260817-1"></script>
+    <script src="reannotation_data.js"></script>
+    <script src="app.js?v=20260817-2"></script>
   </body>
 </html>

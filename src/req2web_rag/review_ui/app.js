@@ -2,6 +2,8 @@
   "use strict";
   const data = window.REQ2WEB_REVIEW_DATA;
   if (!data || !Array.isArray(data.items)) throw new Error("Review data is unavailable.");
+  const reannotation = window.REQ2WEB_LUNA_REANNOTATION;
+  const recheckById = new Map((reannotation?.items || []).map((item) => [item.item_id, item]));
   const storageKey = `req2web-luna-review:${data.source_luna_prelabels_sha256}`;
   const scale = data.relevance_scale;
   const state = JSON.parse(localStorage.getItem(storageKey) || "{}");
@@ -31,10 +33,12 @@
     const status = byId("status-filter").value;
     const caseId = byId("case-filter").value;
     const role = byId("role-filter").value;
+    const attention = byId("attention-filter").value;
     visible = data.items.filter((item) => {
       const row = entry(item);
       if (caseId !== "all" && item.case_id !== caseId) return false;
       if (role !== "all" && item.role !== role) return false;
+      if (attention !== "all" && recheckById.get(item.item_id)?.attention_priority !== attention) return false;
       if (status === "pending" && row) return false;
       if (status === "corrected" && row?.review_status !== "corrected") return false;
       if (status === "low" && item.luna_judgment.confidence !== "low") return false;
@@ -64,6 +68,20 @@
     const evidence = item.candidate.evidence;
     byId("candidate-evidence").innerHTML = `<dl class="facts"><dt>Document</dt><dd>${escapeHtml(item.candidate.doc_id)}</dd><dt>Dataset</dt><dd>${escapeHtml(item.candidate.dataset)} / ${escapeHtml(item.candidate.subset)}</dd>${factsHtml(evidence.structured_facts)}</dl><p class="excerpt">${escapeHtml(evidence.content_excerpt)}</p>`;
     byId("luna-rationale").textContent = judgment.rationale;
+    const recheck = recheckById.get(item.item_id);
+    byId("reannotation-panel").hidden = !recheck;
+    if (recheck) {
+      const priorityCopy = {
+        high: ["Review carefully", "The three grades differ by at least two points."],
+        medium: ["Normal review", "The three grades differ by one point."],
+        low: ["Quick consistency check", "All three independent grades agree."],
+      }[recheck.attention_priority];
+      byId("attention-badge").textContent = priorityCopy[0];
+      byId("attention-badge").className = `attention-badge ${recheck.attention_priority}`;
+      byId("three-run-grades").innerHTML = recheck.grades.map((grade, index) => `<span><small>Run ${index + 1}</small><strong>${grade}</strong></span>`).join("");
+      byId("agreement-summary").textContent = `${priorityCopy[1]} Majority: ${recheck.majority_grade ?? "none"}.`;
+      byId("independent-rationales").innerHTML = [recheck.independent_run_2, recheck.independent_run_3].map((row, index) => `<p><strong>Run ${index + 2}: ${row.suggested_relevance} · ${escapeHtml(row.confidence)}</strong><br>${escapeHtml(row.rationale)}</p>`).join("");
+    }
     byId("grade-buttons").innerHTML = [0,1,2,3].map((grade) => `<button type="button" data-grade="${grade}" aria-pressed="${grade === selectedGrade}" class="${grade === selectedGrade ? "selected" : ""}">${grade}<br><small>${escapeHtml(scale[String(grade)])}</small></button>`).join("");
     byId("grade-help").textContent = saved ? `Saved as ${saved.review_status}.` : `Luna selected ${judgment.suggested_relevance}; change it only if the evidence warrants a correction.`;
     byId("grade-buttons").querySelectorAll("button").forEach((button) => button.addEventListener("click", () => {
@@ -89,7 +107,7 @@
   byId("clear-button").addEventListener("click", () => { const item = visible[cursor]; delete state[item.item_id]; save(); render(); });
   byId("previous-button").addEventListener("click", () => move(-1));
   byId("next-button").addEventListener("click", () => move(1));
-  ["status-filter", "case-filter", "role-filter"].forEach((id) => byId(id).addEventListener("change", () => refreshVisible()));
+  ["status-filter", "case-filter", "role-filter", "attention-filter"].forEach((id) => byId(id).addEventListener("change", () => refreshVisible()));
   byId("export-button").addEventListener("click", () => {
     const items = data.items.map((item) => {
       const row = entry(item);
