@@ -28,7 +28,7 @@
         <label>Case<select id="case-filter"><option value="all">All cases</option></select></label>
         <label>Role<select id="role-filter"><option value="all">All roles</option></select></label>
         <label>Three-run agreement<select id="attention-filter"><option value="all">All priorities</option><option value="high">Review carefully</option><option value="medium">Normal review</option><option value="low">Quick consistency check</option></select></label>
-        <label>Strict review<select id="independent-filter"><option value="all">All recommendations</option><option value="strong">Strong Luna disagreement</option><option value="different">Any Luna disagreement</option><option value="zero">Recommended 0</option><option value="limited">Limited evidence</option></select></label>
+        <label>Adjudicated review<select id="independent-filter"><option value="all">All recommendations</option><option value="changed">Changed after adjudication</option><option value="strong">Strong original disagreement</option><option value="different">Any original disagreement</option><option value="final-zero">Final recommended 0</option><option value="limited">Limited evidence</option></select></label>
         <button id="previous-button" type="button">Previous</button>
         <button id="next-button" type="button">Next</button>
       </section>
@@ -54,11 +54,12 @@
         </section>
         <section id="independent-review-panel" class="independent-review-panel" hidden>
           <div class="independent-review-head">
-            <div><p class="panel-label">STRICT EVIDENCE REVIEW</p><h3>Independent recommendation</h3></div>
+            <div><p id="independent-panel-label" class="panel-label">STRICT EVIDENCE REVIEW</p><h3 id="independent-panel-title">Independent recommendation</h3></div>
             <span id="independent-grade" class="independent-grade"></span>
           </div>
           <p id="independent-rationale"></p>
           <div class="independent-meta"><span id="independent-quality"></span><span id="independent-comparison"></span></div>
+          <details id="adjudication-details" hidden><summary>Show strict and fresh-Luna reasons</summary><p id="strict-review-rationale"></p><p id="fresh-adjudication-rationale"></p></details>
           <button id="use-independent-button" type="button">Select this recommendation</button>
           <p class="grade-help">This is advisory. It changes only the current selection; Confirm saves your decision.</p>
         </section>
@@ -76,6 +77,7 @@
     <script src="review_data.js"></script>
     <script src="reannotation_data.js"></script>
     <script src="independent_review_data.js"></script>
-    <script src="app.js?v=20260818-1"></script>
+    <script src="adjudicated_review_data.js"></script>
+    <script src="app.js?v=20260818-2"></script>
   </body>
 </html>
