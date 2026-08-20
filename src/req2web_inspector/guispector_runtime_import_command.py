@@ -16,6 +16,7 @@ from django.db import transaction
 
 from gui_spector.llm.llm import LLM
 from gui_spector.verfication.bigmodel_provider import BIGMODEL_AGENT_ID
+from gui_spector.verfication.gui_plus_provider import GUI_PLUS_AGENT_ID
 from setups.models import AcceptanceCriterion, Requirement, Setup
 
 
@@ -23,6 +24,18 @@ PACKET_SCHEMA_VERSION = "req2web.guispector.evaluation.v1"
 DEFAULT_PACKET = Path("/app/req2web_reviewer_v17/guispector_evaluation.json")
 DEFAULT_BASE_URL = "http://req2web-pages"
 TOKEN = "{REQ2WEB_INSPECTOR_BASE_URL}"
+PROVIDERS = {
+    "zhipu": {
+        "agent_model": BIGMODEL_AGENT_ID,
+        "setup_prefix": "Req2Web",
+        "label": "Zhipu GLM-4.6V",
+    },
+    "gui-plus": {
+        "agent_model": GUI_PLUS_AGENT_ID,
+        "setup_prefix": "Req2Web GUI Plus",
+        "label": "Alibaba GUI Plus 2026-02-26",
+    },
+}
 
 
 def _mapping(value: Any, label: str) -> Mapping[str, Any]:
@@ -54,8 +67,13 @@ def _load_packet(path: Path) -> Mapping[str, Any]:
     return packet
 
 
-def _setup_name(index: int, case_id: str, condition_id: str) -> str:
-    name = f"Req2Web {index:02d} · {case_id} · {condition_id}"
+def _setup_name(
+    index: int,
+    case_id: str,
+    condition_id: str,
+    setup_prefix: str,
+) -> str:
+    name = f"{setup_prefix} {index:02d} · {case_id} · {condition_id}"
     if len(name) > 255:
         raise CommandError("generated setup name exceeds the GUISpector limit")
     return name
@@ -73,7 +91,9 @@ def _expected_case(
     raw_case: Any,
     expected_index: int,
     base_url: str,
+    provider_key: str,
 ) -> dict[str, Any]:
+    provider = PROVIDERS[provider_key]
     case = _mapping(raw_case, f"case {expected_index}")
     if case.get("execution_index") != expected_index:
         raise CommandError("Req2Web GUISpector execution order drifted")
@@ -114,13 +134,27 @@ def _expected_case(
         ),
         "model_invocation_performed": False,
     }
+    if provider_key == "gui-plus":
+        metadata["verification_provider"] = provider["label"]
     return {
-        "setup_name": _setup_name(expected_index, case_id, condition_id),
+        "setup_name": _setup_name(
+            expected_index,
+            case_id,
+            condition_id,
+            str(provider["setup_prefix"]),
+        ),
         "start_url": start_url,
         "setup_description": (
             "Model-free import from the frozen Req2Web GUISpector packet. "
-            f"Evaluation identity: {metadata['evaluation_identity']}"
+            + (
+                f"Verification provider: {provider['label']}. "
+                if provider_key == "gui-plus"
+                else ""
+            )
+            + f"Evaluation identity: {metadata['evaluation_identity']}"
         ),
+        "agent_model": provider["agent_model"],
+        "provider_key": provider_key,
         "title": _nonempty(requirement.get("title"), "requirement title"),
         "description": _nonempty(requirement.get("description"), "requirement description"),
         "source": _nonempty(requirement.get("source"), "requirement source"),
@@ -135,7 +169,7 @@ def _verify_existing(setup: Setup, expected: Mapping[str, Any]) -> None:
     if (
         setup.start_url != expected["start_url"]
         or setup.description != expected["setup_description"]
-        or setup.agent_model != BIGMODEL_AGENT_ID
+        or setup.agent_model != expected["agent_model"]
         or setup.max_retries != 0
         or setup.max_reasoning_steps != 30
         or setup.agent_timeout_seconds != 300
@@ -168,11 +202,18 @@ class Command(BaseCommand):
     def add_arguments(self, parser):
         parser.add_argument("--packet", type=Path, default=DEFAULT_PACKET)
         parser.add_argument("--base-url", default=DEFAULT_BASE_URL)
+        parser.add_argument(
+            "--provider",
+            choices=sorted(PROVIDERS),
+            default="zhipu",
+            help="Create a separate setup set for the selected verification provider.",
+        )
 
     @transaction.atomic
     def handle(self, *args, **options):
         packet = _load_packet(options["packet"])
         base_url = _nonempty(options["base_url"], "base URL")
+        provider_key = options["provider"]
         if not base_url.startswith(("http://", "https://")):
             raise CommandError("base URL must use HTTP or HTTPS")
 
@@ -180,7 +221,13 @@ class Command(BaseCommand):
         validated = 0
         setup_ids: list[int] = []
         for expected_index, raw_case in enumerate(packet["cases"], start=1):
-            expected = _expected_case(packet, raw_case, expected_index, base_url)
+            expected = _expected_case(
+                packet,
+                raw_case,
+                expected_index,
+                base_url,
+                provider_key,
+            )
             existing = Setup.objects.filter(name=expected["setup_name"]).first()
             if existing is not None:
                 _verify_existing(existing, expected)
@@ -192,9 +239,13 @@ class Command(BaseCommand):
                 name=expected["setup_name"],
                 start_url=expected["start_url"],
                 description=expected["setup_description"],
-                tags_json=["req2web", "guispector", "frozen-phase5"],
+                tags_json=(
+                    ["req2web", "guispector", "frozen-phase5", provider_key]
+                    if provider_key == "gui-plus"
+                    else ["req2web", "guispector", "frozen-phase5"]
+                ),
                 llm_model=LLM.MODEL_GPT_4_1,
-                agent_model=BIGMODEL_AGENT_ID,
+                agent_model=expected["agent_model"],
                 max_reasoning_steps=30,
                 agent_timeout_seconds=300,
                 max_retries=0,
@@ -224,9 +275,10 @@ class Command(BaseCommand):
         self.stdout.write(
             json.dumps(
                 {
-                    "schema_version": "req2web.guispector.packet.import_receipt.v1",
+                    "schema_version": "req2web.guispector.packet.import_receipt.v2",
                     "status": "imported_and_validated_model_free",
                     "evaluation_identity": packet["evaluation_identity"],
+                    "verification_provider": provider_key,
                     "created_setup_count": created,
                     "validated_setup_count": validated,
                     "setup_count": len(setup_ids),

@@ -145,6 +145,9 @@ class GUISpectorSidecarTests(unittest.TestCase):
         self.assertIn("model_api_key_not_configured", result["blocking_reasons"])
         self.assertFalse(result["zhipu_api_key_configured"])
         self.assertFalse(result["openai_api_key_configured"])
+        self.assertFalse(result["dashscope_api_key_configured"])
+        self.assertFalse(result["dashscope_workspace_id_configured"])
+        self.assertFalse(result["gui_plus_configured"])
 
     def test_preflight_accepts_req2web_compose_and_zhipu_presence(self) -> None:
         with patch.dict(
@@ -174,8 +177,38 @@ class GUISpectorSidecarTests(unittest.TestCase):
         self.assertTrue(result["model_api_key_configured"])
         self.assertTrue(result["zhipu_api_key_configured"])
         self.assertFalse(result["openai_api_key_configured"])
+        self.assertFalse(result["gui_plus_configured"])
         self.assertEqual(result["blocking_reasons"], [])
         self.assertNotIn("presence-only-test-value", str(result))
+
+    def test_preflight_accepts_only_a_complete_gui_plus_configuration(self) -> None:
+        environment = {
+            "REQ2WEB_GUISPECTOR_ROOT": "D:/bounded-guispector-checkout",
+            "DASHSCOPE_API_KEY": "presence-only-dashscope-key",
+            "DASHSCOPE_WORKSPACE_ID": "workspace-1",
+        }
+        with patch.dict(os.environ, environment, clear=True), patch(
+            "req2web_inspector.guispector_sidecar.shutil.which",
+            return_value="docker",
+        ), patch.object(
+            Path,
+            "is_dir",
+            autospec=True,
+            return_value=True,
+        ), patch.object(
+            Path,
+            "is_file",
+            autospec=True,
+            side_effect=lambda path: path.name == "docker-compose.req2web.yml",
+        ):
+            result = guispector_runtime_preflight()
+        self.assertEqual(result["status"], "ready_for_operator_started_external_run")
+        self.assertTrue(result["model_api_key_configured"])
+        self.assertTrue(result["dashscope_api_key_configured"])
+        self.assertTrue(result["dashscope_workspace_id_configured"])
+        self.assertTrue(result["gui_plus_configured"])
+        self.assertNotIn("presence-only-dashscope-key", str(result))
+        self.assertNotIn("workspace-1", str(result))
 
 
 if __name__ == "__main__":

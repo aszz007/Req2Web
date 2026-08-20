@@ -17,7 +17,7 @@ from typing import Any, Mapping, Sequence
 GUISPECTOR_EVALUATION_SCHEMA_VERSION = "req2web.guispector.evaluation.v1"
 GUISPECTOR_DECISION_IMPORT_SCHEMA_VERSION = "req2web.guispector.decision_import.v1"
 GUISPECTOR_COMPARISON_SCHEMA_VERSION = "req2web.guispector.comparison.v1"
-GUISPECTOR_PREFLIGHT_SCHEMA_VERSION = "req2web.guispector.preflight.v2"
+GUISPECTOR_PREFLIGHT_SCHEMA_VERSION = "req2web.guispector.preflight.v3"
 
 GUISPECTOR_REPOSITORY_URL = "https://github.com/kristiankolthoff/GUISpector"
 GUISPECTOR_PAPER_URL = "https://arxiv.org/abs/2510.04791"
@@ -575,7 +575,16 @@ def guispector_runtime_preflight() -> dict[str, Any]:
         )
     zhipu_api_key_configured = bool(os.environ.get("ZHIPU_API_KEY", "").strip())
     openai_api_key_configured = bool(os.environ.get("OPENAI_API_KEY", "").strip())
-    model_api_key_configured = zhipu_api_key_configured or openai_api_key_configured
+    dashscope_api_key_configured = bool(os.environ.get("DASHSCOPE_API_KEY", "").strip())
+    dashscope_workspace_id_configured = bool(
+        os.environ.get("DASHSCOPE_WORKSPACE_ID", "").strip()
+    )
+    gui_plus_configured = (
+        dashscope_api_key_configured and dashscope_workspace_id_configured
+    )
+    model_api_key_configured = (
+        zhipu_api_key_configured or openai_api_key_configured or gui_plus_configured
+    )
     ready = docker_available and upstream_root_configured and model_api_key_configured
     blockers: list[str] = []
     if not docker_available:
@@ -592,6 +601,9 @@ def guispector_runtime_preflight() -> dict[str, Any]:
         "model_api_key_configured": model_api_key_configured,
         "zhipu_api_key_configured": zhipu_api_key_configured,
         "openai_api_key_configured": openai_api_key_configured,
+        "dashscope_api_key_configured": dashscope_api_key_configured,
+        "dashscope_workspace_id_configured": dashscope_workspace_id_configured,
+        "gui_plus_configured": gui_plus_configured,
         "execution_performed": False,
         "blocking_reasons": blockers,
         "secret_values_exposed": False,

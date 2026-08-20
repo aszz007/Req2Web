@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Install the Req2Web BigModel adapter into the pinned GUISpector checkout.
+"""Install Req2Web verification-provider adapters into pinned GUISpector.
 
 The upstream checkout is intentionally ignored because the inspected revision
 does not publish a license file. This script verifies that exact revision and
@@ -55,6 +55,26 @@ def _copy_exact(source: Path, destination: Path) -> bool:
     return True
 
 
+def _write_managed(runtime_root: Path, path: Path, content: str, marker: str) -> bool:
+    """Update a project-managed file or an untouched file from the pinned commit."""
+
+    normalized = content.rstrip() + "\n"
+    observed = path.read_text(encoding="utf-8")
+    if observed == normalized:
+        return False
+    relative = path.relative_to(runtime_root).as_posix()
+    pristine = subprocess.run(
+        ["git", "-C", str(runtime_root), "show", f"HEAD:{relative}"],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout
+    if marker not in observed and observed != pristine:
+        raise OverlayInstallError(f"Refusing to overwrite unexpected managed file: {path}")
+    path.write_text(normalized, encoding="utf-8", newline="\n")
+    return True
+
+
 def _git_head(runtime_root: Path) -> str:
     result = subprocess.run(
         ["git", "-C", str(runtime_root), "rev-parse", "HEAD"],
@@ -89,6 +109,11 @@ def install(repository_root: Path, runtime_root: Path) -> dict[str, object]:
     provider_target = runtime_root / "gui_spector/src/gui_spector/verfication/bigmodel_provider.py"
     if _copy_exact(provider_source, provider_target):
         changed.append(str(provider_target.relative_to(runtime_root)))
+
+    gui_plus_source = repository_root / "src/req2web_inspector/guispector_gui_plus_provider.py"
+    gui_plus_target = runtime_root / "gui_spector/src/gui_spector/verfication/gui_plus_provider.py"
+    if _copy_exact(gui_plus_source, gui_plus_target):
+        changed.append(str(gui_plus_target.relative_to(runtime_root)))
 
     command_source = repository_root / "src/req2web_inspector/guispector_runtime_import_command.py"
     command_target = (
@@ -155,10 +180,28 @@ def install(repository_root: Path, runtime_root: Path) -> dict[str, object]:
         changed.append(str(config_path.relative_to(runtime_root)))
     if _replace_once(
         config_path,
+        'BIGMODEL_GLM_4_6V = "zhipu-glm-4.6v"\n',
+        'BIGMODEL_GLM_4_6V = "zhipu-glm-4.6v"\n'
+        'ALIBABA_GUI_PLUS = "alibaba-gui-plus-2026-02-26"\n',
+        'ALIBABA_GUI_PLUS = "alibaba-gui-plus-2026-02-26"',
+    ):
+        if str(config_path.relative_to(runtime_root)) not in changed:
+            changed.append(str(config_path.relative_to(runtime_root)))
+    if _replace_once(
+        config_path,
         '    (OPENAI_COMPUTER_USE_PREVIEW, "OpenAI GPT-4o (CUA)"),\n',
         '    (OPENAI_COMPUTER_USE_PREVIEW, "OpenAI GPT-4o (CUA)"),\n'
         '    (BIGMODEL_GLM_4_6V, "Zhipu GLM-4.6V (Req2Web adapter)"),\n',
         '"Zhipu GLM-4.6V (Req2Web adapter)"',
+    ):
+        if str(config_path.relative_to(runtime_root)) not in changed:
+            changed.append(str(config_path.relative_to(runtime_root)))
+    if _replace_once(
+        config_path,
+        '    (BIGMODEL_GLM_4_6V, "Zhipu GLM-4.6V (Req2Web adapter)"),\n',
+        '    (BIGMODEL_GLM_4_6V, "Zhipu GLM-4.6V (Req2Web adapter)"),\n'
+        '    (ALIBABA_GUI_PLUS, "Alibaba GUI Plus 2026-02-26 (Req2Web adapter)"),\n',
+        '"Alibaba GUI Plus 2026-02-26 (Req2Web adapter)"',
     ):
         if str(config_path.relative_to(runtime_root)) not in changed:
             changed.append(str(config_path.relative_to(runtime_root)))
@@ -175,6 +218,24 @@ def install(repository_root: Path, runtime_root: Path) -> dict[str, object]:
         'from gui_spector.verfication.bigmodel_provider import (',
     ):
         changed.append(str(agent_path.relative_to(runtime_root)))
+    if _replace_once(
+        agent_path,
+        'from gui_spector.verfication.bigmodel_provider import (\n'
+        '    BIGMODEL_AGENT_ID,\n'
+        '    create_bigmodel_response,\n'
+        ')\n',
+        'from gui_spector.verfication.bigmodel_provider import (\n'
+        '    BIGMODEL_AGENT_ID,\n'
+        '    create_bigmodel_response,\n'
+        ')\n'
+        'from gui_spector.verfication.gui_plus_provider import (\n'
+        '    GUI_PLUS_AGENT_ID,\n'
+        '    create_gui_plus_response,\n'
+        ')\n',
+        'from gui_spector.verfication.gui_plus_provider import (',
+    ):
+        if str(agent_path.relative_to(runtime_root)) not in changed:
+            changed.append(str(agent_path.relative_to(runtime_root)))
     old_response_call = '''            response = create_response(
                 model=self.model,
                 input=input_items + new_items,
@@ -201,7 +262,32 @@ def install(repository_root: Path, runtime_root: Path) -> dict[str, object]:
         agent_path,
         old_response_call,
         new_response_call,
-        "if self.model == BIGMODEL_AGENT_ID:\n                response = create_bigmodel_response(",
+        "response = create_bigmodel_response(",
+    ):
+        if str(agent_path.relative_to(runtime_root)) not in changed:
+            changed.append(str(agent_path.relative_to(runtime_root)))
+    if _replace_once(
+        agent_path,
+        '''            if self.model == BIGMODEL_AGENT_ID:
+                response = create_bigmodel_response(
+                    input_items=input_items + new_items,
+                    computer_tools=self.tools,
+                )
+            else:
+''',
+        '''            if self.model == GUI_PLUS_AGENT_ID:
+                response = create_gui_plus_response(
+                    input_items=input_items + new_items,
+                    computer_tools=self.tools,
+                )
+            elif self.model == BIGMODEL_AGENT_ID:
+                response = create_bigmodel_response(
+                    input_items=input_items + new_items,
+                    computer_tools=self.tools,
+                )
+            else:
+''',
+        "if self.model == GUI_PLUS_AGENT_ID:\n                response = create_gui_plus_response(",
     ):
         if str(agent_path.relative_to(runtime_root)) not in changed:
             changed.append(str(agent_path.relative_to(runtime_root)))
@@ -234,7 +320,21 @@ def install(repository_root: Path, runtime_root: Path) -> dict[str, object]:
         agent_path,
         old_initial,
         new_initial,
-        'raise ValueError("GLM-4.6V verification requires a computer adapter")',
+        "initial_screenshot = self.computer.screenshot()",
+    ):
+        if str(agent_path.relative_to(runtime_root)) not in changed:
+            changed.append(str(agent_path.relative_to(runtime_root)))
+    if _replace_once(
+        agent_path,
+        '''        if self.model == BIGMODEL_AGENT_ID:
+            if self.computer is None:
+                raise ValueError("GLM-4.6V verification requires a computer adapter")
+''',
+        '''        if self.model in {BIGMODEL_AGENT_ID, GUI_PLUS_AGENT_ID}:
+            if self.computer is None:
+                raise ValueError("Screenshot verification requires a computer adapter")
+''',
+        "if self.model in {BIGMODEL_AGENT_ID, GUI_PLUS_AGENT_ID}:",
     ):
         if str(agent_path.relative_to(runtime_root)) not in changed:
             changed.append(str(agent_path.relative_to(runtime_root)))
@@ -250,13 +350,30 @@ def install(repository_root: Path, runtime_root: Path) -> dict[str, object]:
         changed.append(str(tasks_path.relative_to(runtime_root)))
     if _replace_once(
         tasks_path,
+        'from gui_spector.verfication.bigmodel_provider import BIGMODEL_AGENT_ID\n',
+        'from gui_spector.verfication.bigmodel_provider import BIGMODEL_AGENT_ID\n'
+        'from gui_spector.verfication.gui_plus_provider import GUI_PLUS_AGENT_ID\n',
+        'from gui_spector.verfication.gui_plus_provider import GUI_PLUS_AGENT_ID',
+    ):
+        if str(tasks_path.relative_to(runtime_root)) not in changed:
+            changed.append(str(tasks_path.relative_to(runtime_root)))
+    if _replace_once(
+        tasks_path,
         "        max_retries = int(getattr(setup, 'max_retries', 2))\n",
         "        max_retries = (\n"
         "            0\n"
         "            if setup.agent_model == BIGMODEL_AGENT_ID\n"
         "            else int(getattr(setup, 'max_retries', 2))\n"
         "        )\n",
-        "if setup.agent_model == BIGMODEL_AGENT_ID",
+        "max_retries = (\n            0",
+    ):
+        if str(tasks_path.relative_to(runtime_root)) not in changed:
+            changed.append(str(tasks_path.relative_to(runtime_root)))
+    if _replace_once(
+        tasks_path,
+        "            if setup.agent_model == BIGMODEL_AGENT_ID\n",
+        "            if setup.agent_model in {BIGMODEL_AGENT_ID, GUI_PLUS_AGENT_ID}\n",
+        "if setup.agent_model in {BIGMODEL_AGENT_ID, GUI_PLUS_AGENT_ID}",
     ):
         if str(tasks_path.relative_to(runtime_root)) not in changed:
             changed.append(str(tasks_path.relative_to(runtime_root)))
@@ -330,12 +447,36 @@ def install(repository_root: Path, runtime_root: Path) -> dict[str, object]:
         changed.append(str(settings_model_path.relative_to(runtime_root)))
     if _replace_once(
         settings_model_path,
+        '    zhipu_api_key = models.CharField(max_length=512, blank=True, null=True)\n',
+        '    zhipu_api_key = models.CharField(max_length=512, blank=True, null=True)\n'
+        '    dashscope_api_key = models.CharField(max_length=512, blank=True, null=True)\n'
+        '    dashscope_workspace_id = models.CharField(max_length=128, blank=True, null=True)\n',
+        "dashscope_workspace_id = models.CharField",
+    ):
+        if str(settings_model_path.relative_to(runtime_root)) not in changed:
+            changed.append(str(settings_model_path.relative_to(runtime_root)))
+    if _replace_once(
+        settings_model_path,
         '        if latest_settings.anthropic_api_key:\n',
         '        if latest_settings.zhipu_api_key:\n'
         '            os.environ["ZHIPU_API_KEY"] = latest_settings.zhipu_api_key\n'
         '            print("ZHIPU_API_KEY configured")\n'
         '        if latest_settings.anthropic_api_key:\n',
         'os.environ["ZHIPU_API_KEY"]',
+    ):
+        if str(settings_model_path.relative_to(runtime_root)) not in changed:
+            changed.append(str(settings_model_path.relative_to(runtime_root)))
+    if _replace_once(
+        settings_model_path,
+        '        if latest_settings.anthropic_api_key:\n',
+        '        if latest_settings.dashscope_api_key:\n'
+        '            os.environ["DASHSCOPE_API_KEY"] = latest_settings.dashscope_api_key\n'
+        '            print("DASHSCOPE_API_KEY configured")\n'
+        '        if latest_settings.dashscope_workspace_id:\n'
+        '            os.environ["DASHSCOPE_WORKSPACE_ID"] = latest_settings.dashscope_workspace_id\n'
+        '            print("DASHSCOPE_WORKSPACE_ID configured")\n'
+        '        if latest_settings.anthropic_api_key:\n',
+        'os.environ["DASHSCOPE_WORKSPACE_ID"]',
     ):
         if str(settings_model_path.relative_to(runtime_root)) not in changed:
             changed.append(str(settings_model_path.relative_to(runtime_root)))
@@ -350,6 +491,10 @@ from gui_spector.verfication.bigmodel_provider import (
     BigModelProviderError,
     test_bigmodel_connection,
 )
+from gui_spector.verfication.gui_plus_provider import (
+    GuiPlusProviderError,
+    test_gui_plus_connection,
+)
 
 from .models import SettingsModel, set_api_keys_from_settings
 
@@ -358,6 +503,8 @@ class SettingsForm(forms.ModelForm):
     class Meta:
         model = SettingsModel
         fields = [
+            "dashscope_api_key",
+            "dashscope_workspace_id",
             "zhipu_api_key",
             "openai_key",
             "google_api_key",
@@ -365,6 +512,13 @@ class SettingsForm(forms.ModelForm):
             "num_workers",
         ]
         widgets = {
+            "dashscope_api_key": forms.PasswordInput(
+                attrs={"class": "form-control", "placeholder": "Paste your Beijing Model Studio API key"},
+                render_value=False,
+            ),
+            "dashscope_workspace_id": forms.TextInput(
+                attrs={"class": "form-control", "placeholder": "Paste the Beijing workspace ID"},
+            ),
             "zhipu_api_key": forms.PasswordInput(
                 attrs={"class": "form-control", "placeholder": "Paste your Zhipu API key"},
                 render_value=False,
@@ -388,12 +542,19 @@ class SettingsForm(forms.ModelForm):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        for name in ("zhipu_api_key", "openai_key", "google_api_key", "anthropic_api_key"):
+        for name in (
+            "dashscope_api_key",
+            "zhipu_api_key",
+            "openai_key",
+            "google_api_key",
+            "anthropic_api_key",
+        ):
             self.fields[name].required = False
             if self.instance and getattr(self.instance, name, None):
                 self.fields[name].widget.attrs["placeholder"] = (
                     "Configured locally. Leave blank to keep the saved value."
                 )
+        self.fields["dashscope_workspace_id"].required = False
 
     def clean_num_workers(self):
         value = self.cleaned_data["num_workers"]
@@ -404,7 +565,13 @@ class SettingsForm(forms.ModelForm):
 
 class SettingsView(View):
     template_name = "settings/settings.html"
-    secret_fields = ("zhipu_api_key", "openai_key", "google_api_key", "anthropic_api_key")
+    secret_fields = (
+        "dashscope_api_key",
+        "zhipu_api_key",
+        "openai_key",
+        "google_api_key",
+        "anthropic_api_key",
+    )
 
     def _latest(self):
         return SettingsModel.objects.order_by("-created_at").first()
@@ -413,6 +580,11 @@ class SettingsView(View):
         return {
             "form": form,
             "zhipu_configured": bool(settings_row and settings_row.zhipu_api_key),
+            "gui_plus_configured": bool(
+                settings_row
+                and settings_row.dashscope_api_key
+                and settings_row.dashscope_workspace_id
+            ),
         }
 
     def get(self, request):
@@ -436,8 +608,25 @@ class SettingsView(View):
                 setattr(settings_row, field_name, submitted)
             elif latest is not None:
                 setattr(settings_row, field_name, getattr(latest, field_name, None))
+        workspace_id = str(form.cleaned_data.get("dashscope_workspace_id") or "").strip()
+        if workspace_id:
+            settings_row.dashscope_workspace_id = workspace_id
+        elif latest is not None:
+            settings_row.dashscope_workspace_id = latest.dashscope_workspace_id
         settings_row.save()
         set_api_keys_from_settings()
+
+        if request.POST.get("action") == "test_gui_plus":
+            try:
+                test_gui_plus_connection(
+                    settings_row.dashscope_api_key or "",
+                    settings_row.dashscope_workspace_id or "",
+                )
+            except GuiPlusProviderError as exc:
+                messages.error(request, str(exc))
+            else:
+                messages.success(request, "GUI Plus 2026-02-26 connection test passed.")
+            return redirect("settings:settings")
 
         if request.POST.get("action") == "test_zhipu":
             try:
@@ -451,9 +640,12 @@ class SettingsView(View):
         messages.success(request, "Local settings saved.")
         return redirect("settings:settings")
 '''
-    existing_views = settings_views_path.read_text(encoding="utf-8")
-    if "test_bigmodel_connection" not in existing_views:
-        settings_views_path.write_text(settings_views, encoding="utf-8", newline="\n")
+    if _write_managed(
+        runtime_root,
+        settings_views_path,
+        settings_views,
+        "test_bigmodel_connection",
+    ):
         changed.append(str(settings_views_path.relative_to(runtime_root)))
 
     settings_template_path = runtime_root / "webapp/settings/templates/settings/settings.html"
@@ -477,11 +669,32 @@ class SettingsView(View):
 
           <form method="post" autocomplete="off">
             {% csrf_token %}
+            <div class="border border-primary rounded-3 p-3 p-md-4 mb-4">
+              <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
+                <div>
+                  <h3 class="h5 fw-bold mb-1">Alibaba GUI Plus <span class="badge text-bg-primary">Recommended</span></h3>
+                  <div class="text-muted small">GUISpector interactive verifier · fixed model: GUI Plus 2026-02-26 · Beijing region · one attempt per run</div>
+                </div>
+                <span class="badge {% if gui_plus_configured %}text-bg-success{% else %}text-bg-secondary{% endif %}">
+                  {% if gui_plus_configured %}Configured{% else %}Not configured{% endif %}
+                </span>
+              </div>
+              <label for="id_dashscope_api_key" class="form-label fw-semibold">Beijing Model Studio API key</label>
+              {{ form.dashscope_api_key }}
+              {% if form.dashscope_api_key.errors %}<div class="text-danger small mt-1">{{ form.dashscope_api_key.errors }}</div>{% endif %}
+              <div class="form-text">The key is masked and is never rendered back into this page.</div>
+              <label for="id_dashscope_workspace_id" class="form-label fw-semibold mt-3">Beijing workspace ID</label>
+              {{ form.dashscope_workspace_id }}
+              {% if form.dashscope_workspace_id.errors %}<div class="text-danger small mt-1">{{ form.dashscope_workspace_id.errors }}</div>{% endif %}
+              <div class="form-text">Use the workspace bound to the same Beijing-region API key.</div>
+              <button type="submit" name="action" value="test_gui_plus" class="btn btn-primary mt-3">Save and test GUI Plus</button>
+            </div>
+
             <div class="border rounded-3 p-3 p-md-4 mb-4">
               <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
                 <div>
-                  <h3 class="h5 fw-bold mb-1">Zhipu BigModel</h3>
-                  <div class="text-muted small">GUISpector interactive verifier · fixed model: GLM-4.6V · one attempt per run</div>
+                  <h3 class="h5 fw-bold mb-1">Zhipu BigModel <span class="badge text-bg-light">Experimental fallback</span></h3>
+                  <div class="text-muted small">Fixed model: GLM-4.6V · kept for diagnostic comparison · one attempt per run</div>
                 </div>
                 <span class="badge {% if zhipu_configured %}text-bg-success{% else %}text-bg-secondary{% endif %}">
                   {% if zhipu_configured %}Configured{% else %}Not configured{% endif %}
@@ -517,7 +730,7 @@ class SettingsView(View):
               <label for="id_num_workers" class="form-label fw-semibold">Parallel workers</label>
               {{ form.num_workers }}
               {% if form.num_workers.errors %}<div class="text-danger small mt-1">{{ form.num_workers.errors }}</div>{% endif %}
-              <div class="form-text">GLM-4.6V runs are fail-closed and are not automatically retried.</div>
+              <div class="form-text">Req2Web provider-adapter runs are fail-closed and are not automatically retried.</div>
             </div>
             <button type="submit" name="action" value="save" class="btn btn-success px-4">Save settings</button>
           </form>
@@ -528,9 +741,12 @@ class SettingsView(View):
 </div>
 {% endblock %}
 '''
-    existing_template = settings_template_path.read_text(encoding="utf-8")
-    if "Save and test GLM-4.6V" not in existing_template:
-        settings_template_path.write_text(settings_template, encoding="utf-8", newline="\n")
+    if _write_managed(
+        runtime_root,
+        settings_template_path,
+        settings_template,
+        "Save and test GLM-4.6V",
+    ):
         changed.append(str(settings_template_path.relative_to(runtime_root)))
 
     migration_path = runtime_root / "webapp/settings/migrations/0002_settingsmodel_zhipu_api_key.py"
@@ -551,8 +767,33 @@ class Migration(migrations.Migration):
     if _write_exact(migration_path, migration):
         changed.append(str(migration_path.relative_to(runtime_root)))
 
+    gui_plus_migration_path = (
+        runtime_root / "webapp/settings/migrations/0003_settingsmodel_dashscope_fields.py"
+    )
+    gui_plus_migration = '''from django.db import migrations, models
+
+
+class Migration(migrations.Migration):
+    dependencies = [("settings", "0002_settingsmodel_zhipu_api_key")]
+
+    operations = [
+        migrations.AddField(
+            model_name="settingsmodel",
+            name="dashscope_api_key",
+            field=models.CharField(blank=True, max_length=512, null=True),
+        ),
+        migrations.AddField(
+            model_name="settingsmodel",
+            name="dashscope_workspace_id",
+            field=models.CharField(blank=True, max_length=128, null=True),
+        ),
+    ]
+'''
+    if _write_exact(gui_plus_migration_path, gui_plus_migration):
+        changed.append(str(gui_plus_migration_path.relative_to(runtime_root)))
+
     return {
-        "schema_version": "req2web.guispector_bigmodel_overlay_install.v1",
+        "schema_version": "req2web.guispector_provider_overlay_install.v2",
         "upstream_commit": EXPECTED_UPSTREAM_COMMIT,
         "runtime_root": str(runtime_root),
         "changed_files": changed,
@@ -563,7 +804,7 @@ class Migration(migrations.Migration):
 
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description="Install the local GLM-4.6V adapter into the pinned GUISpector checkout."
+        description="Install local verification-provider adapters into pinned GUISpector."
     )
     parser.add_argument(
         "--runtime-root",
