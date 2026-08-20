@@ -265,7 +265,10 @@ Action: <short imperative>
 Use computer_use for exactly one next action when more evidence is needed.
 Use finish_verification only after every listed criterion can be judged. Never
 invent evidence, never emit more than one tool call, and never repeat an action
-that has already produced no visible change twice.
+that has already produced no visible change twice. The executed-action history
+uses GUISpector's internal field names for reporting only; do not copy those
+field names into a computer_use call. In particular, a new scroll action uses
+only action and pixels, with an optional coordinate.
 """
 
 
@@ -361,8 +364,36 @@ def _map_computer_use(args: Mapping[str, Any], width: int, height: int) -> dict[
         return {"type": "keypress", "keys": normalized_keys}
     if action_name == "scroll":
         allowed = {key: value for key, value in args.items() if value is not None}
+        internal_echo_fields = {"action", "type", "scroll_x", "scroll_y"}
+        if set(allowed) == internal_echo_fields:
+            if allowed["type"] != "scroll":
+                raise GuiPlusProviderError("GUI Plus returned an invalid scroll type")
+            scroll_values = (allowed["scroll_x"], allowed["scroll_y"])
+            if any(
+                isinstance(value, bool)
+                or not isinstance(value, (int, float))
+                or not math.isfinite(float(value))
+                or abs(float(value)) > 5000
+                for value in scroll_values
+            ):
+                raise GuiPlusProviderError("GUI Plus returned an invalid scroll amount")
+            scroll_x, scroll_y = (int(round(float(value))) for value in scroll_values)
+            if scroll_x == 0 and scroll_y == 0:
+                raise GuiPlusProviderError("GUI Plus returned an invalid scroll amount")
+            return {
+                "type": "scroll",
+                "x": width // 2,
+                "y": height // 2,
+                "scroll_x": scroll_x,
+                "scroll_y": scroll_y,
+            }
         if set(allowed) not in ({"action", "pixels"}, {"action", "pixels", "coordinate"}):
-            raise GuiPlusProviderError("GUI Plus scroll fields do not match the contract")
+            received = ",".join(sorted(allowed)) or "none"
+            raise GuiPlusProviderError(
+                "GUI Plus scroll fields do not match the contract "
+                f"(received: {received}; expected: action,pixels[,coordinate] "
+                "or the exact GUISpector scroll echo)"
+            )
         pixels = allowed.get("pixels")
         if (
             isinstance(pixels, bool)

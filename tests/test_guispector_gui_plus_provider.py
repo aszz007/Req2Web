@@ -92,6 +92,7 @@ class GuiPlusProviderTests(unittest.TestCase):
         self.assertIn("exactly 1280x800", prompt)
         self.assertIn('"name":"computer_use"', prompt)
         self.assertIn('"name":"finish_verification"', prompt)
+        self.assertIn("a new scroll action uses", prompt)
 
     def test_click_and_scroll_are_normalized_for_existing_runner(self) -> None:
         click = normalize_gui_plus_response(
@@ -135,6 +136,51 @@ class GuiPlusProviderTests(unittest.TestCase):
                 _response("computer_use", {"action": "key", "keys": ["x;rm"]}),
                 computer_tools=COMPUTER_TOOLS,
             )
+
+    def test_exact_guispector_scroll_echo_is_normalized(self) -> None:
+        normalized = normalize_gui_plus_response(
+            _response(
+                "computer_use",
+                {
+                    "action": "scroll",
+                    "type": "scroll",
+                    "scroll_x": 0,
+                    "scroll_y": -600,
+                },
+            ),
+            computer_tools=COMPUTER_TOOLS,
+        )
+        self.assertEqual(
+            normalized["output"][0]["action"],
+            {"type": "scroll", "x": 640, "y": 400, "scroll_x": 0, "scroll_y": -600},
+        )
+        with self.assertRaisesRegex(GuiPlusProviderError, "invalid scroll type"):
+            normalize_gui_plus_response(
+                _response(
+                    "computer_use",
+                    {
+                        "action": "scroll",
+                        "type": "click",
+                        "scroll_x": 0,
+                        "scroll_y": 600,
+                    },
+                ),
+                computer_tools=COMPUTER_TOOLS,
+            )
+
+    def test_scroll_mismatch_reports_field_names_without_values(self) -> None:
+        with self.assertRaisesRegex(
+            GuiPlusProviderError,
+            r"received: action,direction,pixels; expected: action,pixels\[,coordinate\]",
+        ) as raised:
+            normalize_gui_plus_response(
+                _response(
+                    "computer_use",
+                    {"action": "scroll", "pixels": -600, "direction": "down"},
+                ),
+                computer_tools=COMPUTER_TOOLS,
+            )
+        self.assertNotIn("down", str(raised.exception))
 
     def test_finish_becomes_strict_assistant_json(self) -> None:
         normalized = normalize_gui_plus_response(
