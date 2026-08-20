@@ -100,15 +100,24 @@ def _tool(
     }
 
 
-def bigmodel_tools() -> list[dict[str, Any]]:
-    coordinate = {"type": "integer", "minimum": 0}
+def bigmodel_tools(
+    *,
+    display_width: int | None = None,
+    display_height: int | None = None,
+) -> list[dict[str, Any]]:
+    coordinate_x: dict[str, Any] = {"type": "integer", "minimum": 0}
+    coordinate_y: dict[str, Any] = {"type": "integer", "minimum": 0}
+    if isinstance(display_width, int) and display_width > 0:
+        coordinate_x["maximum"] = display_width - 1
+    if isinstance(display_height, int) and display_height > 0:
+        coordinate_y["maximum"] = display_height - 1
     return [
         _tool(
             "click",
             "Click one visible point in the browser.",
             {
-                "x": coordinate,
-                "y": coordinate,
+                "x": coordinate_x,
+                "y": coordinate_y,
                 "button": {"type": "string", "enum": ["left", "middle", "right"]},
             },
             ["x", "y"],
@@ -116,15 +125,15 @@ def bigmodel_tools() -> list[dict[str, Any]]:
         _tool(
             "double_click",
             "Double-click one visible point in the browser.",
-            {"x": coordinate, "y": coordinate},
+            {"x": coordinate_x, "y": coordinate_y},
             ["x", "y"],
         ),
         _tool(
             "scroll",
             "Scroll at a visible point. Positive scroll_y moves down.",
             {
-                "x": coordinate,
-                "y": coordinate,
+                "x": coordinate_x,
+                "y": coordinate_y,
                 "scroll_x": {"type": "integer", "minimum": -5000, "maximum": 5000},
                 "scroll_y": {"type": "integer", "minimum": -5000, "maximum": 5000},
             },
@@ -152,7 +161,7 @@ def bigmodel_tools() -> list[dict[str, Any]]:
         _tool(
             "move",
             "Move the pointer to one visible point.",
-            {"x": coordinate, "y": coordinate},
+            {"x": coordinate_x, "y": coordinate_y},
             ["x", "y"],
         ),
         _tool(
@@ -163,7 +172,7 @@ def bigmodel_tools() -> list[dict[str, Any]]:
                     "type": "array",
                     "items": {
                         "type": "object",
-                        "properties": {"x": coordinate, "y": coordinate},
+                        "properties": {"x": coordinate_x, "y": coordinate_y},
                         "required": ["x", "y"],
                         "additionalProperties": False,
                     },
@@ -294,10 +303,14 @@ def build_bigmodel_request(
     system_text = (
         "You are a GUI verification agent controlling a browser from screenshots. "
         f"The screenshot coordinate space is {width} by {height}. "
+        f"Every x coordinate must be between 0 and {width - 1}; every y coordinate "
+        f"must be between 0 and {height - 1}. "
         "Inspect the latest screenshot and call exactly one supplied tool. "
         "Use one browser action when more evidence is needed. Use finish only after "
         "you can judge every acceptance criterion. Never invent visual evidence, "
-        "never call multiple tools in one response, and never output prose instead of a tool call."
+        "never call multiple tools in one response, and never output prose instead of a tool call. "
+        "If the same action produces no visible change twice, do not repeat it again; "
+        "treat the unchanged state as evidence and finish with the supported decision."
     )
     return {
         "model": BIGMODEL_API_MODEL,
@@ -311,7 +324,7 @@ def build_bigmodel_request(
                 ],
             },
         ],
-        "tools": bigmodel_tools(),
+        "tools": bigmodel_tools(display_width=width, display_height=height),
         "tool_choice": "auto",
         "thinking": {"type": "enabled"},
         "temperature": 0.1,
@@ -327,7 +340,28 @@ def _require_exact_keys(
     allowed_optional = optional or set()
     keys = set(args)
     if not required.issubset(keys) or not keys.issubset(required | allowed_optional):
-        raise BigModelProviderError("BigModel tool arguments do not match the action contract")
+        received = ",".join(sorted(keys)) or "none"
+        expected = ",".join(sorted(required | allowed_optional)) or "none"
+        raise BigModelProviderError(
+            "BigModel tool arguments do not match the action contract "
+            f"(received fields: {received}; allowed fields: {expected})"
+        )
+
+
+def _discard_null_extras(
+    args: Mapping[str, Any],
+    *,
+    required: set[str],
+    optional: set[str] | None = None,
+) -> dict[str, Any]:
+    """Discard only semantically empty fields outside the declared action shape."""
+
+    allowed = required | (optional or set())
+    return {
+        key: value
+        for key, value in args.items()
+        if key in allowed or value is not None
+    }
 
 
 def _coordinate(value: Any, limit: int) -> int:
@@ -337,9 +371,9 @@ def _coordinate(value: Any, limit: int) -> int:
 
 
 def _validate_action(name: str, args: Mapping[str, Any], width: int, height: int) -> dict[str, Any]:
-    action = dict(args)
     if name in {"click", "double_click", "move"}:
         optional = {"button"} if name == "click" else set()
+        action = _discard_null_extras(args, required={"x", "y"}, optional=optional)
         _require_exact_keys(action, {"x", "y"}, optional)
         action["x"] = _coordinate(action["x"], width)
         action["y"] = _coordinate(action["y"], height)
@@ -349,6 +383,10 @@ def _validate_action(name: str, args: Mapping[str, Any], width: int, height: int
                 raise BigModelProviderError("BigModel returned an invalid click button")
             action["button"] = button
     elif name == "scroll":
+        action = _discard_null_extras(
+            args,
+            required={"x", "y", "scroll_x", "scroll_y"},
+        )
         _require_exact_keys(action, {"x", "y", "scroll_x", "scroll_y"})
         action["x"] = _coordinate(action["x"], width)
         action["y"] = _coordinate(action["y"], height)
@@ -357,10 +395,12 @@ def _validate_action(name: str, args: Mapping[str, Any], width: int, height: int
             if isinstance(value, bool) or not isinstance(value, int) or not -5000 <= value <= 5000:
                 raise BigModelProviderError("BigModel returned an invalid scroll amount")
     elif name == "type":
+        action = _discard_null_extras(args, required={"text"})
         _require_exact_keys(action, {"text"})
         if not isinstance(action["text"], str) or len(action["text"]) > 4000:
             raise BigModelProviderError("BigModel returned invalid typing text")
     elif name == "keypress":
+        action = _discard_null_extras(args, required={"keys"})
         _require_exact_keys(action, {"keys"})
         keys = action["keys"]
         if not isinstance(keys, list) or not 1 <= len(keys) <= 4:
@@ -370,6 +410,7 @@ def _validate_action(name: str, args: Mapping[str, Any], width: int, height: int
             raise BigModelProviderError("BigModel returned a disallowed key")
         action["keys"] = normalized
     elif name == "drag":
+        action = _discard_null_extras(args, required={"path"})
         _require_exact_keys(action, {"path"})
         path = action["path"]
         if not isinstance(path, list) or not 2 <= len(path) <= 100:
@@ -384,6 +425,7 @@ def _validate_action(name: str, args: Mapping[str, Any], width: int, height: int
             )
         action["path"] = normalized_path
     elif name == "wait":
+        action = _discard_null_extras(args, required={"ms"})
         _require_exact_keys(action, {"ms"})
         value = action["ms"]
         if isinstance(value, bool) or not isinstance(value, int) or not 100 <= value <= 5000:

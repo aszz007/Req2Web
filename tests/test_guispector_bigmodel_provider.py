@@ -108,6 +108,11 @@ class BigModelProviderTests(unittest.TestCase):
             "data:image/png;base64,BBBB",
         )
         self.assertIn("call exactly one supplied tool", request["messages"][0]["content"])
+        self.assertIn("between 0 and 1279", request["messages"][0]["content"])
+        self.assertIn("do not repeat it again", request["messages"][0]["content"])
+        click_properties = request["tools"][0]["function"]["parameters"]["properties"]
+        self.assertEqual(click_properties["x"]["maximum"], 1279)
+        self.assertEqual(click_properties["y"]["maximum"], 799)
         self.assertIn("click", request["messages"][1]["content"][1]["text"])
 
     def test_action_tool_call_is_normalized_for_existing_runner(self) -> None:
@@ -162,6 +167,24 @@ class BigModelProviderTests(unittest.TestCase):
         with self.assertRaisesRegex(BigModelProviderError, "out-of-range"):
             normalize_bigmodel_response(
                 _tool_response("click", {"x": 1280, "y": 2}),
+                computer_tools=COMPUTER_TOOLS,
+            )
+
+    def test_null_only_extra_field_is_ignored_without_relaxing_non_null_extras(self) -> None:
+        normalized = normalize_bigmodel_response(
+            _tool_response("click", {"x": 440, "y": 350, "unexpected": None}),
+            computer_tools=COMPUTER_TOOLS,
+        )
+        self.assertEqual(
+            normalized["output"][0]["action"],
+            {"type": "click", "x": 440, "y": 350, "button": "left"},
+        )
+        with self.assertRaisesRegex(
+            BigModelProviderError,
+            r"received fields: unexpected,x,y; allowed fields: button,x,y",
+        ):
+            normalize_bigmodel_response(
+                _tool_response("click", {"x": 440, "y": 350, "unexpected": "left"}),
                 computer_tools=COMPUTER_TOOLS,
             )
 

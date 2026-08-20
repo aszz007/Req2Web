@@ -128,6 +128,21 @@ def install(repository_root: Path, runtime_root: Path) -> dict[str, object]:
         "../../../release/phase6_reviewer_v17:/app/req2web_reviewer_v17:ro",
     ):
         changed.append(str(compose_path.relative_to(runtime_root)))
+    if _replace_once(
+        compose_path,
+        '''      LOCAL_AGENT_EXEC: "1"
+      NUM_DISPLAYS: "1"
+      SCREEN_RESOLUTION: 1280x800x24
+''',
+        '''      LOCAL_AGENT_EXEC: "1"
+      NUM_DISPLAYS: "1"
+      DISPLAY_POOL_SIZE: "1"
+      SCREEN_RESOLUTION: 1280x800x24
+''',
+        'DISPLAY_POOL_SIZE: "1"',
+    ):
+        if str(compose_path.relative_to(runtime_root)) not in changed:
+            changed.append(str(compose_path.relative_to(runtime_root)))
 
     config_path = runtime_root / "gui_spector/src/gui_spector/verfication/config.py"
     if _replace_once(
@@ -242,6 +257,51 @@ def install(repository_root: Path, runtime_root: Path) -> dict[str, object]:
         "            else int(getattr(setup, 'max_retries', 2))\n"
         "        )\n",
         "if setup.agent_model == BIGMODEL_AGENT_ID",
+    ):
+        if str(tasks_path.relative_to(runtime_root)) not in changed:
+            changed.append(str(tasks_path.relative_to(runtime_root)))
+    if _replace_once(
+        tasks_path,
+        '''    try:
+        attempts = 0
+        max_retries = (
+''',
+        '''    try:
+        computer = None
+        attempts = 0
+        max_retries = (
+''',
+        "computer = None\n        attempts = 0",
+    ):
+        if str(tasks_path.relative_to(runtime_root)) not in changed:
+            changed.append(str(tasks_path.relative_to(runtime_root)))
+    if _replace_once(
+        tasks_path,
+        '''                print(f"Run error: {run_exc} attempts: {attempts}")
+                computer.cleanup_browser()
+                if attempts > max_retries:
+''',
+        '''                print(f"Run error: {run_exc} attempts: {attempts}")
+                if computer is not None:
+                    computer.cleanup_browser()
+                if attempts > max_retries:
+''',
+        "if computer is not None:\n                    computer.cleanup_browser()",
+    ):
+        if str(tasks_path.relative_to(runtime_root)) not in changed:
+            changed.append(str(tasks_path.relative_to(runtime_root)))
+    if _replace_once(
+        tasks_path,
+        '''        try:
+            computer.cleanup_browser()
+            pool.release(disp)
+''',
+        '''        try:
+            if computer is not None:
+                computer.cleanup_browser()
+            pool.release(disp)
+''',
+        "if computer is not None:\n                computer.cleanup_browser()",
     ):
         if str(tasks_path.relative_to(runtime_root)) not in changed:
             changed.append(str(tasks_path.relative_to(runtime_root)))
