@@ -13,6 +13,7 @@ import math
 import os
 import re
 from typing import Any, Callable, Mapping, Sequence
+from urllib.parse import urlparse
 
 try:
     from gui_spector.verfication.bigmodel_provider import (
@@ -46,6 +47,20 @@ GUI_PLUS_REQUEST_TIMEOUT_SECONDS = 180
 GUI_PLUS_SEED = 20260820
 
 _WORKSPACE_ID_PATTERN = re.compile(r"[A-Za-z0-9][A-Za-z0-9-]{0,127}\Z")
+_BEIJING_HOST_PATTERN = re.compile(
+    r"(?P<workspace_id>[A-Za-z0-9][A-Za-z0-9-]{0,127})"
+    r"\.cn-beijing\.maas\.aliyuncs\.com\Z",
+    re.IGNORECASE,
+)
+_CONNECTION_TEST_IMAGE_DATA_URL = (
+    "data:image/png;base64,"
+    "iVBORw0KGgoAAAANSUhEUgAAAQAAAAEACAAAAAB5Gfe6AAABN0lEQVR42u3QAQEAAAjDoPcv"
+    "PYMIEVjPTYAAAQIECBAgQIAAAQIECBAgQIAAAQIECBAgQIAAAQIECBAgQIAAAQIECBAgQIAA"
+    "AQIECBAgQIAAAQIECBAgQIAAAQIECBAgQIAAAQIECBAgQIAAAQIECBAgQIAAAQIECBAgQIAA"
+    "AQIECBAgQIAAAQIECBAgQIAAAQIECBAgQIAAAQIECBAgQIAAAQIECBAgQIAAAQIECBAgQIAA"
+    "AQIECBAgQIAAAQIECBAgQIAAAQIECBAgQIAAAQIECBAgQIAAAQIECBAgQIAAAQIECBAgQIAA"
+    "AQIECBAgQIAAAQIECBAgQIAAAQIECBAgQIAAAQIECKgDag8O8kgPnOEAAAAASUVORK5CYII="
+)
 _TOOL_CALL_PATTERN = re.compile(
     r"\s*(?:Action:\s*[^\r\n]+\s*)?"
     r"<tool_call>\s*(\{.*\})\s*</tool_call>\s*",
@@ -76,11 +91,61 @@ class GuiPlusProviderError(BigModelProviderError):
     """Raised when a GUI Plus request or response fails closed."""
 
 
-def _endpoint(workspace_id: str) -> str:
-    normalized = str(workspace_id or "").strip()
-    if not _WORKSPACE_ID_PATTERN.fullmatch(normalized):
-        raise GuiPlusProviderError("Alibaba Model Studio workspace ID is not configured or invalid")
-    return GUI_PLUS_API_URL_TEMPLATE.format(workspace_id=normalized)
+def normalize_gui_plus_workspace_reference(workspace_reference: str) -> str:
+    """Return the workspace ID from either an ID or a Beijing API host."""
+
+    normalized = str(workspace_reference or "").strip()
+    if _WORKSPACE_ID_PATTERN.fullmatch(normalized):
+        return normalized
+
+    candidate = normalized if "://" in normalized else f"https://{normalized}"
+    parsed = urlparse(candidate)
+    try:
+        port = parsed.port
+    except ValueError as exc:
+        raise GuiPlusProviderError(
+            "Alibaba Model Studio Beijing endpoint is not configured or invalid"
+        ) from exc
+    if parsed.scheme != "https" or parsed.username or parsed.password or port:
+        raise GuiPlusProviderError(
+            "Alibaba Model Studio Beijing endpoint is not configured or invalid"
+        )
+    host_match = _BEIJING_HOST_PATTERN.fullmatch(parsed.hostname or "")
+    if host_match is None:
+        raise GuiPlusProviderError(
+            "Alibaba Model Studio Beijing endpoint is not configured or invalid"
+        )
+    return host_match.group("workspace_id")
+
+
+def _endpoint(workspace_reference: str) -> str:
+    workspace_id = normalize_gui_plus_workspace_reference(workspace_reference)
+    return GUI_PLUS_API_URL_TEMPLATE.format(workspace_id=workspace_id)
+
+
+def _provider_error_detail(response: Any, api_key: str) -> str:
+    """Return a bounded provider error without echoing credentials or payloads."""
+
+    try:
+        body = response.json()
+    except (ValueError, json.JSONDecodeError, AttributeError):
+        return ""
+    if not isinstance(body, Mapping):
+        return ""
+    error = body.get("error")
+    error_mapping = error if isinstance(error, Mapping) else {}
+    code = str(body.get("code") or error_mapping.get("code") or "").strip()
+    message = str(
+        body.get("message")
+        or error_mapping.get("message")
+        or (error if isinstance(error, str) else "")
+    ).strip()
+    parts = [part for part in (code, message) if part]
+    if not parts:
+        return ""
+    detail = redact_gui_plus_secret(": ".join(parts), api_key)
+    detail = re.sub(r"\s+", " ", detail).strip()
+    return detail[:400]
 
 
 def _computer_use_tool(width: int, height: int) -> dict[str, Any]:
@@ -445,8 +510,11 @@ def create_gui_plus_response(
     except (OSError, TimeoutError) as exc:
         raise GuiPlusProviderError("GUI Plus request failed before a response was received") from exc
     if getattr(response, "status_code", None) != 200:
+        detail = _provider_error_detail(response, key)
+        suffix = f": {detail}" if detail else ""
         raise GuiPlusProviderError(
-            f"GUI Plus request failed with HTTP {getattr(response, 'status_code', 'unknown')}"
+            f"GUI Plus request failed with HTTP "
+            f"{getattr(response, 'status_code', 'unknown')}{suffix}"
         )
     try:
         response_data = response.json()
@@ -471,18 +539,14 @@ def test_gui_plus_connection(
     request_data = {
         "model": GUI_PLUS_API_MODEL,
         "messages": [
-            {"role": "system", "content": _system_prompt(16, 16)},
+            {"role": "system", "content": _system_prompt(256, 256)},
             {
                 "role": "user",
                 "content": [
                     {
                         "type": "image_url",
                         "image_url": {
-                            "url": (
-                                "data:image/png;base64,"
-                                "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwC"
-                                "AAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
-                            )
+                            "url": _CONNECTION_TEST_IMAGE_DATA_URL
                         },
                     },
                     {"type": "text", "text": "Return one wait action."},
@@ -505,9 +569,11 @@ def test_gui_plus_connection(
     except (OSError, TimeoutError) as exc:
         raise GuiPlusProviderError("GUI Plus connection test could not reach the service") from exc
     if getattr(response, "status_code", None) != 200:
+        detail = _provider_error_detail(response, key)
+        suffix = f": {detail}" if detail else ""
         raise GuiPlusProviderError(
             "GUI Plus connection test failed with HTTP "
-            f"{getattr(response, 'status_code', 'unknown')}"
+            f"{getattr(response, 'status_code', 'unknown')}{suffix}"
         )
     try:
         body = response.json()

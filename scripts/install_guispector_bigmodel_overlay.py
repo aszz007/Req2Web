@@ -517,7 +517,10 @@ class SettingsForm(forms.ModelForm):
                 render_value=False,
             ),
             "dashscope_workspace_id": forms.TextInput(
-                attrs={"class": "form-control", "placeholder": "Paste the Beijing workspace ID"},
+                attrs={
+                    "class": "form-control",
+                    "placeholder": "Paste the Beijing API host or workspace ID",
+                },
             ),
             "zhipu_api_key": forms.PasswordInput(
                 attrs={"class": "form-control", "placeholder": "Paste your Zhipu API key"},
@@ -682,11 +685,16 @@ class SettingsView(View):
               <label for="id_dashscope_api_key" class="form-label fw-semibold">Beijing Model Studio API key</label>
               {{ form.dashscope_api_key }}
               {% if form.dashscope_api_key.errors %}<div class="text-danger small mt-1">{{ form.dashscope_api_key.errors }}</div>{% endif %}
-              <div class="form-text">The key is masked and is never rendered back into this page.</div>
-              <label for="id_dashscope_workspace_id" class="form-label fw-semibold mt-3">Beijing workspace ID</label>
-              {{ form.dashscope_workspace_id }}
-              {% if form.dashscope_workspace_id.errors %}<div class="text-danger small mt-1">{{ form.dashscope_workspace_id.errors }}</div>{% endif %}
-              <div class="form-text">Use the workspace bound to the same Beijing-region API key.</div>
+              <div class="form-text">Normally, only paste the key. It is masked and is never rendered back into this page.</div>
+              <details class="mt-3">
+                <summary class="small fw-semibold">Advanced Beijing endpoint</summary>
+                <div class="mt-3">
+                  <label for="id_dashscope_workspace_id" class="form-label fw-semibold">API host or workspace ID</label>
+                  {{ form.dashscope_workspace_id }}
+                  {% if form.dashscope_workspace_id.errors %}<div class="text-danger small mt-1">{{ form.dashscope_workspace_id.errors }}</div>{% endif %}
+                  <div class="form-text">This value is required by Alibaba's Beijing endpoint, but it only needs to be set once. The full API Host shown by Alibaba is accepted.</div>
+                </div>
+              </details>
               <button type="submit" name="action" value="test_gui_plus" class="btn btn-primary mt-3">Save and test GUI Plus</button>
             </div>
 

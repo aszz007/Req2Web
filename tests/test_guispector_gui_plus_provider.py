@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import base64
 import json
 from pathlib import Path
+import struct
 import sys
 import unittest
 
@@ -19,6 +21,7 @@ from req2web_inspector.guispector_gui_plus_provider import (  # noqa: E402
     build_gui_plus_request,
     create_gui_plus_response,
     normalize_gui_plus_response,
+    normalize_gui_plus_workspace_reference,
     redact_gui_plus_secret,
     test_gui_plus_connection as check_gui_plus_connection,
 )
@@ -193,7 +196,7 @@ class GuiPlusProviderTests(unittest.TestCase):
                 workspace_id="workspace-1",
                 post=post,
             )
-        with self.assertRaisesRegex(GuiPlusProviderError, "workspace ID"):
+        with self.assertRaisesRegex(GuiPlusProviderError, "endpoint"):
             create_gui_plus_response(
                 input_items=INPUT_ITEMS,
                 computer_tools=COMPUTER_TOOLS,
@@ -203,7 +206,30 @@ class GuiPlusProviderTests(unittest.TestCase):
             )
         self.assertEqual(calls, [])
 
-    def test_http_error_is_one_attempt_and_never_echoes_secret_or_body(self) -> None:
+    def test_workspace_reference_accepts_id_or_beijing_api_host(self) -> None:
+        expected = "llm-workspace-1"
+        self.assertEqual(normalize_gui_plus_workspace_reference(expected), expected)
+        self.assertEqual(
+            normalize_gui_plus_workspace_reference(
+                "https://llm-workspace-1.cn-beijing.maas.aliyuncs.com/"
+                "compatible-mode/v1"
+            ),
+            expected,
+        )
+        self.assertEqual(
+            normalize_gui_plus_workspace_reference(
+                "llm-workspace-1.cn-beijing.maas.aliyuncs.com"
+            ),
+            expected,
+        )
+        with self.assertRaisesRegex(GuiPlusProviderError, "endpoint"):
+            normalize_gui_plus_workspace_reference("https://unexpected.example")
+        with self.assertRaisesRegex(GuiPlusProviderError, "endpoint"):
+            normalize_gui_plus_workspace_reference(
+                "https://llm-workspace-1.cn-beijing.maas.aliyuncs.com:bad"
+            )
+
+    def test_http_error_is_one_attempt_and_reports_redacted_detail(self) -> None:
         secret = "test-secret-value"
         calls: list[dict[str, object]] = []
 
@@ -225,7 +251,7 @@ class GuiPlusProviderTests(unittest.TestCase):
             GUI_PLUS_API_URL_TEMPLATE.format(workspace_id="workspace-1"),
         )
         self.assertNotIn(secret, str(raised.exception))
-        self.assertNotIn("bad key", str(raised.exception))
+        self.assertIn("bad key [REDACTED]", str(raised.exception))
 
     def test_connection_test_uses_fixed_model_endpoint_and_redaction(self) -> None:
         captured: dict[str, object] = {}
@@ -237,6 +263,10 @@ class GuiPlusProviderTests(unittest.TestCase):
         check_gui_plus_connection("local-secret", "workspace-1", post=post)
         self.assertEqual(captured["json"]["model"], GUI_PLUS_API_MODEL)
         self.assertEqual(captured["timeout"], 30)
+        image_url = captured["json"]["messages"][1]["content"][0]["image_url"]["url"]
+        png = base64.b64decode(image_url.split(",", 1)[1])
+        self.assertEqual(struct.unpack(">II", png[16:24]), (256, 256))
+        self.assertIn("exactly 256x256", captured["json"]["messages"][0]["content"])
         self.assertEqual(
             redact_gui_plus_secret(
                 "local-secret Authorization: Bearer another-token",
