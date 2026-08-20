@@ -17,7 +17,7 @@ from typing import Any, Mapping, Sequence
 GUISPECTOR_EVALUATION_SCHEMA_VERSION = "req2web.guispector.evaluation.v1"
 GUISPECTOR_DECISION_IMPORT_SCHEMA_VERSION = "req2web.guispector.decision_import.v1"
 GUISPECTOR_COMPARISON_SCHEMA_VERSION = "req2web.guispector.comparison.v1"
-GUISPECTOR_PREFLIGHT_SCHEMA_VERSION = "req2web.guispector.preflight.v1"
+GUISPECTOR_PREFLIGHT_SCHEMA_VERSION = "req2web.guispector.preflight.v2"
 
 GUISPECTOR_REPOSITORY_URL = "https://github.com/kristiankolthoff/GUISpector"
 GUISPECTOR_PAPER_URL = "https://arxiv.org/abs/2510.04791"
@@ -571,22 +571,27 @@ def guispector_runtime_preflight() -> dict[str, Any]:
             (root / "docker-compose.yml").is_file()
             or (root / "docker-compose.yaml").is_file()
             or (root / "compose.yml").is_file()
+            or (root / "docker-compose.req2web.yml").is_file()
         )
-    api_key_configured = bool(os.environ.get("OPENAI_API_KEY", "").strip())
-    ready = docker_available and upstream_root_configured and api_key_configured
+    zhipu_api_key_configured = bool(os.environ.get("ZHIPU_API_KEY", "").strip())
+    openai_api_key_configured = bool(os.environ.get("OPENAI_API_KEY", "").strip())
+    model_api_key_configured = zhipu_api_key_configured or openai_api_key_configured
+    ready = docker_available and upstream_root_configured and model_api_key_configured
     blockers: list[str] = []
     if not docker_available:
         blockers.append("docker_cli_not_available")
     if not upstream_root_configured:
         blockers.append("guispector_checkout_not_configured")
-    if not api_key_configured:
-        blockers.append("openai_api_key_not_configured")
+    if not model_api_key_configured:
+        blockers.append("model_api_key_not_configured")
     return {
         "schema_version": GUISPECTOR_PREFLIGHT_SCHEMA_VERSION,
         "status": "ready_for_operator_started_external_run" if ready else "not_ready",
         "docker_cli_available": docker_available,
         "guispector_checkout_configured": upstream_root_configured,
-        "openai_api_key_configured": api_key_configured,
+        "model_api_key_configured": model_api_key_configured,
+        "zhipu_api_key_configured": zhipu_api_key_configured,
+        "openai_api_key_configured": openai_api_key_configured,
         "execution_performed": False,
         "blocking_reasons": blockers,
         "secret_values_exposed": False,

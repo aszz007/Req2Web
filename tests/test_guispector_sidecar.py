@@ -142,7 +142,40 @@ class GUISpectorSidecarTests(unittest.TestCase):
         self.assertFalse(result["execution_performed"])
         self.assertFalse(result["secret_values_exposed"])
         self.assertIn("docker_cli_not_available", result["blocking_reasons"])
-        self.assertIn("openai_api_key_not_configured", result["blocking_reasons"])
+        self.assertIn("model_api_key_not_configured", result["blocking_reasons"])
+        self.assertFalse(result["zhipu_api_key_configured"])
+        self.assertFalse(result["openai_api_key_configured"])
+
+    def test_preflight_accepts_req2web_compose_and_zhipu_presence(self) -> None:
+        with patch.dict(
+            os.environ,
+            {
+                "REQ2WEB_GUISPECTOR_ROOT": "D:/bounded-guispector-checkout",
+                "ZHIPU_API_KEY": "presence-only-test-value",
+            },
+            clear=True,
+        ), patch(
+            "req2web_inspector.guispector_sidecar.shutil.which",
+            return_value="docker",
+        ), patch.object(
+            Path,
+            "is_dir",
+            autospec=True,
+            return_value=True,
+        ), patch.object(
+            Path,
+            "is_file",
+            autospec=True,
+            side_effect=lambda path: path.name == "docker-compose.req2web.yml",
+        ):
+            result = guispector_runtime_preflight()
+        self.assertEqual(result["status"], "ready_for_operator_started_external_run")
+        self.assertTrue(result["guispector_checkout_configured"])
+        self.assertTrue(result["model_api_key_configured"])
+        self.assertTrue(result["zhipu_api_key_configured"])
+        self.assertFalse(result["openai_api_key_configured"])
+        self.assertEqual(result["blocking_reasons"], [])
+        self.assertNotIn("presence-only-test-value", str(result))
 
 
 if __name__ == "__main__":
