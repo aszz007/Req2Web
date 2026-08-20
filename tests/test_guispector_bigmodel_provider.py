@@ -108,16 +108,26 @@ class BigModelProviderTests(unittest.TestCase):
             "data:image/png;base64,BBBB",
         )
         self.assertIn("call exactly one supplied tool", request["messages"][0]["content"])
-        self.assertIn("between 0 and 1279", request["messages"][0]["content"])
+        self.assertIn("normalized screenshot coordinates from 0 through 999", request["messages"][0]["content"])
+        self.assertIn("Do not return pixel coordinates", request["messages"][0]["content"])
         self.assertIn("do not repeat it again", request["messages"][0]["content"])
+        self.assertIn("shortest evidence path", request["messages"][0]["content"])
+        self.assertIn(
+            "echoing each criterion name exactly",
+            request["messages"][0]["content"],
+        )
+        self.assertIn("use at most one directed scroll", request["messages"][0]["content"])
+        self.assertEqual(request["tools"][0]["function"]["name"], "left_click")
         click_properties = request["tools"][0]["function"]["parameters"]["properties"]
-        self.assertEqual(click_properties["x"]["maximum"], 1279)
-        self.assertEqual(click_properties["y"]["maximum"], 799)
-        self.assertIn("click", request["messages"][1]["content"][1]["text"])
+        self.assertEqual(click_properties["start_box"]["items"]["maximum"], 999)
+        history_text = request["messages"][1]["content"][1]["text"]
+        self.assertIn("click", history_text)
+        self.assertNotIn('"x":', history_text)
+        self.assertNotIn('"y":', history_text)
 
     def test_action_tool_call_is_normalized_for_existing_runner(self) -> None:
         normalized = normalize_bigmodel_response(
-            _tool_response("click", {"x": 440, "y": 350}),
+            _tool_response("left_click", {"start_box": [440, 350]}),
             computer_tools=COMPUTER_TOOLS,
         )
         self.assertEqual(normalized["id"], "completion-1")
@@ -129,7 +139,7 @@ class BigModelProviderTests(unittest.TestCase):
                     "call_id": "call-1",
                     "status": "completed",
                     "pending_safety_checks": [],
-                    "action": {"type": "click", "x": 440, "y": 350, "button": "left"},
+                    "action": {"type": "click", "x": 563, "y": 280, "button": "left"},
                 }
             ],
         )
@@ -157,8 +167,27 @@ class BigModelProviderTests(unittest.TestCase):
         self.assertEqual(decision["status"], "met")
         self.assertEqual(decision["notes"], "")
 
+    def test_glm_desktop_scroll_contract_maps_to_runner_pixels(self) -> None:
+        normalized = normalize_bigmodel_response(
+            _tool_response(
+                "scroll",
+                {"start_box": [500, 500], "direction": "up", "step": 5},
+            ),
+            computer_tools=COMPUTER_TOOLS,
+        )
+        self.assertEqual(
+            normalized["output"][0]["action"],
+            {
+                "type": "scroll",
+                "x": 640,
+                "y": 400,
+                "scroll_x": 0,
+                "scroll_y": -500,
+            },
+        )
+
     def test_multiple_actions_and_out_of_range_coordinates_fail_closed(self) -> None:
-        multiple = _tool_response("click", {"x": 1, "y": 2})
+        multiple = _tool_response("left_click", {"start_box": [1, 2]})
         multiple["choices"][0]["message"]["tool_calls"].append(
             multiple["choices"][0]["message"]["tool_calls"][0]
         )
@@ -166,32 +195,35 @@ class BigModelProviderTests(unittest.TestCase):
             normalize_bigmodel_response(multiple, computer_tools=COMPUTER_TOOLS)
         with self.assertRaisesRegex(BigModelProviderError, "out-of-range"):
             normalize_bigmodel_response(
-                _tool_response("click", {"x": 1280, "y": 2}),
+                _tool_response("left_click", {"start_box": [1000, 2]}),
                 computer_tools=COMPUTER_TOOLS,
             )
 
     def test_null_only_extra_field_is_ignored_without_relaxing_non_null_extras(self) -> None:
         normalized = normalize_bigmodel_response(
-            _tool_response("click", {"x": 440, "y": 350, "unexpected": None}),
+            _tool_response("left_click", {"start_box": [440, 350], "unexpected": None}),
             computer_tools=COMPUTER_TOOLS,
         )
         self.assertEqual(
             normalized["output"][0]["action"],
-            {"type": "click", "x": 440, "y": 350, "button": "left"},
+            {"type": "click", "x": 563, "y": 280, "button": "left"},
         )
         with self.assertRaisesRegex(
             BigModelProviderError,
-            r"received fields: unexpected,x,y; allowed fields: button,x,y",
+            r"received fields: start_box,unexpected; allowed fields: element_info,start_box",
         ):
             normalize_bigmodel_response(
-                _tool_response("click", {"x": 440, "y": 350, "unexpected": "left"}),
+                _tool_response(
+                    "left_click",
+                    {"start_box": [440, 350], "unexpected": "left"},
+                ),
                 computer_tools=COMPUTER_TOOLS,
             )
 
     def test_disallowed_keypress_cannot_reach_shell_adapter(self) -> None:
         with self.assertRaisesRegex(BigModelProviderError, "disallowed key"):
             normalize_bigmodel_response(
-                _tool_response("keypress", {"keys": ["CTRL", "x;rm"]}),
+                _tool_response("key", {"keys": "CTRL+x;rm"}),
                 computer_tools=COMPUTER_TOOLS,
             )
 

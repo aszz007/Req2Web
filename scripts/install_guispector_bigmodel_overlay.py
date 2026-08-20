@@ -93,6 +93,7 @@ def install(repository_root: Path, runtime_root: Path) -> dict[str, object]:
     required = [
         runtime_root / "gui_spector/src/gui_spector/verfication/agent.py",
         runtime_root / "gui_spector/src/gui_spector/verfication/config.py",
+        runtime_root / "gui_spector/src/gui_spector/computers/docker.py",
         runtime_root / "webapp/settings/models.py",
         runtime_root / "webapp/settings/views.py",
         runtime_root / "webapp/settings/templates/settings/settings.html",
@@ -104,6 +105,31 @@ def install(repository_root: Path, runtime_root: Path) -> dict[str, object]:
         raise OverlayInstallError(f"GUISpector checkout is incomplete: {missing}")
 
     changed: list[str] = []
+
+    computer_path = runtime_root / "gui_spector/src/gui_spector/computers/docker.py"
+    if _replace_once(
+        computer_path,
+        '''    def get_dimensions(self):
+      #return (1920, 1080)
+      return (1280, 720)  # Default fallback; will be updated in __enter__.
+''',
+        '''    def get_dimensions(self):
+        return self.dimensions
+''',
+        "return self.dimensions",
+    ):
+        changed.append(str(computer_path.relative_to(runtime_root)))
+    if _replace_once(
+        computer_path,
+        '''        self.local_agent_exec = os.environ.get("LOCAL_AGENT_EXEC", "0") == "1"
+''',
+        '''        self.local_agent_exec = os.environ.get("LOCAL_AGENT_EXEC", "0") == "1"
+        self.dimensions = (1280, 800)
+''',
+        "self.dimensions = (1280, 800)",
+    ):
+        if str(computer_path.relative_to(runtime_root)) not in changed:
+            changed.append(str(computer_path.relative_to(runtime_root)))
 
     provider_source = repository_root / "src/req2web_inspector/guispector_bigmodel_provider.py"
     provider_target = runtime_root / "gui_spector/src/gui_spector/verfication/bigmodel_provider.py"
@@ -388,7 +414,22 @@ def install(repository_root: Path, runtime_root: Path) -> dict[str, object]:
         attempts = 0
         max_retries = (
 ''',
-        "computer = None\n        attempts = 0",
+        "computer = None\n",
+    ):
+        if str(tasks_path.relative_to(runtime_root)) not in changed:
+            changed.append(str(tasks_path.relative_to(runtime_root)))
+    if _replace_once(
+        tasks_path,
+        '''    try:
+        computer = None
+        attempts = 0
+''',
+        '''    try:
+        computer = None
+        runner = None
+        attempts = 0
+''',
+        "runner = None\n        attempts = 0",
     ):
         if str(tasks_path.relative_to(runtime_root)) not in changed:
             changed.append(str(tasks_path.relative_to(runtime_root)))
@@ -432,6 +473,26 @@ def install(repository_root: Path, runtime_root: Path) -> dict[str, object]:
                         computer=computer,
 ''',
         "model=setup.agent_model,",
+    ):
+        if str(tasks_path.relative_to(runtime_root)) not in changed:
+            changed.append(str(tasks_path.relative_to(runtime_root)))
+    if _replace_once(
+        tasks_path,
+        '''        pending.error = str(e)
+        pending.save()
+''',
+        '''        pending.error = str(e)
+        try:
+            partial_interactions = sorted((run_dir / "interactions").glob("*_interaction.json"))
+            pending.steps_taken = len(partial_interactions)
+            partial_images = sorted((run_dir / "images").glob("*.png"))
+            if partial_images:
+                pending.last_screenshot = str(partial_images[-1])
+        except Exception:
+            pass
+        pending.save()
+''',
+        "partial_interactions = sorted(",
     ):
         if str(tasks_path.relative_to(runtime_root)) not in changed:
             changed.append(str(tasks_path.relative_to(runtime_root)))

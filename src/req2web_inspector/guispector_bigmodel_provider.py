@@ -105,82 +105,66 @@ def bigmodel_tools(
     display_width: int | None = None,
     display_height: int | None = None,
 ) -> list[dict[str, Any]]:
-    coordinate_x: dict[str, Any] = {"type": "integer", "minimum": 0}
-    coordinate_y: dict[str, Any] = {"type": "integer", "minimum": 0}
-    if isinstance(display_width, int) and display_width > 0:
-        coordinate_x["maximum"] = display_width - 1
-    if isinstance(display_height, int) and display_height > 0:
-        coordinate_y["maximum"] = display_height - 1
+    del display_width, display_height
+    point = {
+        "type": "array",
+        "items": {"type": "integer", "minimum": 0, "maximum": 999},
+        "minItems": 2,
+        "maxItems": 2,
+        "description": "GLM desktop coordinate [x, y], normalized to 0-999.",
+    }
+    element_info = {"type": "string", "maxLength": 300}
     return [
         _tool(
-            "click",
-            "Click one visible point in the browser.",
-            {
-                "x": coordinate_x,
-                "y": coordinate_y,
-                "button": {"type": "string", "enum": ["left", "middle", "right"]},
-            },
-            ["x", "y"],
+            "left_click",
+            "Perform a left click at one visible element using the GLM desktop action format.",
+            {"start_box": point, "element_info": element_info},
+            ["start_box"],
         ),
         _tool(
-            "double_click",
-            "Double-click one visible point in the browser.",
-            {"x": coordinate_x, "y": coordinate_y},
-            ["x", "y"],
+            "left_double_click",
+            "Perform a left double-click at one visible element.",
+            {"start_box": point, "element_info": element_info},
+            ["start_box"],
         ),
         _tool(
             "scroll",
-            "Scroll at a visible point. Positive scroll_y moves down.",
+            "Scroll a visible region up or down by a small number of wheel steps.",
             {
-                "x": coordinate_x,
-                "y": coordinate_y,
-                "scroll_x": {"type": "integer", "minimum": -5000, "maximum": 5000},
-                "scroll_y": {"type": "integer", "minimum": -5000, "maximum": 5000},
+                "start_box": point,
+                "direction": {"type": "string", "enum": ["up", "down"]},
+                "step": {"type": "integer", "minimum": 1, "maximum": 10},
+                "element_info": element_info,
             },
-            ["x", "y", "scroll_x", "scroll_y"],
+            ["start_box", "direction", "step"],
         ),
         _tool(
             "type",
             "Type text into the focused control.",
-            {"text": {"type": "string", "maxLength": 4000}},
-            ["text"],
+            {"content": {"type": "string", "maxLength": 4000}},
+            ["content"],
         ),
         _tool(
-            "keypress",
+            "key",
             "Press one key or a safe key combination.",
-            {
-                "keys": {
-                    "type": "array",
-                    "items": {"type": "string", "enum": sorted(_KEYPRESS_KEYS)},
-                    "minItems": 1,
-                    "maxItems": 4,
-                }
-            },
+            {"keys": {"type": "string", "maxLength": 80}},
             ["keys"],
         ),
         _tool(
-            "move",
+            "hover",
             "Move the pointer to one visible point.",
-            {"x": coordinate_x, "y": coordinate_y},
-            ["x", "y"],
+            {"start_box": point, "element_info": element_info},
+            ["start_box"],
         ),
         _tool(
-            "drag",
-            "Drag through a short path of visible points.",
+            "left_drag",
+            "Drag from one visible point to another.",
             {
-                "path": {
-                    "type": "array",
-                    "items": {
-                        "type": "object",
-                        "properties": {"x": coordinate_x, "y": coordinate_y},
-                        "required": ["x", "y"],
-                        "additionalProperties": False,
-                    },
-                    "minItems": 2,
-                    "maxItems": 100,
-                }
+                "start_box": point,
+                "end_box": point,
+                "element_info": element_info,
             },
-            ["path"],
+            ["start_box", "end_box"],
         ),
         _tool(
             "wait",
@@ -190,7 +174,10 @@ def bigmodel_tools(
         ),
         _tool(
             "finish",
-            "Finish verification with one decision covering every acceptance criterion.",
+            (
+                "Finish verification as soon as the visible evidence is sufficient, "
+                "with one decision covering every acceptance criterion."
+            ),
             {
                 "status": {
                     "type": "string",
@@ -262,10 +249,26 @@ def _history_and_screenshot(input_items: Sequence[Mapping[str, Any]]) -> tuple[s
         elif item_type == "computer_call":
             action = item.get("action")
             if isinstance(action, Mapping):
-                history.append(
-                    f"{len(history) + 1}. {action.get('type')}: "
-                    f"{json.dumps(dict(action), ensure_ascii=False, sort_keys=True)}"
-                )
+                action_type = str(action.get("type", "action"))
+                if action_type == "scroll":
+                    amount = action.get("scroll_y", 0)
+                    direction = "down" if isinstance(amount, int) and amount > 0 else "up"
+                    description = f"Scrolled {direction}."
+                elif action_type in {"click", "double_click"}:
+                    description = f"Executed a {action_type.replace('_', '-')} on a visible point."
+                elif action_type == "type":
+                    description = f"Typed {json.dumps(str(action.get('text', '')), ensure_ascii=False)}."
+                elif action_type == "keypress":
+                    description = "Pressed the requested key or key combination."
+                elif action_type == "drag":
+                    description = "Dragged across the requested visible path."
+                elif action_type == "move":
+                    description = "Moved the pointer to a visible point."
+                elif action_type == "wait":
+                    description = "Waited for the page to settle."
+                else:
+                    description = f"Executed {action_type}."
+                history.append(f"{len(history) + 1}. {description}")
         elif item_type == "computer_call_output":
             output = item.get("output")
             if isinstance(output, Mapping):
@@ -302,12 +305,24 @@ def build_bigmodel_request(
     width, height = _display_dimensions(computer_tools)
     system_text = (
         "You are a GUI verification agent controlling a browser from screenshots. "
-        f"The screenshot coordinate space is {width} by {height}. "
-        f"Every x coordinate must be between 0 and {width - 1}; every y coordinate "
-        f"must be between 0 and {height - 1}. "
-        "Inspect the latest screenshot and call exactly one supplied tool. "
-        "Use one browser action when more evidence is needed. Use finish only after "
-        "you can judge every acceptance criterion. Never invent visual evidence, "
+        f"The current screenshot is {width} by {height} pixels, but every tool coordinate "
+        "must use GLM normalized screenshot coordinates from 0 through 999: x=0 is the "
+        "left edge, x=999 is the right edge, y=0 is the top edge, and y=999 is the "
+        "bottom edge. Do not return pixel coordinates. "
+        "Use the GLM desktop action fields exactly: start_box is [x, y], scroll uses "
+        "direction plus step, type uses content, and key uses a key string. "
+        "Judge only the web page content inside the browser; ignore browser chrome, "
+        "private-browsing notices, operating-system notices, and unrelated tabs. "
+        "Inspect the latest screenshot and call exactly one supplied tool. Take the "
+        "shortest evidence path: do not explore unrelated controls, and do not require "
+        "every page feature to be exercised when the listed criteria are already clear. "
+        "Use one browser action only when more evidence is needed. If a criterion names "
+        "an interaction, exercise that interaction once and inspect its visible feedback. "
+        "After exercising the named interaction, use at most one directed scroll to the "
+        "criterion's stated confirmation location; then call finish instead of exploring "
+        "other page features. Never repeat an identical scroll when the screenshot is unchanged. "
+        "Use finish as soon as every listed criterion can be judged, echoing each criterion "
+        "name exactly as provided. Never invent visual evidence, "
         "never call multiple tools in one response, and never output prose instead of a tool call. "
         "If the same action produces no visible change twice, do not repeat it again; "
         "treat the unchanged state as evidence and finish with the supported decision."
@@ -365,74 +380,95 @@ def _discard_null_extras(
 
 
 def _coordinate(value: Any, limit: int) -> int:
-    if isinstance(value, bool) or not isinstance(value, int) or not 0 <= value < limit:
-        raise BigModelProviderError("BigModel returned an out-of-range coordinate")
-    return value
+    if isinstance(value, bool) or not isinstance(value, int) or not 0 <= value <= 999:
+        raise BigModelProviderError(
+            f"BigModel returned an out-of-range normalized coordinate: {value!r}"
+        )
+    if not isinstance(limit, int) or limit <= 0:
+        raise BigModelProviderError("GUISpector supplied invalid display dimensions")
+    return round(value * (limit - 1) / 999)
+
+
+def _point(value: Any, width: int, height: int) -> tuple[int, int]:
+    if not isinstance(value, list) or len(value) != 2:
+        raise BigModelProviderError("BigModel returned an invalid normalized point")
+    return _coordinate(value[0], width), _coordinate(value[1], height)
 
 
 def _validate_action(name: str, args: Mapping[str, Any], width: int, height: int) -> dict[str, Any]:
-    if name in {"click", "double_click", "move"}:
-        optional = {"button"} if name == "click" else set()
-        action = _discard_null_extras(args, required={"x", "y"}, optional=optional)
-        _require_exact_keys(action, {"x", "y"}, optional)
-        action["x"] = _coordinate(action["x"], width)
-        action["y"] = _coordinate(action["y"], height)
-        if name == "click":
-            button = action.get("button", "left")
-            if button not in {"left", "middle", "right"}:
-                raise BigModelProviderError("BigModel returned an invalid click button")
-            action["button"] = button
+    if name in {"left_click", "left_double_click", "hover"}:
+        action = _discard_null_extras(
+            args,
+            required={"start_box"},
+            optional={"element_info"},
+        )
+        _require_exact_keys(action, {"start_box"}, {"element_info"})
+        x, y = _point(action["start_box"], width, height)
+        if name == "left_click":
+            return {"type": "click", "x": x, "y": y, "button": "left"}
+        if name == "left_double_click":
+            return {"type": "double_click", "x": x, "y": y}
+        return {"type": "move", "x": x, "y": y}
     elif name == "scroll":
         action = _discard_null_extras(
             args,
-            required={"x", "y", "scroll_x", "scroll_y"},
+            required={"start_box", "direction", "step"},
+            optional={"element_info"},
         )
-        _require_exact_keys(action, {"x", "y", "scroll_x", "scroll_y"})
-        action["x"] = _coordinate(action["x"], width)
-        action["y"] = _coordinate(action["y"], height)
-        for key in ("scroll_x", "scroll_y"):
-            value = action[key]
-            if isinstance(value, bool) or not isinstance(value, int) or not -5000 <= value <= 5000:
-                raise BigModelProviderError("BigModel returned an invalid scroll amount")
+        _require_exact_keys(
+            action,
+            {"start_box", "direction", "step"},
+            {"element_info"},
+        )
+        x, y = _point(action["start_box"], width, height)
+        direction = action["direction"]
+        step = action["step"]
+        if direction not in {"up", "down"}:
+            raise BigModelProviderError("BigModel returned an invalid scroll direction")
+        if isinstance(step, bool) or not isinstance(step, int) or not 1 <= step <= 10:
+            raise BigModelProviderError("BigModel returned an invalid scroll step")
+        amount = step * 100 * (1 if direction == "down" else -1)
+        return {"type": "scroll", "x": x, "y": y, "scroll_x": 0, "scroll_y": amount}
     elif name == "type":
-        action = _discard_null_extras(args, required={"text"})
-        _require_exact_keys(action, {"text"})
-        if not isinstance(action["text"], str) or len(action["text"]) > 4000:
+        action = _discard_null_extras(args, required={"content"})
+        _require_exact_keys(action, {"content"})
+        if not isinstance(action["content"], str) or len(action["content"]) > 4000:
             raise BigModelProviderError("BigModel returned invalid typing text")
-    elif name == "keypress":
+        return {"type": "type", "text": action["content"]}
+    elif name == "key":
         action = _discard_null_extras(args, required={"keys"})
         _require_exact_keys(action, {"keys"})
         keys = action["keys"]
-        if not isinstance(keys, list) or not 1 <= len(keys) <= 4:
+        if not isinstance(keys, str):
             raise BigModelProviderError("BigModel returned an invalid key combination")
-        normalized = [str(key).upper() for key in keys]
+        normalized = [part.strip().upper() for part in keys.split("+") if part.strip()]
+        if not 1 <= len(normalized) <= 4:
+            raise BigModelProviderError("BigModel returned an invalid key combination")
         if any(key not in _KEYPRESS_KEYS for key in normalized):
             raise BigModelProviderError("BigModel returned a disallowed key")
-        action["keys"] = normalized
-    elif name == "drag":
-        action = _discard_null_extras(args, required={"path"})
-        _require_exact_keys(action, {"path"})
-        path = action["path"]
-        if not isinstance(path, list) or not 2 <= len(path) <= 100:
-            raise BigModelProviderError("BigModel returned an invalid drag path")
-        normalized_path = []
-        for point in path:
-            if not isinstance(point, Mapping):
-                raise BigModelProviderError("BigModel returned an invalid drag point")
-            _require_exact_keys(point, {"x", "y"})
-            normalized_path.append(
-                {"x": _coordinate(point["x"], width), "y": _coordinate(point["y"], height)}
-            )
-        action["path"] = normalized_path
+        return {"type": "keypress", "keys": normalized}
+    elif name == "left_drag":
+        action = _discard_null_extras(
+            args,
+            required={"start_box", "end_box"},
+            optional={"element_info"},
+        )
+        _require_exact_keys(action, {"start_box", "end_box"}, {"element_info"})
+        start_x, start_y = _point(action["start_box"], width, height)
+        end_x, end_y = _point(action["end_box"], width, height)
+        return {
+            "type": "drag",
+            "path": [{"x": start_x, "y": start_y}, {"x": end_x, "y": end_y}],
+        }
     elif name == "wait":
         action = _discard_null_extras(args, required={"ms"})
         _require_exact_keys(action, {"ms"})
         value = action["ms"]
         if isinstance(value, bool) or not isinstance(value, int) or not 100 <= value <= 5000:
             raise BigModelProviderError("BigModel returned an invalid wait duration")
+        return {"type": "wait", "ms": value}
     else:
         raise BigModelProviderError("BigModel returned an unsupported browser action")
-    return action
 
 
 def _validate_finish(args: Mapping[str, Any]) -> dict[str, Any]:
@@ -519,14 +555,14 @@ def normalize_bigmodel_response(
         ]
     else:
         width, height = _display_dimensions(computer_tools)
-        action_args = _validate_action(name, arguments, width, height)
+        action = _validate_action(name, arguments, width, height)
         output = [
             {
                 "type": "computer_call",
                 "call_id": call_id,
                 "status": "completed",
                 "pending_safety_checks": [],
-                "action": {"type": name, **action_args},
+                "action": action,
             }
         ]
     return {

@@ -18,10 +18,9 @@ from urllib.parse import urlparse
 try:
     from gui_spector.verfication.bigmodel_provider import (
         BigModelProviderError,
+        _content_parts,
         _default_post,
         _display_dimensions,
-        _history_and_screenshot,
-        _validate_action,
         _validate_finish,
     )
 except ModuleNotFoundError as exc:
@@ -29,10 +28,9 @@ except ModuleNotFoundError as exc:
         raise
     from req2web_inspector.guispector_bigmodel_provider import (
         BigModelProviderError,
+        _content_parts,
         _default_post,
         _display_dimensions,
-        _history_and_screenshot,
-        _validate_action,
         _validate_finish,
     )
 
@@ -182,7 +180,13 @@ def _computer_use_tool(width: int, height: int) -> dict[str, Any]:
                         "minItems": 2,
                         "maxItems": 2,
                     },
-                    "pixels": {"type": "number"},
+                    "pixels": {
+                        "type": "number",
+                        "description": (
+                            "Signed vertical distance: negative scrolls down to later "
+                            "page content; positive scrolls up to earlier content."
+                        ),
+                    },
                     "time": {"type": "number"},
                 },
                 "required": ["action"],
@@ -211,6 +215,7 @@ def _finish_tool() -> dict[str, Any]:
                     "detailed_summary": {"type": "string"},
                     "acceptance_criteria_results": {
                         "type": "array",
+                        "minItems": 1,
                         "items": {
                             "type": "object",
                             "properties": {
@@ -238,6 +243,66 @@ def _finish_tool() -> dict[str, Any]:
     }
 
 
+def _gui_plus_history_and_screenshot(
+    input_items: Sequence[Mapping[str, Any]],
+) -> tuple[str, str]:
+    """Serialize prior actions as prose instead of GUISpector's private schema."""
+
+    task_text = ""
+    latest_screenshot = ""
+    history: list[str] = []
+    for item in input_items:
+        item_type = str(item.get("type", ""))
+        if item.get("role") == "user":
+            texts, images = _content_parts(item.get("content"))
+            if texts and not task_text:
+                task_text = "\n".join(texts)
+            if images:
+                latest_screenshot = images[-1]
+        elif item_type == "computer_call":
+            action = item.get("action")
+            if not isinstance(action, Mapping):
+                continue
+            action_type = str(action.get("type") or "unknown")
+            if action_type == "scroll":
+                scroll_y = action.get("scroll_y", 0)
+                if isinstance(scroll_y, (int, float)) and not isinstance(scroll_y, bool):
+                    direction = "down" if scroll_y > 0 else "up"
+                    summary = f"scrolled {direction} by {abs(int(scroll_y))} pixels"
+                else:
+                    summary = "performed a bounded scroll"
+            elif action_type in {"click", "double_click", "move"}:
+                summary = (
+                    f"{action_type.replace('_', ' ')} at "
+                    f"({action.get('x')},{action.get('y')})"
+                )
+            elif action_type == "keypress":
+                keys = action.get("keys")
+                summary = f"pressed {keys}" if isinstance(keys, list) else "pressed a key"
+            elif action_type == "type":
+                summary = "typed text into the focused control"
+            elif action_type == "wait":
+                summary = "waited for the page to settle"
+            else:
+                summary = f"completed {action_type}"
+            history.append(f"{len(history) + 1}. {summary}.")
+        elif item_type == "computer_call_output":
+            output = item.get("output")
+            if isinstance(output, Mapping):
+                image_value = output.get("image_url")
+                if isinstance(image_value, str) and image_value:
+                    latest_screenshot = image_value
+                current_url = output.get("current_url")
+                if current_url:
+                    history.append(f"Current browser URL: {current_url}")
+    if not task_text:
+        raise GuiPlusProviderError("GUI Plus request has no verification task text")
+    if not latest_screenshot:
+        raise GuiPlusProviderError("GUI Plus request has no browser screenshot")
+    history_text = "\n".join(history) if history else "No browser actions have been taken yet."
+    return f"{task_text}\n\nExecuted action history:\n{history_text}", latest_screenshot
+
+
 def _system_prompt(width: int, height: int) -> str:
     tools = [_computer_use_tool(width, height), _finish_tool()]
     serialized_tools = "\n".join(
@@ -246,8 +311,10 @@ def _system_prompt(width: int, height: int) -> str:
     return f"""# Tools
 
 You are a GUI verification agent. You receive the latest browser screenshot,
-the complete acceptance task, and the bounded action history. Use only visible
-evidence. The screenshot resolution is exactly {width}x{height}; x must be in
+the complete acceptance task, and a short prose action history. Judge only the
+web page content inside the browser. Ignore browser chrome, private-browsing
+notices, operating-system notices, and unrelated tabs. Use only visible evidence.
+The screenshot resolution is exactly {width}x{height}; x must be in
 [0,{width - 1}] and y must be in [0,{height - 1}].
 
 You are provided with function signatures within <tools></tools> XML tags:
@@ -262,13 +329,16 @@ Action: <short imperative>
 {{"name":<function-name>,"arguments":<args-json-object>}}
 </tool_call>
 
-Use computer_use for exactly one next action when more evidence is needed.
-Use finish_verification only after every listed criterion can be judged. Never
-invent evidence, never emit more than one tool call, and never repeat an action
-that has already produced no visible change twice. The executed-action history
-uses GUISpector's internal field names for reporting only; do not copy those
-field names into a computer_use call. In particular, a new scroll action uses
-only action and pixels, with an optional coordinate.
+Take the shortest evidence path. Do not explore unrelated controls and do not
+require every page feature to be exercised when the listed criteria are already
+clear. Use computer_use for exactly one next action when more evidence is needed.
+If a criterion names an interaction, exercise that interaction once and inspect
+its visible feedback. Use finish_verification as soon as every listed criterion
+can be judged, echoing each criterion name exactly as provided. Never invent
+evidence, never emit more than one tool call, and never repeat an action that has
+already produced no visible change twice. A new scroll action uses only action
+and pixels, with an optional coordinate. Negative pixels scroll DOWN to later
+page content; positive pixels scroll UP to earlier content.
 """
 
 
@@ -277,7 +347,7 @@ def build_gui_plus_request(
     input_items: Sequence[Mapping[str, Any]],
     computer_tools: Sequence[Mapping[str, Any]],
 ) -> dict[str, Any]:
-    task_history, screenshot = _history_and_screenshot(input_items)
+    task_history, screenshot = _gui_plus_history_and_screenshot(input_items)
     width, height = _display_dimensions(computer_tools)
     return {
         "model": GUI_PLUS_API_MODEL,
@@ -348,11 +418,10 @@ def _map_computer_use(args: Mapping[str, Any], width: int, height: int) -> dict[
         return {"type": runner_name, "x": x, "y": y}
     if action_name == "type":
         action = _exact_fields(args, {"action", "text"})
-        try:
-            normalized = _validate_action("type", {"text": action["text"]}, width, height)
-        except BigModelProviderError as exc:
-            raise GuiPlusProviderError(str(exc).replace("BigModel", "GUI Plus")) from exc
-        return {"type": "type", **normalized}
+        text = action["text"]
+        if not isinstance(text, str) or len(text) > 4000:
+            raise GuiPlusProviderError("GUI Plus returned invalid typing text")
+        return {"type": "type", "text": text}
     if action_name == "key":
         action = _exact_fields(args, {"action", "keys"})
         keys = action["keys"]
@@ -427,7 +496,9 @@ def _map_computer_use(args: Mapping[str, Any], width: int, height: int) -> dict[
         if not 100 <= milliseconds <= 5000:
             raise GuiPlusProviderError("GUI Plus returned an invalid wait duration")
         return {"type": "wait", "ms": milliseconds}
-    raise GuiPlusProviderError("GUI Plus returned an unsupported browser action")
+    raise GuiPlusProviderError(
+        f"GUI Plus returned an unsupported browser action: {action_name!r}"
+    )
 
 
 def _parse_tool_call(content: Any) -> tuple[str, Mapping[str, Any]]:

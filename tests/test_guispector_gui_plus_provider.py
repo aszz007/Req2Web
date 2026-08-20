@@ -92,7 +92,46 @@ class GuiPlusProviderTests(unittest.TestCase):
         self.assertIn("exactly 1280x800", prompt)
         self.assertIn('"name":"computer_use"', prompt)
         self.assertIn('"name":"finish_verification"', prompt)
-        self.assertIn("a new scroll action uses", prompt)
+        self.assertIn("A new scroll action uses", prompt)
+        self.assertIn("Negative pixels scroll DOWN", prompt)
+        self.assertIn("shortest evidence path", prompt)
+        pixels = json.loads(
+            prompt.split("<tools>\n", 1)[1].split("\n", 1)[0]
+        )["function"]["parameters"]["properties"]["pixels"]
+        self.assertIn("negative scrolls down", pixels["description"])
+
+    def test_history_is_prose_and_does_not_echo_internal_scroll_schema(self) -> None:
+        request = build_gui_plus_request(
+            input_items=INPUT_ITEMS
+            + [
+                {
+                    "type": "computer_call",
+                    "action": {
+                        "type": "scroll",
+                        "x": 640,
+                        "y": 400,
+                        "scroll_x": 0,
+                        "scroll_y": 600,
+                    },
+                },
+                {
+                    "type": "computer_call_output",
+                    "output": {
+                        "image_url": "data:image/png;base64,BBBB",
+                        "current_url": "http://req2web-pages/example",
+                    },
+                },
+            ],
+            computer_tools=COMPUTER_TOOLS,
+        )
+        history = request["messages"][1]["content"][1]["text"]
+        self.assertIn("scrolled down by 600 pixels", history)
+        self.assertNotIn("scroll_y", history)
+        self.assertNotIn("scroll_x", history)
+        self.assertEqual(
+            request["messages"][1]["content"][0]["image_url"]["url"],
+            "data:image/png;base64,BBBB",
+        )
 
     def test_click_and_scroll_are_normalized_for_existing_runner(self) -> None:
         click = normalize_gui_plus_response(
@@ -118,6 +157,14 @@ class GuiPlusProviderTests(unittest.TestCase):
         self.assertEqual(click["usage"]["input_tokens"], 13)
 
     def test_key_and_wait_are_bounded(self) -> None:
+        typed = normalize_gui_plus_response(
+            _response("computer_use", {"action": "type", "text": "Test Report"}),
+            computer_tools=COMPUTER_TOOLS,
+        )
+        self.assertEqual(
+            typed["output"][0]["action"],
+            {"type": "type", "text": "Test Report"},
+        )
         keypress = normalize_gui_plus_response(
             _response("computer_use", {"action": "key", "keys": ["ctrl", "a"]}),
             computer_tools=COMPUTER_TOOLS,
@@ -134,6 +181,16 @@ class GuiPlusProviderTests(unittest.TestCase):
         with self.assertRaisesRegex(GuiPlusProviderError, "disallowed key"):
             normalize_gui_plus_response(
                 _response("computer_use", {"action": "key", "keys": ["x;rm"]}),
+                computer_tools=COMPUTER_TOOLS,
+            )
+
+    def test_unsupported_action_reports_only_its_name(self) -> None:
+        with self.assertRaisesRegex(
+            GuiPlusProviderError,
+            r"unsupported browser action: 'terminate'",
+        ):
+            normalize_gui_plus_response(
+                _response("computer_use", {"action": "terminate"}),
                 computer_tools=COMPUTER_TOOLS,
             )
 
