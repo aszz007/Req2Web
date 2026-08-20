@@ -23,7 +23,7 @@ from req2web_inspector.phase6_replay import (  # noqa: E402
 class Phase6ReviewerBundleTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
-        cls.bundle_root = ROOT / "release" / "phase6_reviewer_v16"
+        cls.bundle_root = ROOT / "release" / "phase6_reviewer_v17"
         cls.manifest = validate_phase6_reviewer_bundle(cls.bundle_root)
 
     def test_frozen_counts_and_separate_ledgers(self) -> None:
@@ -113,6 +113,32 @@ class Phase6ReviewerBundleTests(unittest.TestCase):
         for method in experiment["efficiency"]["methods"]:
             self.assertTrue(method["all_repetitions_exactly_match_comparison"])
 
+    def test_optional_guispector_packet_is_prepared_but_not_executed(self) -> None:
+        catalog = json.loads(
+            (self.bundle_root / "catalog.json").read_text(encoding="utf-8")
+        )
+        packet = json.loads(
+            (self.bundle_root / catalog["guispector_evaluation"]).read_text(
+                encoding="utf-8"
+            )
+        )
+        self.assertEqual(packet["status"], "prepared_not_executed")
+        self.assertFalse(packet["execution_performed"])
+        self.assertEqual(packet["scope"]["result_package_count"], 12)
+        self.assertEqual(packet["scope"]["acceptance_criterion_count"], 24)
+        self.assertFalse(packet["scope"]["canonical_flow_modified"])
+        self.assertFalse(packet["reference_profile"]["independent_human_gold"])
+        self.assertFalse(packet["reference_profile"]["paper_comparison_eligible"])
+        self.assertEqual(len(packet["cases"]), 12)
+        for item in packet["cases"]:
+            requirement = item["guispector_requirement"]
+            self.assertEqual(len(requirement["acceptance_criteria"]), 2)
+            self.assertTrue(
+                item["start_url_template"].startswith(
+                    "{REQ2WEB_INSPECTOR_BASE_URL}/"
+                )
+            )
+
     def test_manifest_detects_file_tampering(self) -> None:
         test_root = ROOT / f".phase6-replay-test-{uuid.uuid4().hex}"
         test_root.mkdir()
@@ -147,6 +173,10 @@ class Phase6ReviewerBundleTests(unittest.TestCase):
         self.assertIn("function applyPreviewSafetyStyles()", script)
         self.assertIn("function connectPreviewStateMonitor()", script)
         self.assertIn("req2web-inspector-preview-safety", script)
+        self.assertIn('id="external-verification"', page)
+        self.assertIn('id="guispector-case-select"', page)
+        self.assertIn("function renderGuispector(report)", script)
+        self.assertIn(".external-summary", styles)
 
     def test_single_inspector_has_compact_user_entry_and_explanations(self) -> None:
         page = (self.bundle_root / "index.html").read_text(encoding="utf-8")

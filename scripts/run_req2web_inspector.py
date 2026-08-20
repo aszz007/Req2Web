@@ -22,6 +22,9 @@ from req2web_inspector.phase6_replay import (  # noqa: E402
     Phase6ReplayError,
     validate_phase6_reviewer_bundle,
 )
+from req2web_inspector.guispector_sidecar import (  # noqa: E402
+    guispector_runtime_preflight,
+)
 from req2web_inspector.live_draft import (  # noqa: E402
     InspectorLiveDraftError,
     LocalDraftRunStore,
@@ -135,6 +138,11 @@ class _InspectorHandler(SimpleHTTPRequestHandler):
                 if self.canonical_run_store is not None
                 else "not_connected"
             ),
+            "optional_guispector_verification": {
+                "packet_status": "prepared_not_executed",
+                "canonical_flow_modified": False,
+                **guispector_runtime_preflight(),
+            },
             "external_api_or_paid_service": "not_used",
         }
 
@@ -335,7 +343,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--bundle-root",
         type=Path,
-        default=ROOT / "release" / "phase6_reviewer_v16",
+        default=ROOT / "release" / "phase6_reviewer_v17",
     )
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8765)

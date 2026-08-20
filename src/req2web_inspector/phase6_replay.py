@@ -31,6 +31,12 @@ from req2web_rag.retrieval_experiment import (
     RETRIEVAL_EXPERIMENT_SCHEMA_VERSION,
     validate_retrieval_experiment,
 )
+from req2web_inspector.guispector_sidecar import (
+    GUISPECTOR_EVALUATION_SCHEMA_VERSION,
+    GUISpectorSidecarError,
+    build_guispector_evaluation,
+    validate_guispector_evaluation,
+)
 
 
 PHASE6_REPLAY_MANIFEST_SCHEMA_VERSION = "req2web.phase6.reviewer_replay.v2"
@@ -466,6 +472,14 @@ def _material_inventory() -> dict[str, Any]:
             },
             {
                 "material": (
+                    "GUISpector-compatible requirement packet, internal-reference "
+                    "boundary, and same-formula metric protocol"
+                ),
+                "origin": "project-authored read-only interoperability sidecar",
+                "redistribution_status": "pending_owner_license_decision",
+            },
+            {
+                "material": (
                     "Provider-neutral LLM prelabel template, deterministic two-human "
                     "review assignment with an 84-candidate blind overlap audit, "
                     "exploratory metric protocol, and descriptive local efficiency report"
@@ -513,6 +527,7 @@ _INDEX_HTML = """<!doctype html>
       <a href="#human-work">Human handoff</a>
       <a href="#retrieval">Retrieval</a>
       <a href="#case-inspector">Evidence</a>
+      <a href="#external-verification">External check</a>
       <a href="#final-result">Result</a>
     </nav>
     <span class="local-status"><i></i> Local replay</span>
@@ -725,6 +740,37 @@ _INDEX_HTML = """<!doctype html>
         <pre id="historical-json"></pre>
         <div id="revalidation-block"></div>
       </article>
+    </section>
+
+    <section class="panel external-panel" id="external-verification">
+      <div class="section-heading">
+        <div>
+          <span class="section-kicker">Optional external verification</span>
+          <h2 class="module-title">Check the same result package with GUISpector <button class="info-tip" type="button" aria-label="About the optional GUISpector check" data-tooltip="Exports each frozen requirement, its fixed acceptance criteria, and the exact runnable package URL for GUISpector. Imported GUISpector decisions use its requirement-level and criterion-level precision, recall, and F1 formulas. This sidecar never changes Req2Web generation or acceptance evidence.">!</button></h2>
+          <p class="muted">The integration packet is ready. An external GUISpector deployment, its configured model service, and an explicit operator-started run are still required.</p>
+        </div>
+        <div id="guispector-runtime-status" class="capability-pill pending">Checking optional runtime</div>
+      </div>
+      <div id="guispector-summary" class="external-summary"></div>
+      <div class="external-grid">
+        <article class="external-card">
+          <span class="section-kicker">Prepared input</span>
+          <h3>One exact package at a time</h3>
+          <p>GUISpector receives the frozen requirement, two fixed acceptance conditions, and the exact packaged page address. It does not receive hidden data or rewrite the package.</p>
+          <label for="guispector-case-select"><span>Prepared package</span><select id="guispector-case-select"></select></label>
+          <div id="guispector-case" class="external-case"></div>
+        </article>
+        <article class="external-card">
+          <span class="section-kicker">Comparable output</span>
+          <h3>Same metric names, honest coverage</h3>
+          <div id="guispector-metrics"></div>
+          <p class="media-note">The present twelve packages are internally labeled as met. Unmet and partial classes therefore remain undefined until an independently labeled mixed set is evaluated.</p>
+        </article>
+      </div>
+      <div class="external-actions">
+        <a class="button secondary" href="guispector_evaluation.json" download>Download evaluation packet</a>
+        <details><summary>Exact packet, published reference values, and claim boundary</summary><pre id="guispector-json"></pre></details>
+      </div>
     </section>
 
     <section class="panel page-panel" id="final-result">
@@ -967,6 +1013,26 @@ summary { cursor: pointer; color: #344054; font-size: .82rem; font-weight: 750; 
 .button.secondary { border-color: var(--line-strong); background: white; color: #344054; }
 .interaction-list { margin: .8rem 0; padding-left: 1.5rem; color: var(--muted); font-size: .82rem; line-height: 1.5; }
 .interaction-list small { display: block; overflow-wrap: anywhere; }
+.external-panel { margin-top: 1rem; }
+.external-summary { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: .65rem; margin: 1.1rem 0; }
+.external-stat { min-width: 0; padding: .8rem; border: 1px solid var(--line); border-radius: 10px; background: #fcfcfd; }
+.external-stat strong { display: block; color: var(--ink); font-size: 1.25rem; letter-spacing: -.03em; }
+.external-stat span { display: block; margin-top: .25rem; color: var(--muted); font-size: .72rem; line-height: 1.4; }
+.external-grid { display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(300px, .9fr); gap: .8rem; }
+.external-card { min-width: 0; padding: 1rem; border: 1px solid var(--line); border-radius: 11px; background: #fcfcfd; }
+.external-card h3 { margin: .4rem 0 .45rem; font-size: 1rem; }
+.external-card > p { color: var(--muted); font-size: .8rem; line-height: 1.55; }
+.external-card label { display: grid; gap: .4rem; margin-top: .8rem; color: #344054; font-size: .76rem; font-weight: 750; }
+.external-case { min-width: 0; margin-top: .75rem; padding: .75rem; border: 1px solid #bfdbfe; border-radius: 9px; background: var(--accent-soft); }
+.external-case strong, .external-case span { overflow-wrap: anywhere; }
+.external-case p { margin: .35rem 0; color: #475467; font-size: .77rem; line-height: 1.5; }
+.external-case ul { margin: .45rem 0 0; padding-left: 1.2rem; color: #475467; font-size: .75rem; line-height: 1.5; }
+.metric-table { width: 100%; border-collapse: collapse; font-size: .75rem; }
+.metric-table th, .metric-table td { padding: .52rem .4rem; border-bottom: 1px solid var(--line); text-align: left; }
+.metric-table th { color: var(--muted); font-size: .68rem; text-transform: uppercase; letter-spacing: .04em; }
+.metric-table td:last-child { color: var(--warning); font-weight: 750; }
+.external-actions { display: flex; flex-wrap: wrap; align-items: flex-start; gap: .75rem; margin-top: .85rem; }
+.external-actions details { flex: 1 1 520px; margin: 0; }
 .page-panel { margin-top: 1rem; }
 .preview-controls { display: flex; justify-content: space-between; align-items: center; gap: 1rem; margin-top: 1rem; }
 .preview-controls > span { color: var(--muted); font-size: .76rem; font-weight: 700; }
@@ -1014,7 +1080,8 @@ footer a { white-space: nowrap; text-decoration: none; font-weight: 750; }
   .metrics { grid-template-columns: 1fr 1fr; }
   .metric { border-right: 1px solid var(--line); }
   .separation-note { grid-template-columns: 1fr; }
-  .retrieval-summary, .details-grid, .overview-grid, .node-grid, .evidence-cards { grid-template-columns: 1fr; }
+  .retrieval-summary, .details-grid, .overview-grid, .node-grid, .evidence-cards, .external-grid { grid-template-columns: 1fr; }
+  .external-summary { grid-template-columns: 1fr 1fr; }
   .case-toolbar { top: 74px; grid-template-columns: 1fr; }
   .badges { display: none; }
   .preview-canvas { height: 680px; }
@@ -1028,6 +1095,7 @@ footer a { white-space: nowrap; text-decoration: none; font-weight: 750; }
   .hero-actions { flex-direction: column; }
   .form-grid, .stage-list, .outcome-summary { grid-template-columns: 1fr; }
   .canonical-controls { grid-template-columns: 1fr; }
+  .external-summary { grid-template-columns: 1fr; }
   .canonical-controls > div, .canonical-controls label, .canonical-controls .button { grid-column: 1; }
   .button { text-align: center; }
   .metrics { grid-template-columns: 1fr; }
@@ -1296,6 +1364,7 @@ async function initializeLiveInspector() {
     const importAvailable = value.result_package_import === 'available';
     const semanticAvailable = value.semantic_requirement_assist === 'available_local_qwen';
     const canonicalAvailable = value.model_f1_f4_generation === 'available_explicit_local_qwen';
+    const guispector = value.optional_guispector_verification || {};
     capability.textContent = canonicalAvailable ? 'Complete local flow available' : (available ? 'Local drafts available' : 'Portable replay only');
     capability.className = `capability-pill ${available ? 'available' : 'unavailable'}`;
     byId('analyze-requirement').disabled = !available;
@@ -1312,6 +1381,10 @@ async function initializeLiveInspector() {
       ? `Available: ${value.canonical_model_flow.profile.profile_name}`
       : 'Not connected';
     byId('canonical-flow-status').className = `module-status ${canonicalAvailable ? 'available' : 'unavailable'}`;
+    byId('guispector-runtime-status').textContent = guispector.status === 'ready_for_operator_started_external_run'
+      ? 'External runtime ready · not run'
+      : 'Packet ready · external run not connected';
+    byId('guispector-runtime-status').className = `capability-pill ${guispector.status === 'ready_for_operator_started_external_run' ? 'available' : 'unavailable'}`;
     byId('canonical-b-aux').disabled = !value.canonical_model_flow.requirement_assist_available;
     if (!value.canonical_model_flow.requirement_assist_available) byId('canonical-b-aux').checked = false;
     byId('import-package-button').disabled = !importAvailable;
@@ -1328,6 +1401,8 @@ async function initializeLiveInspector() {
     byId('generate-canonical').dataset.available = 'false';
     byId('generate-canonical').disabled = true;
     byId('canonical-flow-status').textContent = 'Not connected';
+    byId('guispector-runtime-status').textContent = 'Packet ready · external run not connected';
+    byId('guispector-runtime-status').className = 'capability-pill unavailable';
     byId('canonical-flow-status').className = 'module-status unavailable';
     byId('semantic-assist-status').textContent = 'Not connected';
     byId('semantic-assist-status').className = 'module-status unavailable';
@@ -1561,6 +1636,49 @@ function renderMetrics(counts) {
   ).join('');
 }
 
+function renderGuispectorCase(report, index) {
+  const item = report.cases[index];
+  const requirement = item.guispector_requirement;
+  byId('guispector-case').innerHTML = `<strong>${escapeHtml(requirement.title)}</strong><p>${escapeHtml(requirement.description.split('\\n')[0])}</p><ul>${requirement.acceptance_criteria.map(row => `<li><strong>${escapeHtml(row.criterion_name)}</strong> · ${escapeHtml(row.description)}</li>`).join('')}</ul><p><a href="${escapeHtml(item.bundle_relative_start_url)}" target="_blank" rel="noopener">Open exact package</a></p>`;
+}
+
+function renderGuispector(report) {
+  const scope = report.scope;
+  const reference = report.reference_profile;
+  const current = report.current_result;
+  const summary = [
+    [scope.result_package_count, 'prepared result packages'],
+    [scope.acceptance_criterion_count, 'fixed acceptance criteria'],
+    [current.decision_count, 'external decisions imported'],
+    ['No', 'formal comparison claim'],
+  ];
+  byId('guispector-summary').innerHTML = summary.map(([value, label]) => `<div class="external-stat"><strong>${escapeHtml(value)}</strong><span>${escapeHtml(label)}</span></div>`).join('');
+  const published = report.published_reference_metrics;
+  const rows = [
+    ['Requirement met', published.requirement_level_f1.met],
+    ['Requirement unmet', published.requirement_level_f1.unmet],
+    ['Requirement partial', published.requirement_level_f1.partial],
+    ['Criterion met', published.acceptance_criterion_level_f1.met],
+    ['Criterion unmet', published.acceptance_criterion_level_f1.unmet],
+  ];
+  byId('guispector-metrics').innerHTML = `<table class="metric-table"><thead><tr><th>F1 class</th><th>Paper</th><th>This packet</th></tr></thead><tbody>${rows.map(([label, value]) => `<tr><td>${escapeHtml(label)}</td><td>${Number(value).toFixed(3)}</td><td>Not run</td></tr>`).join('')}</tbody></table>`;
+  const select = byId('guispector-case-select');
+  select.innerHTML = report.cases.map((item, index) => `<option value="${index}">${String(item.execution_index).padStart(2, '0')} · ${escapeHtml(item.case_id)} · ${escapeHtml(item.condition_id)}</option>`).join('');
+  select.addEventListener('change', () => renderGuispectorCase(report, Number(select.value)));
+  byId('guispector-json').textContent = pretty({
+    status: report.status,
+    execution_performed: report.execution_performed,
+    evaluation_identity: report.evaluation_identity,
+    upstream: report.upstream,
+    scope,
+    input_policy: report.input_policy,
+    reference_profile: reference,
+    published_reference_metrics: published,
+    current_result: current,
+  });
+  renderGuispectorCase(report, 0);
+}
+
 function renderRequirement(value) {
   const requirement = value.requirement || value.requirement_summary || 'Unavailable';
   const useCases = Array.isArray(value.use_cases) ? value.use_cases.length : 0;
@@ -1678,12 +1796,14 @@ async function showCase(item) {
 
 async function main() {
   const catalog = await getJson('catalog.json');
-  const [retrieval, retrievalExperiment] = await Promise.all([
+  const [retrieval, retrievalExperiment, guispector] = await Promise.all([
     getJson(catalog.retrieval_comparison),
     getJson(catalog.retrieval_experiment),
+    getJson(catalog.guispector_evaluation),
   ]);
   renderMetrics(catalog.counts);
   renderRetrievalComparison(retrieval, retrievalExperiment);
+  renderGuispector(guispector);
   const select = byId('case-select');
   select.innerHTML = catalog.cases.map(item =>
     `<option value="${item.execution_index - 1}">${String(item.execution_index).padStart(2, '0')} · ${item.case_id} · ${item.condition_id}</option>`
@@ -1712,7 +1832,10 @@ projection, validated F1-F4 outputs, preserved failure location, final
 PageSpec, objective Chrome evidence, semantic sidecar, screenshot, interaction
 trace, runnable final page, and a deterministic BM25/RRF/TF-IDF retrieval
 comparison with a blinded metric protocol and descriptive local efficiency
-evidence.
+evidence. It also includes a read-only GUISpector interoperability packet that
+maps the same twelve exact pages to their frozen requirements and twenty-four
+acceptance criteria. The packet is prepared but no external GUISpector run is
+included.
 
 When served from the repository with `scripts/run_req2web_inspector.py`, the
 same interface also accepts irregular requirements, runs deterministic input
@@ -1729,6 +1852,15 @@ acceptance for new drafts remain explicitly not executed.
 
 No GPU, model, hidden material, network connection, or browser automation is
 required. The replay does not regenerate or repair any evidence.
+
+The optional GUISpector packet is `guispector_evaluation.json`. A later
+operator-started GUISpector run requires a separate upstream checkout, Docker,
+and the model-service credentials required by that upstream project. Imported
+decisions can be evaluated with `scripts/guispector_result_package_bridge.py`.
+The resulting precision, recall, and F1 values use one-vs-rest requirement
+classes (`met`, `unmet`, `partial`) and criterion classes (`met`, `unmet`). The
+current frozen set has only internal positive references, so absent classes
+remain undefined and the result is not independent gold or formal evaluation.
 
 ## Run
 
@@ -2226,6 +2358,7 @@ def build_phase6_reviewer_bundle(
             ),
             "retrieval_comparison": "retrieval_comparison.json",
             "retrieval_experiment": "retrieval_experiment.json",
+            "guispector_evaluation": "guispector_evaluation.json",
             "cases": [
                 {
                     "execution_index": record["execution_index"],
@@ -2236,8 +2369,15 @@ def build_phase6_reviewer_bundle(
                 for record in case_records
             ],
         }
+        try:
+            guispector_evaluation = build_guispector_evaluation(temp_root, catalog)
+        except GUISpectorSidecarError as exc:
+            raise Phase6ReplayError(
+                f"GUISpector evaluation packet failed closed: {exc}"
+            ) from exc
         _write_json(temp_root / "retrieval_comparison.json", retrieval_comparison)
         _write_json(temp_root / "retrieval_experiment.json", retrieval_experiment)
+        _write_json(temp_root / "guispector_evaluation.json", guispector_evaluation)
         _copy_regular_file(
             experiment_root / "annotation" / "llm_prelabel_template.json",
             temp_root
@@ -2360,6 +2500,31 @@ def validate_phase6_reviewer_bundle(root: Path) -> dict[str, Any]:
     catalog_cases = _list(catalog.get("cases"), "reviewer catalog cases")
     if catalog.get("counts") != counts or len(catalog_cases) != ROW_COUNT:
         raise Phase6ReplayError("reviewer catalog aggregate drifted")
+    guispector_path = _safe_relative_path(str(catalog.get("guispector_evaluation")))
+    if guispector_path != "guispector_evaluation.json":
+        raise Phase6ReplayError("GUISpector evaluation path drifted")
+    try:
+        guispector = validate_guispector_evaluation(bundle_root)
+    except GUISpectorSidecarError as exc:
+        raise Phase6ReplayError(
+            f"GUISpector evaluation packet failed closed: {exc}"
+        ) from exc
+    guispector_scope = _mapping(guispector.get("scope"), "GUISpector scope")
+    guispector_reference = _mapping(
+        guispector.get("reference_profile"),
+        "GUISpector reference profile",
+    )
+    if (
+        guispector.get("schema_version") != GUISPECTOR_EVALUATION_SCHEMA_VERSION
+        or guispector.get("status") != "prepared_not_executed"
+        or guispector.get("execution_performed") is not False
+        or guispector_scope.get("result_package_count") != ROW_COUNT
+        or guispector_scope.get("acceptance_criterion_count")
+        != SEMANTIC_CRITERION_COUNT
+        or guispector_reference.get("independent_human_gold") is not False
+        or guispector_reference.get("paper_comparison_eligible") is not False
+    ):
+        raise Phase6ReplayError("GUISpector evaluation claim boundary drifted")
     retrieval_path = _safe_relative_path(str(catalog.get("retrieval_comparison")))
     retrieval = _read_json(
         bundle_root / Path(retrieval_path),
