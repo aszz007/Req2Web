@@ -20,6 +20,7 @@ BIGMODEL_AGENT_ID = "zhipu-glm-4.6v"
 BIGMODEL_API_MODEL = "glm-4.6v"
 BIGMODEL_API_URL = "https://open.bigmodel.cn/api/paas/v4/chat/completions"
 BIGMODEL_REQUEST_TIMEOUT_SECONDS = 180
+BIGMODEL_BROWSER_ACTION_BUDGET = 5
 
 
 class BigModelProviderError(RuntimeError):
@@ -286,6 +287,10 @@ def _history_and_screenshot(input_items: Sequence[Mapping[str, Any]]) -> tuple[s
     return f"{task_text}\n\nExecuted action history:\n{history_text}", latest_screenshot
 
 
+def _computer_action_count(input_items: Sequence[Mapping[str, Any]]) -> int:
+    return sum(1 for item in input_items if item.get("type") == "computer_call")
+
+
 def _display_dimensions(tools: Sequence[Mapping[str, Any]]) -> tuple[int, int]:
     for tool in tools:
         if tool.get("type") == "computer-preview":
@@ -302,6 +307,8 @@ def build_bigmodel_request(
     computer_tools: Sequence[Mapping[str, Any]],
 ) -> dict[str, Any]:
     task_history, screenshot = _history_and_screenshot(input_items)
+    action_count = _computer_action_count(input_items)
+    decision_only = action_count >= BIGMODEL_BROWSER_ACTION_BUDGET
     width, height = _display_dimensions(computer_tools)
     system_text = (
         "You are a GUI verification agent controlling a browser from screenshots. "
@@ -327,6 +334,17 @@ def build_bigmodel_request(
         "If the same action produces no visible change twice, do not repeat it again; "
         "treat the unchanged state as evidence and finish with the supported decision."
     )
+    tools = bigmodel_tools(display_width=width, display_height=height)
+    tool_choice: Any = "auto"
+    if decision_only:
+        tools = [tool for tool in tools if tool["function"]["name"] == "finish"]
+        tool_choice = "required"
+        system_text += (
+            f" The bounded browser-action budget of {BIGMODEL_BROWSER_ACTION_BUDGET} "
+            "actions is exhausted. Do not request another browser action. Call finish "
+            "now and report met or unmet only from the latest visible screenshot and "
+            "recorded action history."
+        )
     return {
         "model": BIGMODEL_API_MODEL,
         "messages": [
@@ -339,8 +357,8 @@ def build_bigmodel_request(
                 ],
             },
         ],
-        "tools": bigmodel_tools(display_width=width, display_height=height),
-        "tool_choice": "auto",
+        "tools": tools,
+        "tool_choice": tool_choice,
         "thinking": {"type": "enabled"},
         "temperature": 0.1,
         "stream": False,

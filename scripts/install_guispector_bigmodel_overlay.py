@@ -364,6 +364,37 @@ def install(repository_root: Path, runtime_root: Path) -> dict[str, object]:
     ):
         if str(agent_path.relative_to(runtime_root)) not in changed:
             changed.append(str(agent_path.relative_to(runtime_root)))
+    if _replace_once(
+        agent_path,
+        '''                # Enforce maximum reasoning steps
+                turns_completed += 1
+                if isinstance(max_reasoning_steps, int) and max_reasoning_steps > 0 and turns_completed >= max_reasoning_steps:
+                    raise MaximumReasoningStepsReachedException(
+                        f"Maximum reasoning steps reached: {max_reasoning_steps}"
+                    )
+''',
+        '''                # Enforce the limit only while another model turn would be required.
+                turns_completed += 1
+                turn_has_final_message = any(
+                    isinstance(output_item, dict)
+                    and output_item.get("type") == "message"
+                    and output_item.get("role") == "assistant"
+                    for output_item in response.get("output", [])
+                )
+                if (
+                    isinstance(max_reasoning_steps, int)
+                    and max_reasoning_steps > 0
+                    and turns_completed >= max_reasoning_steps
+                    and not turn_has_final_message
+                ):
+                    raise MaximumReasoningStepsReachedException(
+                        f"Maximum reasoning steps reached: {max_reasoning_steps}"
+                    )
+''',
+        "turn_has_final_message = any(",
+    ):
+        if str(agent_path.relative_to(runtime_root)) not in changed:
+            changed.append(str(agent_path.relative_to(runtime_root)))
 
     tasks_path = runtime_root / "webapp/setups/tasks.py"
     if _replace_once(

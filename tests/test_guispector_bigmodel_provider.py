@@ -14,6 +14,7 @@ if str(SRC) not in sys.path:
 from req2web_inspector.guispector_bigmodel_provider import (  # noqa: E402
     BIGMODEL_API_MODEL,
     BIGMODEL_API_URL,
+    BIGMODEL_BROWSER_ACTION_BUDGET,
     BigModelProviderError,
     build_bigmodel_request,
     create_bigmodel_response,
@@ -144,6 +145,38 @@ class BigModelProviderTests(unittest.TestCase):
             ],
         )
         self.assertEqual(normalized["usage"]["input_tokens"], 11)
+
+    def test_action_budget_forces_a_model_decision_without_fabricating_one(self) -> None:
+        history: list[dict[str, object]] = []
+        for index in range(BIGMODEL_BROWSER_ACTION_BUDGET):
+            history.extend(
+                [
+                    {
+                        "type": "computer_call",
+                        "call_id": f"call-{index}",
+                        "action": {"type": "scroll", "scroll_y": 100},
+                    },
+                    {
+                        "type": "computer_call_output",
+                        "call_id": f"call-{index}",
+                        "output": {
+                            "type": "input_image",
+                            "image_url": f"data:image/png;base64,SHOT{index}",
+                        },
+                    },
+                ]
+            )
+        request = build_bigmodel_request(
+            input_items=INPUT_ITEMS + history,
+            computer_tools=COMPUTER_TOOLS,
+        )
+        self.assertEqual(request["tool_choice"], "required")
+        self.assertEqual(
+            [tool["function"]["name"] for tool in request["tools"]],
+            ["finish"],
+        )
+        self.assertIn("Do not request another browser action", request["messages"][0]["content"])
+        self.assertNotIn("met", request["messages"][1]["content"][1]["text"].lower())
 
     def test_finish_tool_call_becomes_strict_assistant_json(self) -> None:
         normalized = normalize_bigmodel_response(
