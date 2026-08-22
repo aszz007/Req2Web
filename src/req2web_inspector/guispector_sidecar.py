@@ -20,7 +20,7 @@ GUISPECTOR_EVALUATION_SCHEMA_VERSION = "req2web.guispector.evaluation.v1"
 GUISPECTOR_DECISION_IMPORT_SCHEMA_VERSION = "req2web.guispector.decision_import.v1"
 GUISPECTOR_COMPARISON_SCHEMA_VERSION = "req2web.guispector.comparison.v1"
 GUISPECTOR_BATCH_EXECUTION_SCHEMA_VERSION = "req2web.guispector.batch_execution.v1"
-GUISPECTOR_BATCH_METRICS_SCHEMA_VERSION = "req2web.guispector.batch_metrics.v1"
+GUISPECTOR_BATCH_METRICS_SCHEMA_VERSION = "req2web.guispector.batch_metrics.v2"
 GUISPECTOR_PREFLIGHT_SCHEMA_VERSION = "req2web.guispector.preflight.v3"
 
 GUISPECTOR_REPOSITORY_URL = "https://github.com/kristiankolthoff/GUISpector"
@@ -597,6 +597,63 @@ def _summary_statistics(values: Sequence[float]) -> dict[str, Any]:
     }
 
 
+def _conservative_end_to_end_metrics(
+    references: Sequence[str],
+    predictions: Sequence[str | None],
+) -> dict[str, Any]:
+    """Count verifier abstentions as operational misses, never semantic labels."""
+
+    if len(references) != len(predictions):
+        raise GUISpectorSidecarError("end-to-end reference and prediction counts differ")
+    true_positive = sum(
+        reference == "met" and prediction == "met"
+        for reference, prediction in zip(references, predictions)
+    )
+    false_positive = sum(
+        reference != "met" and prediction == "met"
+        for reference, prediction in zip(references, predictions)
+    )
+    false_negative = sum(
+        reference == "met" and prediction != "met"
+        for reference, prediction in zip(references, predictions)
+    )
+    predicted_positive = true_positive + false_positive
+    reference_positive = true_positive + false_negative
+    precision = true_positive / predicted_positive if predicted_positive else None
+    recall = true_positive / reference_positive if reference_positive else None
+    if precision is None or recall is None:
+        f1 = None
+    elif precision + recall == 0:
+        f1 = 0.0
+    else:
+        f1 = 2 * precision * recall / (precision + recall)
+    correct_complete = sum(
+        prediction is not None and prediction == reference
+        for reference, prediction in zip(references, predictions)
+    )
+    return {
+        "item_count": len(references),
+        "completed_prediction_count": sum(
+            prediction is not None for prediction in predictions
+        ),
+        "abstention_count": sum(prediction is None for prediction in predictions),
+        "accuracy_with_abstention_as_incorrect": (
+            correct_complete / len(references) if references else None
+        ),
+        "met_positive_detection": {
+            "support": reference_positive,
+            "predicted_count": predicted_positive,
+            "true_positive": true_positive,
+            "false_positive": false_positive,
+            "false_negative_including_abstentions": false_negative,
+            "precision": precision,
+            "recall": recall,
+            "f1": f1,
+            "defined": precision is not None and recall is not None,
+        },
+    }
+
+
 def build_guispector_batch_metrics(
     evaluation: Mapping[str, Any],
     batch_execution: Mapping[str, Any],
@@ -749,6 +806,49 @@ def build_guispector_batch_metrics(
         input_cost + output_cost
         for input_cost, output_cost in zip(paper_input_costs, paper_output_costs)
     ]
+    all_requirement_references: list[str] = []
+    all_requirement_predictions: list[str | None] = []
+    all_criterion_references: list[str] = []
+    all_criterion_predictions: list[str | None] = []
+    for case, normalized_row in zip(packet_cases, normalized_rows):
+        reference = _mapping(case.get("internal_reference"), "internal reference")
+        reference_criteria = [
+            _mapping(value, "internal reference criterion")
+            for value in _list(
+                reference.get("acceptance_criteria"),
+                "internal reference criteria",
+            )
+        ]
+        all_requirement_references.append(
+            _nonempty(reference.get("requirement_status"), "reference status")
+        )
+        all_criterion_references.extend(
+            "met" if value.get("met") is True else "unmet"
+            for value in reference_criteria
+        )
+        if normalized_row["status"] == "error":
+            all_requirement_predictions.append(None)
+            all_criterion_predictions.extend(None for _ in reference_criteria)
+        else:
+            decision = _mapping(
+                normalized_row.get("decision"),
+                "normalized batch decision",
+            )
+            all_requirement_predictions.append(
+                _nonempty(decision.get("requirement_label"), "decision status")
+            )
+            all_criterion_predictions.extend(
+                _nonempty(
+                    _mapping(value, "normalized decision criterion").get("label"),
+                    "decision criterion label",
+                )
+                for value in _list(
+                    decision.get("acceptance_criteria"),
+                    "normalized decision criteria",
+                )
+            )
+    if len(all_criterion_predictions) != len(all_criterion_references):
+        raise GUISpectorSidecarError("end-to-end criterion count drifted")
     report: dict[str, Any] = {
         "schema_version": GUISPECTOR_BATCH_METRICS_SCHEMA_VERSION,
         "status": "batch_metrics_complete_with_execution_errors",
@@ -796,6 +896,20 @@ def build_guispector_batch_metrics(
                 _CRITERION_LABELS,
             ),
         },
+        "conservative_end_to_end_metrics": {
+            "policy": (
+                "An execution error is counted as an operational miss for this "
+                "metric, but remains an abstention and is never relabeled unmet."
+            ),
+            "requirement_level": _conservative_end_to_end_metrics(
+                all_requirement_references,
+                all_requirement_predictions,
+            ),
+            "acceptance_criterion_level": _conservative_end_to_end_metrics(
+                all_criterion_references,
+                all_criterion_predictions,
+            ),
+        },
         "published_guispector_reference": {
             **packet["published_reference_metrics"],
             "efficiency_average_of_five_app_means": {
@@ -817,6 +931,7 @@ def build_guispector_batch_metrics(
         "limitations": [
             packet["reference_profile"]["limitation"],
             "Execution errors are abstentions and are never mapped to unmet labels.",
+            "Conservative end-to-end metrics count abstentions as operational misses only; they do not create unmet or partial ground truth.",
             "Efficiency comparisons use a fixed five-action GLM compatibility budget, while the paper used a different model and protocol.",
             "Failed upstream runs did not persist aggregate token usage, so token and normalized-cost statistics cover completed decisions only.",
         ],

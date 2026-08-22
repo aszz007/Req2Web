@@ -109,6 +109,39 @@ class GUISpectorSidecarTests(unittest.TestCase):
             1,
         )
         self.assertEqual(report["all_attempt_efficiency"]["steps"]["mean"], 5.0)
+        conservative = report["conservative_end_to_end_metrics"]
+        self.assertEqual(
+            conservative["requirement_level"]["abstention_count"],
+            1,
+        )
+        self.assertEqual(
+            conservative["requirement_level"][
+                "accuracy_with_abstention_as_incorrect"
+            ],
+            0.5,
+        )
+        self.assertEqual(
+            conservative["requirement_level"]["met_positive_detection"][
+                "precision"
+            ],
+            1.0,
+        )
+        self.assertEqual(
+            conservative["requirement_level"]["met_positive_detection"][
+                "recall"
+            ],
+            0.5,
+        )
+        self.assertAlmostEqual(
+            conservative["requirement_level"]["met_positive_detection"]["f1"],
+            2 / 3,
+        )
+        self.assertAlmostEqual(
+            conservative["acceptance_criterion_level"][
+                "met_positive_detection"
+            ]["f1"],
+            2 / 3,
+        )
         self.assertFalse(report["paper_comparison_eligible"])
 
     def test_batch_metrics_reject_error_rows_with_decisions(self) -> None:
