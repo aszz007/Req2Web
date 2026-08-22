@@ -173,6 +173,134 @@ class GUISpectorSidecarTests(unittest.TestCase):
         with self.assertRaisesRegex(GUISpectorSidecarError, "carries a decision"):
             build_guispector_batch_metrics(evaluation, execution)
 
+    def test_batch_metrics_compute_cache_aware_glm_cost(self) -> None:
+        evaluation = {
+            "evaluation_identity": "priced-batch",
+            "scope": {"acceptance_criterion_count": 1},
+            "reference_profile": {"limitation": "Positive-only reference."},
+            "published_reference_metrics": {},
+            "cases": [_case(1, "met", True)],
+        }
+        evaluation["cases"][0]["condition_id"] = None
+        execution = {
+            "schema_version": GUISPECTOR_BATCH_EXECUTION_SCHEMA_VERSION,
+            "evaluation_identity": "priced-batch",
+            "rows": [
+                {
+                    "execution_index": 1,
+                    "case_id": "case-1",
+                    "condition_id": None,
+                    "run_id": 13,
+                    "status": "met",
+                    "steps_taken": 1,
+                    "elapsed_s": 2.0,
+                    "usage": {
+                        "tokens_in": 1000,
+                        "cached_tokens": 200,
+                        "tokens_out": 100,
+                        "reasoning_tokens": 40,
+                        "provider_calls": [
+                            {
+                                "input_tokens": 1000,
+                                "cached_tokens": 200,
+                                "output_tokens": 100,
+                                "reasoning_tokens": 40,
+                            }
+                        ],
+                    },
+                    "decision": _raw_decision("met", True),
+                    "error": None,
+                }
+            ],
+        }
+        report = build_guispector_batch_metrics(evaluation, execution)
+        pricing = report["actual_glm_46v_cost"]
+        self.assertEqual(report["status"], "batch_metrics_complete")
+        self.assertEqual(pricing["status"], "exact_all_attempts")
+        self.assertEqual(pricing["token_totals"]["uncached_input"], 800)
+        self.assertEqual(pricing["token_totals"]["cached_input"], 200)
+        self.assertEqual(pricing["token_totals"]["reasoning_within_output"], 40)
+        self.assertAlmostEqual(pricing["cost_cny_totals"]["uncached_input"], 0.0008)
+        self.assertAlmostEqual(pricing["cost_cny_totals"]["cache_hit_input"], 0.00004)
+        self.assertAlmostEqual(pricing["cost_cny_totals"]["output"], 0.0003)
+        self.assertAlmostEqual(pricing["cost_cny_totals"]["total"], 0.00114)
+
+    def test_batch_metrics_reject_cached_tokens_above_input(self) -> None:
+        evaluation = {
+            "evaluation_identity": "invalid-cache-batch",
+            "scope": {"acceptance_criterion_count": 1},
+            "reference_profile": {"limitation": "Positive-only reference."},
+            "published_reference_metrics": {},
+            "cases": [_case(1, "met", True)],
+        }
+        evaluation["cases"][0]["condition_id"] = None
+        execution = {
+            "schema_version": GUISPECTOR_BATCH_EXECUTION_SCHEMA_VERSION,
+            "evaluation_identity": "invalid-cache-batch",
+            "rows": [
+                {
+                    "execution_index": 1,
+                    "case_id": "case-1",
+                    "condition_id": None,
+                    "run_id": 14,
+                    "status": "met",
+                    "steps_taken": 1,
+                    "elapsed_s": 2.0,
+                    "usage": {
+                        "tokens_in": 10,
+                        "tokens_out": 1,
+                        "provider_calls": [
+                            {
+                                "input_tokens": 10,
+                                "cached_tokens": 11,
+                                "output_tokens": 1,
+                                "reasoning_tokens": 0,
+                            }
+                        ],
+                    },
+                    "decision": _raw_decision("met", True),
+                    "error": None,
+                }
+            ],
+        }
+        with self.assertRaisesRegex(GUISpectorSidecarError, "cached tokens exceed"):
+            build_guispector_batch_metrics(evaluation, execution)
+
+    def test_batch_metrics_use_guispector_criterion_derived_status(self) -> None:
+        evaluation = {
+            "evaluation_identity": "derived-status-batch",
+            "scope": {"acceptance_criterion_count": 1},
+            "reference_profile": {"limitation": "Positive-only reference."},
+            "published_reference_metrics": {},
+            "cases": [_case(1, "met", True)],
+        }
+        evaluation["cases"][0]["condition_id"] = None
+        execution = {
+            "schema_version": GUISPECTOR_BATCH_EXECUTION_SCHEMA_VERSION,
+            "evaluation_identity": "derived-status-batch",
+            "rows": [
+                {
+                    "execution_index": 1,
+                    "case_id": "case-1",
+                    "condition_id": None,
+                    "run_id": 15,
+                    "status": "unmet",
+                    "steps_taken": 1,
+                    "elapsed_s": 2.0,
+                    "usage": {"tokens_in": 10, "tokens_out": 1},
+                    "decision": _raw_decision("partially_met", False),
+                    "error": None,
+                }
+            ],
+        }
+        report = build_guispector_batch_metrics(evaluation, execution)
+        normalized = report["normalized_rows"][0]["decision"]
+        self.assertEqual(normalized["requirement_label"], "unmet")
+        self.assertEqual(
+            normalized["model_reported_requirement_label"],
+            "partial",
+        )
+
     def test_documented_status_aliases_are_normalized(self) -> None:
         self.assertEqual(
             normalize_guispector_decision(

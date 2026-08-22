@@ -320,7 +320,8 @@ def build_bigmodel_request(
         "direction plus step, type uses content, and key uses a key string. "
         "Judge only the web page content inside the browser; ignore browser chrome, "
         "private-browsing notices, operating-system notices, and unrelated tabs. "
-        "Inspect the latest screenshot and call exactly one supplied tool. Take the "
+        "Inspect the latest screenshot and take the shortest evidence path. "
+        "While browser tools are available, call exactly one supplied tool. Take the "
         "shortest evidence path: do not explore unrelated controls, and do not require "
         "every page feature to be exercised when the listed criteria are already clear. "
         "Use one browser action only when more evidence is needed. If a criterion names "
@@ -329,26 +330,24 @@ def build_bigmodel_request(
         "criterion's stated confirmation location; then call finish instead of exploring "
         "other page features. Never repeat an identical scroll when the screenshot is unchanged. "
         "Use finish as soon as every listed criterion can be judged, echoing each criterion "
-        "name exactly as provided. Never invent visual evidence, "
-        "never call multiple tools in one response, and never output prose instead of a tool call. "
+        "name exactly as provided. Never invent visual evidence and never call multiple "
+        "tools in one response. "
         "If the same action produces no visible change twice, do not repeat it again; "
         "treat the unchanged state as evidence and finish with the supported decision."
     )
     tools = bigmodel_tools(display_width=width, display_height=height)
-    tool_choice: Any = "auto"
     if decision_only:
-        tools = [tool for tool in tools if tool["function"]["name"] == "finish"]
-        tool_choice = {
-            "type": "function",
-            "function": {"name": "finish"},
-        }
         system_text += (
             f" The bounded browser-action budget of {BIGMODEL_BROWSER_ACTION_BUDGET} "
-            "actions is exhausted. Do not request another browser action. Call finish "
-            "now and report met or unmet only from the latest visible screenshot and "
-            "recorded action history."
+            "actions is exhausted. No browser tool is available now. Return exactly one "
+            "JSON object and no prose, markdown, or tool call. The object must contain "
+            "status, explanation, detailed_summary, acceptance_criteria_results, "
+            "final_url, and optional notes. Status must be met, not_met, or partially_met. "
+            "Each acceptance_criteria_results item must contain criterion_name, met, and "
+            "evidence, with every provided criterion name echoed exactly. Judge only from "
+            "the latest visible screenshot and recorded action history."
         )
-    return {
+    request: dict[str, Any] = {
         "model": BIGMODEL_API_MODEL,
         "messages": [
             {"role": "system", "content": system_text},
@@ -360,12 +359,16 @@ def build_bigmodel_request(
                 ],
             },
         ],
-        "tools": tools,
-        "tool_choice": tool_choice,
         "thinking": {"type": "enabled"},
         "temperature": 0.1,
         "stream": False,
     }
+    if decision_only:
+        request["response_format"] = {"type": "json_object"}
+    else:
+        request["tools"] = tools
+        request["tool_choice"] = "auto"
+    return request
 
 
 def _require_exact_keys(
@@ -534,6 +537,7 @@ def normalize_bigmodel_response(
     response_data: Mapping[str, Any],
     *,
     computer_tools: Sequence[Mapping[str, Any]],
+    allow_plain_decision: bool = False,
 ) -> dict[str, Any]:
     choices = response_data.get("choices")
     if not isinstance(choices, list) or len(choices) != 1 or not isinstance(choices[0], Mapping):
@@ -541,31 +545,41 @@ def normalize_bigmodel_response(
     message = choices[0].get("message")
     if not isinstance(message, Mapping):
         raise BigModelProviderError("BigModel response has no assistant message")
-    tool_calls = message.get("tool_calls")
-    if not isinstance(tool_calls, list) or len(tool_calls) != 1:
-        raise BigModelProviderError("BigModel must return exactly one tool call")
-    tool_call = tool_calls[0]
-    if not isinstance(tool_call, Mapping) or not isinstance(tool_call.get("function"), Mapping):
-        raise BigModelProviderError("BigModel returned a malformed tool call")
-    function = tool_call["function"]
-    name = str(function.get("name", ""))
-    raw_arguments = function.get("arguments")
-    try:
-        arguments = json.loads(raw_arguments) if isinstance(raw_arguments, str) else raw_arguments
-    except json.JSONDecodeError as exc:
-        raise BigModelProviderError("BigModel returned invalid tool-call JSON") from exc
-    if not isinstance(arguments, Mapping):
-        raise BigModelProviderError("BigModel tool arguments are not an object")
     response_id = str(response_data.get("id") or "bigmodel-response")
-    call_id = str(tool_call.get("id") or f"{response_id}-tool")
     usage = response_data.get("usage") if isinstance(response_data.get("usage"), Mapping) else {}
+    prompt_details = (
+        usage.get("prompt_tokens_details")
+        if isinstance(usage.get("prompt_tokens_details"), Mapping)
+        else {}
+    )
+    completion_details = (
+        usage.get("completion_tokens_details")
+        if isinstance(usage.get("completion_tokens_details"), Mapping)
+        else {}
+    )
     normalized_usage = {
         "input_tokens": int(usage.get("prompt_tokens", 0) or 0),
         "output_tokens": int(usage.get("completion_tokens", 0) or 0),
         "total_tokens": int(usage.get("total_tokens", 0) or 0),
-        "output_tokens_details": {"reasoning_tokens": 0},
+        "input_tokens_details": {
+            "cached_tokens": int(prompt_details.get("cached_tokens", 0) or 0),
+        },
+        "output_tokens_details": {
+            "reasoning_tokens": int(completion_details.get("reasoning_tokens", 0) or 0),
+        },
     }
-    if name == "finish":
+
+    tool_calls = message.get("tool_calls")
+    if not tool_calls:
+        if not allow_plain_decision:
+            raise BigModelProviderError("BigModel must return exactly one tool call")
+        content = message.get("content")
+        try:
+            arguments = json.loads(content) if isinstance(content, str) else content
+        except json.JSONDecodeError as exc:
+            raise BigModelProviderError("BigModel returned invalid final-decision JSON") from exc
+        if not isinstance(arguments, Mapping):
+            raise BigModelProviderError("BigModel final decision is not an object")
         decision = _validate_finish(arguments)
         output = [
             {
@@ -580,17 +594,47 @@ def normalize_bigmodel_response(
             }
         ]
     else:
-        width, height = _display_dimensions(computer_tools)
-        action = _validate_action(name, arguments, width, height)
-        output = [
-            {
-                "type": "computer_call",
-                "call_id": call_id,
-                "status": "completed",
-                "pending_safety_checks": [],
-                "action": action,
-            }
-        ]
+        if not isinstance(tool_calls, list) or len(tool_calls) != 1:
+            raise BigModelProviderError("BigModel must return exactly one tool call")
+        tool_call = tool_calls[0]
+        if not isinstance(tool_call, Mapping) or not isinstance(tool_call.get("function"), Mapping):
+            raise BigModelProviderError("BigModel returned a malformed tool call")
+        function = tool_call["function"]
+        name = str(function.get("name", ""))
+        raw_arguments = function.get("arguments")
+        try:
+            arguments = json.loads(raw_arguments) if isinstance(raw_arguments, str) else raw_arguments
+        except json.JSONDecodeError as exc:
+            raise BigModelProviderError("BigModel returned invalid tool-call JSON") from exc
+        if not isinstance(arguments, Mapping):
+            raise BigModelProviderError("BigModel tool arguments are not an object")
+        call_id = str(tool_call.get("id") or f"{response_id}-tool")
+        if name == "finish":
+            decision = _validate_finish(arguments)
+            output = [
+                {
+                    "type": "message",
+                    "role": "assistant",
+                    "content": [
+                        {
+                            "type": "output_text",
+                            "text": json.dumps(decision, ensure_ascii=False, separators=(",", ":")),
+                        }
+                    ],
+                }
+            ]
+        else:
+            width, height = _display_dimensions(computer_tools)
+            action = _validate_action(name, arguments, width, height)
+            output = [
+                {
+                    "type": "computer_call",
+                    "call_id": call_id,
+                    "status": "completed",
+                    "pending_safety_checks": [],
+                    "action": action,
+                }
+            ]
     return {
         "id": response_id,
         "output": output,
@@ -632,7 +676,13 @@ def create_bigmodel_response(
         raise BigModelProviderError("BigModel returned non-JSON content") from exc
     if not isinstance(response_data, Mapping):
         raise BigModelProviderError("BigModel returned an invalid response object")
-    return normalize_bigmodel_response(response_data, computer_tools=computer_tools)
+    return normalize_bigmodel_response(
+        response_data,
+        computer_tools=computer_tools,
+        allow_plain_decision=(
+            _computer_action_count(input_items) >= BIGMODEL_BROWSER_ACTION_BUDGET
+        ),
+    )
 
 
 def test_bigmodel_connection(

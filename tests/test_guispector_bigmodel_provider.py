@@ -170,15 +170,11 @@ class BigModelProviderTests(unittest.TestCase):
             input_items=INPUT_ITEMS + history,
             computer_tools=COMPUTER_TOOLS,
         )
-        self.assertEqual(
-            request["tool_choice"],
-            {"type": "function", "function": {"name": "finish"}},
-        )
-        self.assertEqual(
-            [tool["function"]["name"] for tool in request["tools"]],
-            ["finish"],
-        )
-        self.assertIn("Do not request another browser action", request["messages"][0]["content"])
+        self.assertNotIn("tool_choice", request)
+        self.assertNotIn("tools", request)
+        self.assertEqual(request["response_format"], {"type": "json_object"})
+        self.assertIn("No browser tool is available now", request["messages"][0]["content"])
+        self.assertIn("Return exactly one JSON object", request["messages"][0]["content"])
         self.assertNotIn("met", request["messages"][1]["content"][1]["text"].lower())
 
     def test_finish_tool_call_becomes_strict_assistant_json(self) -> None:
@@ -202,6 +198,45 @@ class BigModelProviderTests(unittest.TestCase):
         decision = json.loads(output["content"][0]["text"])
         self.assertEqual(decision["status"], "met")
         self.assertEqual(decision["notes"], "")
+
+    def test_terminal_plain_json_becomes_strict_assistant_json(self) -> None:
+        response = _tool_response("finish", {})
+        response["choices"][0]["message"].pop("tool_calls")
+        response["choices"][0]["message"]["content"] = json.dumps(
+            {
+                "status": "partially_met",
+                "explanation": "One control is visible and one is absent.",
+                "detailed_summary": "The final screenshot supports a mixed decision.",
+                "acceptance_criteria_results": [
+                    {"criterion_name": "AC-1", "met": True, "evidence": "Visible."},
+                    {"criterion_name": "AC-2", "met": False, "evidence": "Not visible."},
+                ],
+                "final_url": "http://req2web-pages/cases/01/package/page/index.html",
+            }
+        )
+        response["usage"] = {
+            "prompt_tokens": 100,
+            "completion_tokens": 30,
+            "total_tokens": 130,
+            "prompt_tokens_details": {"cached_tokens": 20},
+            "completion_tokens_details": {"reasoning_tokens": 12},
+        }
+        normalized = normalize_bigmodel_response(
+            response,
+            computer_tools=COMPUTER_TOOLS,
+            allow_plain_decision=True,
+        )
+        decision = json.loads(normalized["output"][0]["content"][0]["text"])
+        self.assertEqual(decision["status"], "partially_met")
+        self.assertEqual(normalized["usage"]["input_tokens_details"]["cached_tokens"], 20)
+        self.assertEqual(normalized["usage"]["output_tokens_details"]["reasoning_tokens"], 12)
+
+    def test_plain_json_is_rejected_before_the_terminal_decision_turn(self) -> None:
+        response = _tool_response("finish", {})
+        response["choices"][0]["message"].pop("tool_calls")
+        response["choices"][0]["message"]["content"] = "{}"
+        with self.assertRaisesRegex(BigModelProviderError, "exactly one tool call"):
+            normalize_bigmodel_response(response, computer_tools=COMPUTER_TOOLS)
 
     def test_glm_desktop_scroll_contract_maps_to_runner_pixels(self) -> None:
         normalized = normalize_bigmodel_response(

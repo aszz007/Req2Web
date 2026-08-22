@@ -20,11 +20,16 @@ GUISPECTOR_EVALUATION_SCHEMA_VERSION = "req2web.guispector.evaluation.v1"
 GUISPECTOR_DECISION_IMPORT_SCHEMA_VERSION = "req2web.guispector.decision_import.v1"
 GUISPECTOR_COMPARISON_SCHEMA_VERSION = "req2web.guispector.comparison.v1"
 GUISPECTOR_BATCH_EXECUTION_SCHEMA_VERSION = "req2web.guispector.batch_execution.v1"
-GUISPECTOR_BATCH_METRICS_SCHEMA_VERSION = "req2web.guispector.batch_metrics.v2"
+GUISPECTOR_BATCH_METRICS_SCHEMA_VERSION = "req2web.guispector.batch_metrics.v3"
 GUISPECTOR_PREFLIGHT_SCHEMA_VERSION = "req2web.guispector.preflight.v3"
 
 GUISPECTOR_REPOSITORY_URL = "https://github.com/kristiankolthoff/GUISpector"
 GUISPECTOR_PAPER_URL = "https://arxiv.org/abs/2510.04791"
+GLM_46V_PRICING_SOURCE_URL = "https://open.bigmodel.cn/pricing"
+GLM_46V_PRICING_OBSERVED_DATE = "2026-08-23"
+GLM_46V_0_TO_32K_INPUT_CNY_PER_MILLION = 1.0
+GLM_46V_0_TO_32K_CACHE_HIT_CNY_PER_MILLION = 0.2
+GLM_46V_0_TO_32K_OUTPUT_CNY_PER_MILLION = 3.0
 START_URL_TOKEN = "{REQ2WEB_INSPECTOR_BASE_URL}"
 
 _REQUIREMENT_LABELS = ("met", "unmet", "partial")
@@ -597,6 +602,115 @@ def _summary_statistics(values: Sequence[float]) -> dict[str, Any]:
     }
 
 
+def _normalize_glm_46v_usage(usage: Mapping[str, Any]) -> dict[str, Any]:
+    """Validate exact per-call usage and price the official sub-32k tier."""
+
+    tokens_in = _nonnegative_integer(usage.get("tokens_in"), "batch input tokens")
+    tokens_out = _nonnegative_integer(
+        usage.get("tokens_out"),
+        "batch output tokens",
+    )
+    raw_calls = usage.get("provider_calls")
+    if raw_calls is None:
+        return {
+            "tokens_in": tokens_in,
+            "tokens_out": tokens_out,
+            "actual_glm_46v_cost": None,
+        }
+    calls = [
+        _mapping(value, "GLM provider call usage")
+        for value in _list(raw_calls, "GLM provider call usages")
+    ]
+    if not calls:
+        raise GUISpectorSidecarError("GLM provider call usages must not be empty")
+    normalized_calls: list[dict[str, Any]] = []
+    for call in calls:
+        input_tokens = _nonnegative_integer(
+            call.get("input_tokens"),
+            "GLM call input tokens",
+        )
+        cached_tokens = _nonnegative_integer(
+            call.get("cached_tokens"),
+            "GLM call cached tokens",
+        )
+        output_tokens = _nonnegative_integer(
+            call.get("output_tokens"),
+            "GLM call output tokens",
+        )
+        reasoning_tokens = _nonnegative_integer(
+            call.get("reasoning_tokens"),
+            "GLM call reasoning tokens",
+        )
+        if cached_tokens > input_tokens:
+            raise GUISpectorSidecarError("GLM cached tokens exceed input tokens")
+        if reasoning_tokens > output_tokens:
+            raise GUISpectorSidecarError("GLM reasoning tokens exceed output tokens")
+        if input_tokens >= 32_000:
+            raise GUISpectorSidecarError(
+                "GLM call does not belong to the priced [0, 32k) input tier"
+            )
+        uncached_tokens = input_tokens - cached_tokens
+        uncached_input_cost = (
+            uncached_tokens
+            / 1_000_000
+            * GLM_46V_0_TO_32K_INPUT_CNY_PER_MILLION
+        )
+        cache_hit_cost = (
+            cached_tokens
+            / 1_000_000
+            * GLM_46V_0_TO_32K_CACHE_HIT_CNY_PER_MILLION
+        )
+        output_cost = (
+            output_tokens
+            / 1_000_000
+            * GLM_46V_0_TO_32K_OUTPUT_CNY_PER_MILLION
+        )
+        normalized_calls.append(
+            {
+                "input_tokens": input_tokens,
+                "cached_tokens": cached_tokens,
+                "uncached_input_tokens": uncached_tokens,
+                "output_tokens": output_tokens,
+                "reasoning_tokens": reasoning_tokens,
+                "cost_cny": {
+                    "uncached_input": uncached_input_cost,
+                    "cache_hit_input": cache_hit_cost,
+                    "output": output_cost,
+                    "total": uncached_input_cost + cache_hit_cost + output_cost,
+                },
+            }
+        )
+    aggregate = {
+        "tokens_in": sum(value["input_tokens"] for value in normalized_calls),
+        "cached_tokens": sum(value["cached_tokens"] for value in normalized_calls),
+        "uncached_input_tokens": sum(
+            value["uncached_input_tokens"] for value in normalized_calls
+        ),
+        "tokens_out": sum(value["output_tokens"] for value in normalized_calls),
+        "reasoning_tokens": sum(
+            value["reasoning_tokens"] for value in normalized_calls
+        ),
+    }
+    if aggregate["tokens_in"] != tokens_in or aggregate["tokens_out"] != tokens_out:
+        raise GUISpectorSidecarError("GLM provider call usage does not sum to run usage")
+    for field in ("cached_tokens", "reasoning_tokens"):
+        if field in usage and _nonnegative_integer(
+            usage.get(field),
+            f"batch {field.replace('_', ' ')}",
+        ) != aggregate[field]:
+            raise GUISpectorSidecarError(f"GLM aggregate {field} drifted")
+    aggregate_cost = {
+        field: sum(value["cost_cny"][field] for value in normalized_calls)
+        for field in ("uncached_input", "cache_hit_input", "output", "total")
+    }
+    return {
+        **aggregate,
+        "provider_call_count": len(normalized_calls),
+        "provider_calls": normalized_calls,
+        "actual_glm_46v_cost": aggregate_cost,
+    }
+
+
 def _conservative_end_to_end_metrics(
     references: Sequence[str],
     predictions: Sequence[str | None],
@@ -683,6 +797,16 @@ def build_guispector_batch_metrics(
     successful_elapsed: list[float] = []
     input_tokens: list[float] = []
     output_tokens: list[float] = []
+    cached_tokens: list[float] = []
+    uncached_input_tokens: list[float] = []
+    priced_input_tokens: list[float] = []
+    priced_output_tokens: list[float] = []
+    reasoning_tokens: list[float] = []
+    provider_call_counts: list[float] = []
+    actual_uncached_input_costs: list[float] = []
+    actual_cache_hit_costs: list[float] = []
+    actual_output_costs: list[float] = []
+    actual_total_costs: list[float] = []
     requirement_references: list[str] = []
     requirement_predictions: list[str] = []
     criterion_references: list[str] = []
@@ -745,17 +869,28 @@ def build_guispector_batch_metrics(
             _mapping(row.get("decision"), "GUISpector batch decision"),
             expected_names,
         )
-        if decision["requirement_label"] != status:
-            raise GUISpectorSidecarError("batch status and decision status differ")
+        model_reported_requirement_label = decision["requirement_label"]
+        met_criterion_count = sum(
+            value["label"] == "met" for value in decision["acceptance_criteria"]
+        )
+        if met_criterion_count == len(decision["acceptance_criteria"]):
+            derived_requirement_label = "met"
+        elif met_criterion_count == 0:
+            derived_requirement_label = "unmet"
+        else:
+            derived_requirement_label = "partial"
+        if derived_requirement_label != status:
+            raise GUISpectorSidecarError(
+                "batch status and criterion-derived GUISpector status differ"
+            )
+        decision["model_reported_requirement_label"] = (
+            model_reported_requirement_label
+        )
+        decision["requirement_label"] = derived_requirement_label
         usage = _mapping(row.get("usage"), "GUISpector batch usage")
-        tokens_in = _nonnegative_integer(
-            usage.get("tokens_in"),
-            "batch input tokens",
-        )
-        tokens_out = _nonnegative_integer(
-            usage.get("tokens_out"),
-            "batch output tokens",
-        )
+        normalized_usage = _normalize_glm_46v_usage(usage)
+        tokens_in = normalized_usage["tokens_in"]
+        tokens_out = normalized_usage["tokens_out"]
         reference = _mapping(case.get("internal_reference"), "internal reference")
         reference_criteria = [
             _mapping(value, "internal reference criterion")
@@ -779,6 +914,22 @@ def build_guispector_batch_metrics(
         successful_elapsed.append(elapsed)
         input_tokens.append(float(tokens_in))
         output_tokens.append(float(tokens_out))
+        actual_cost = normalized_usage["actual_glm_46v_cost"]
+        if actual_cost is not None:
+            priced_input_tokens.append(float(tokens_in))
+            priced_output_tokens.append(float(tokens_out))
+            cached_tokens.append(float(normalized_usage["cached_tokens"]))
+            uncached_input_tokens.append(
+                float(normalized_usage["uncached_input_tokens"])
+            )
+            reasoning_tokens.append(float(normalized_usage["reasoning_tokens"]))
+            provider_call_counts.append(
+                float(normalized_usage["provider_call_count"])
+            )
+            actual_uncached_input_costs.append(actual_cost["uncached_input"])
+            actual_cache_hit_costs.append(actual_cost["cache_hit_input"])
+            actual_output_costs.append(actual_cost["output"])
+            actual_total_costs.append(actual_cost["total"])
         status_counts[status] += 1
         normalized_rows.append(
             {
@@ -789,10 +940,7 @@ def build_guispector_batch_metrics(
                 "status": status,
                 "steps_taken": steps,
                 "elapsed_s": elapsed,
-                "usage": {
-                    "tokens_in": tokens_in,
-                    "tokens_out": tokens_out,
-                },
+                "usage": normalized_usage,
                 "decision": decision,
             }
         )
@@ -806,6 +954,53 @@ def build_guispector_batch_metrics(
         input_cost + output_cost
         for input_cost, output_cost in zip(paper_input_costs, paper_output_costs)
     ]
+    all_attempt_token_usage: dict[str, Any] | str
+    if decision_count == attempt_count:
+        all_attempt_token_usage = {
+            "input_tokens": _summary_statistics(input_tokens),
+            "output_tokens": _summary_statistics(output_tokens),
+        }
+    else:
+        all_attempt_token_usage = "unavailable_for_failed_upstream_runs"
+    actual_cost_coverage = len(actual_total_costs) / attempt_count if attempt_count else None
+    actual_glm_cost: dict[str, Any] = {
+        "status": (
+            "exact_all_attempts"
+            if len(actual_total_costs) == attempt_count
+            else "partial_completed_decisions_only"
+            if actual_total_costs
+            else "unavailable_no_per_call_cache_usage"
+        ),
+        "priced_run_count": len(actual_total_costs),
+        "attempt_count": attempt_count,
+        "coverage": actual_cost_coverage,
+        "currency": "CNY",
+        "model": "GLM-4.6V",
+        "pricing_source": GLM_46V_PRICING_SOURCE_URL,
+        "pricing_observed_date": GLM_46V_PRICING_OBSERVED_DATE,
+        "applied_tier": "per-call input length [0, 32k)",
+        "rates_cny_per_million_tokens": {
+            "uncached_input": GLM_46V_0_TO_32K_INPUT_CNY_PER_MILLION,
+            "cache_hit_input": GLM_46V_0_TO_32K_CACHE_HIT_CNY_PER_MILLION,
+            "output": GLM_46V_0_TO_32K_OUTPUT_CNY_PER_MILLION,
+        },
+        "cache_storage_price": "temporarily_free",
+        "token_totals": {
+            "input": int(sum(priced_input_tokens)),
+            "cached_input": int(sum(cached_tokens)),
+            "uncached_input": int(sum(uncached_input_tokens)),
+            "output": int(sum(priced_output_tokens)),
+            "reasoning_within_output": int(sum(reasoning_tokens)),
+        },
+        "provider_call_count": int(sum(provider_call_counts)),
+        "cost_cny_totals": {
+            "uncached_input": sum(actual_uncached_input_costs),
+            "cache_hit_input": sum(actual_cache_hit_costs),
+            "output": sum(actual_output_costs),
+            "total": sum(actual_total_costs),
+        },
+        "per_run_total_cost_cny": _summary_statistics(actual_total_costs),
+    }
     all_requirement_references: list[str] = []
     all_requirement_predictions: list[str | None] = []
     all_criterion_references: list[str] = []
@@ -851,7 +1046,11 @@ def build_guispector_batch_metrics(
         raise GUISpectorSidecarError("end-to-end criterion count drifted")
     report: dict[str, Any] = {
         "schema_version": GUISPECTOR_BATCH_METRICS_SCHEMA_VERSION,
-        "status": "batch_metrics_complete_with_execution_errors",
+        "status": (
+            "batch_metrics_complete"
+            if status_counts["error"] == 0
+            else "batch_metrics_complete_with_execution_errors"
+        ),
         "evaluation_identity": packet["evaluation_identity"],
         "attempt_count": attempt_count,
         "decision_count": decision_count,
@@ -867,13 +1066,17 @@ def build_guispector_batch_metrics(
         "all_attempt_efficiency": {
             "steps": _summary_statistics(all_steps),
             "elapsed_seconds": _summary_statistics(all_elapsed),
-            "token_usage": "unavailable_for_failed_upstream_runs",
+            "token_usage": all_attempt_token_usage,
         },
         "completed_decision_efficiency": {
             "steps": _summary_statistics(successful_steps),
             "elapsed_seconds": _summary_statistics(successful_elapsed),
             "input_tokens": _summary_statistics(input_tokens),
             "output_tokens": _summary_statistics(output_tokens),
+            "cached_input_tokens": _summary_statistics(cached_tokens),
+            "uncached_input_tokens": _summary_statistics(uncached_input_tokens),
+            "reasoning_tokens_within_output": _summary_statistics(reasoning_tokens),
+            "provider_calls": _summary_statistics(provider_call_counts),
             "paper_rate_normalized_input_cost_usd": _summary_statistics(
                 paper_input_costs
             ),
@@ -884,6 +1087,7 @@ def build_guispector_batch_metrics(
                 paper_total_costs
             ),
         },
+        "actual_glm_46v_cost": actual_glm_cost,
         "completed_decision_metrics": {
             "requirement_level": _one_vs_rest(
                 requirement_references,
@@ -933,7 +1137,17 @@ def build_guispector_batch_metrics(
             "Execution errors are abstentions and are never mapped to unmet labels.",
             "Conservative end-to-end metrics count abstentions as operational misses only; they do not create unmet or partial ground truth.",
             "Efficiency comparisons use a fixed five-action GLM compatibility budget, while the paper used a different model and protocol.",
-            "Failed upstream runs did not persist aggregate token usage, so token and normalized-cost statistics cover completed decisions only.",
+            (
+                "Failed upstream runs did not persist aggregate token usage, so "
+                "token and normalized-cost statistics cover completed decisions only."
+                if status_counts["error"]
+                else "All attempted runs completed and expose aggregate token usage."
+            ),
+            (
+                "Actual GLM-4.6V cost is cache-aware only where exact per-call "
+                "usage is present; reasoning tokens remain part of output tokens "
+                "and are not charged twice."
+            ),
         ],
     }
     report["batch_metrics_identity"] = _identity(
