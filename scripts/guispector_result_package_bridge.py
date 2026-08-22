@@ -15,6 +15,7 @@ if str(SRC) not in sys.path:
 
 from req2web_inspector.guispector_sidecar import (  # noqa: E402
     GUISpectorSidecarError,
+    build_guispector_batch_metrics,
     build_guispector_comparison,
     guispector_runtime_preflight,
     validate_guispector_evaluation,
@@ -40,6 +41,14 @@ def build_parser() -> argparse.ArgumentParser:
         help=(
             "Complete req2web.guispector.decision_import.v1 JSON produced after "
             "an operator-started external GUISpector run."
+        ),
+    )
+    parser.add_argument(
+        "--batch-execution",
+        type=Path,
+        help=(
+            "Complete req2web.guispector.batch_execution.v1 JSON containing "
+            "one terminal run row for every frozen package, including errors."
         ),
     )
     parser.add_argument(
@@ -94,6 +103,10 @@ def main(argv: list[str] | None = None) -> int:
         }
         if args.preflight:
             result["runtime_preflight"] = guispector_runtime_preflight()
+        if args.decisions is not None and args.batch_execution is not None:
+            raise GUISpectorSidecarError(
+                "--decisions and --batch-execution are mutually exclusive"
+            )
         if args.decisions is not None:
             comparison = build_guispector_comparison(
                 evaluation,
@@ -108,8 +121,26 @@ def main(argv: list[str] | None = None) -> int:
                     "output": str(args.output.resolve()),
                     "paper_comparison_eligible": False,
                 }
+        elif args.batch_execution is not None:
+            comparison = build_guispector_batch_metrics(
+                evaluation,
+                _read_json(args.batch_execution),
+            )
+            result = comparison
+            if args.output is not None:
+                _write_new_json(args.output, comparison)
+                result = {
+                    "status": comparison["status"],
+                    "batch_metrics_identity": comparison[
+                        "batch_metrics_identity"
+                    ],
+                    "output": str(args.output.resolve()),
+                    "paper_comparison_eligible": False,
+                }
         elif args.output is not None:
-            raise GUISpectorSidecarError("--output requires --decisions")
+            raise GUISpectorSidecarError(
+                "--output requires --decisions or --batch-execution"
+            )
     except (OSError, ValueError, json.JSONDecodeError, GUISpectorSidecarError) as exc:
         print(
             json.dumps(

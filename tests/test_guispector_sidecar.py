@@ -13,8 +13,10 @@ if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
 from req2web_inspector.guispector_sidecar import (  # noqa: E402
+    GUISPECTOR_BATCH_EXECUTION_SCHEMA_VERSION,
     GUISPECTOR_DECISION_IMPORT_SCHEMA_VERSION,
     GUISpectorSidecarError,
+    build_guispector_batch_metrics,
     build_guispector_comparison,
     guispector_runtime_preflight,
     normalize_guispector_decision,
@@ -57,6 +59,87 @@ def _raw_decision(status: str, met: bool) -> dict[str, object]:
 
 
 class GUISpectorSidecarTests(unittest.TestCase):
+    def test_batch_metrics_keep_errors_as_abstentions(self) -> None:
+        evaluation = {
+            "evaluation_identity": "batch-evaluation",
+            "scope": {"acceptance_criterion_count": 2},
+            "reference_profile": {"limitation": "Positive-only reference."},
+            "published_reference_metrics": {},
+            "cases": [_case(1, "met", True), _case(2, "met", True)],
+        }
+        execution = {
+            "schema_version": GUISPECTOR_BATCH_EXECUTION_SCHEMA_VERSION,
+            "evaluation_identity": "batch-evaluation",
+            "rows": [
+                {
+                    "execution_index": 1,
+                    "case_id": "case-1",
+                    "condition_id": None,
+                    "run_id": 10,
+                    "status": "met",
+                    "steps_taken": 5,
+                    "elapsed_s": 20.0,
+                    "usage": {"tokens_in": 1000, "tokens_out": 100},
+                    "decision": _raw_decision("met", True),
+                    "error": None,
+                },
+                {
+                    "execution_index": 2,
+                    "case_id": "case-2",
+                    "condition_id": None,
+                    "run_id": 11,
+                    "status": "error",
+                    "steps_taken": 5,
+                    "elapsed_s": 30.0,
+                    "usage": None,
+                    "decision": None,
+                    "error": "Terminal response was malformed.",
+                },
+            ],
+        }
+        for case in evaluation["cases"]:
+            case["condition_id"] = None
+        report = build_guispector_batch_metrics(evaluation, execution)
+        self.assertEqual(report["decision_count"], 1)
+        self.assertEqual(report["execution_error_count"], 1)
+        self.assertEqual(report["decision_completion_rate"], 0.5)
+        self.assertEqual(report["criterion_judgment_coverage"], 0.5)
+        self.assertEqual(
+            report["completed_decision_metrics"]["requirement_level"]["item_count"],
+            1,
+        )
+        self.assertEqual(report["all_attempt_efficiency"]["steps"]["mean"], 5.0)
+        self.assertFalse(report["paper_comparison_eligible"])
+
+    def test_batch_metrics_reject_error_rows_with_decisions(self) -> None:
+        evaluation = {
+            "evaluation_identity": "batch-error",
+            "scope": {"acceptance_criterion_count": 1},
+            "reference_profile": {"limitation": "Positive-only reference."},
+            "published_reference_metrics": {},
+            "cases": [_case(1, "met", True)],
+        }
+        evaluation["cases"][0]["condition_id"] = None
+        execution = {
+            "schema_version": GUISPECTOR_BATCH_EXECUTION_SCHEMA_VERSION,
+            "evaluation_identity": "batch-error",
+            "rows": [
+                {
+                    "execution_index": 1,
+                    "case_id": "case-1",
+                    "condition_id": None,
+                    "run_id": 12,
+                    "status": "error",
+                    "steps_taken": 0,
+                    "elapsed_s": 1.0,
+                    "decision": _raw_decision("met", True),
+                    "error": "Malformed terminal response.",
+                }
+            ],
+        }
+        with self.assertRaisesRegex(GUISpectorSidecarError, "carries a decision"):
+            build_guispector_batch_metrics(evaluation, execution)
+
     def test_documented_status_aliases_are_normalized(self) -> None:
         self.assertEqual(
             normalize_guispector_decision(

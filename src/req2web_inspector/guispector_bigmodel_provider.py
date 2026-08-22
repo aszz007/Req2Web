@@ -338,7 +338,10 @@ def build_bigmodel_request(
     tool_choice: Any = "auto"
     if decision_only:
         tools = [tool for tool in tools if tool["function"]["name"] == "finish"]
-        tool_choice = "required"
+        tool_choice = {
+            "type": "function",
+            "function": {"name": "finish"},
+        }
         system_text += (
             f" The bounded browser-action budget of {BIGMODEL_BROWSER_ACTION_BUDGET} "
             "actions is exhausted. Do not request another browser action. Call finish "
@@ -486,7 +489,12 @@ def _validate_action(name: str, args: Mapping[str, Any], width: int, height: int
             raise BigModelProviderError("BigModel returned an invalid wait duration")
         return {"type": "wait", "ms": value}
     else:
-        raise BigModelProviderError("BigModel returned an unsupported browser action")
+        safe_name = name if name and len(name) <= 64 and name.isascii() else "invalid-name"
+        safe_fields = ",".join(sorted(str(key) for key in args)) or "none"
+        raise BigModelProviderError(
+            "BigModel returned an unsupported browser action "
+            f"(name={safe_name}; fields={safe_fields})"
+        )
 
 
 def _validate_finish(args: Mapping[str, Any]) -> dict[str, Any]:

@@ -8,15 +8,19 @@ from __future__ import annotations
 
 from hashlib import sha256
 import json
+import math
 import os
 from pathlib import Path, PurePosixPath
 import shutil
+import statistics
 from typing import Any, Mapping, Sequence
 
 
 GUISPECTOR_EVALUATION_SCHEMA_VERSION = "req2web.guispector.evaluation.v1"
 GUISPECTOR_DECISION_IMPORT_SCHEMA_VERSION = "req2web.guispector.decision_import.v1"
 GUISPECTOR_COMPARISON_SCHEMA_VERSION = "req2web.guispector.comparison.v1"
+GUISPECTOR_BATCH_EXECUTION_SCHEMA_VERSION = "req2web.guispector.batch_execution.v1"
+GUISPECTOR_BATCH_METRICS_SCHEMA_VERSION = "req2web.guispector.batch_metrics.v1"
 GUISPECTOR_PREFLIGHT_SCHEMA_VERSION = "req2web.guispector.preflight.v3"
 
 GUISPECTOR_REPOSITORY_URL = "https://github.com/kristiankolthoff/GUISpector"
@@ -559,6 +563,271 @@ def build_guispector_comparison(
     return report
 
 
+def _finite_number(value: Any, label: str) -> float:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise GUISpectorSidecarError(f"{label} must be numeric")
+    number = float(value)
+    if not math.isfinite(number) or number < 0:
+        raise GUISpectorSidecarError(f"{label} must be finite and non-negative")
+    return number
+
+
+def _nonnegative_integer(value: Any, label: str) -> int:
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        raise GUISpectorSidecarError(f"{label} must be a non-negative integer")
+    return value
+
+
+def _summary_statistics(values: Sequence[float]) -> dict[str, Any]:
+    rows = [float(value) for value in values]
+    if not rows:
+        return {
+            "count": 0,
+            "mean": None,
+            "sample_sd": None,
+            "minimum": None,
+            "maximum": None,
+        }
+    return {
+        "count": len(rows),
+        "mean": statistics.fmean(rows),
+        "sample_sd": statistics.stdev(rows) if len(rows) > 1 else 0.0,
+        "minimum": min(rows),
+        "maximum": max(rows),
+    }
+
+
+def build_guispector_batch_metrics(
+    evaluation: Mapping[str, Any],
+    batch_execution: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Score a complete attempted batch without mapping execution errors to labels."""
+
+    packet = _mapping(evaluation, "GUISpector evaluation")
+    execution = _mapping(batch_execution, "GUISpector batch execution")
+    if execution.get("schema_version") != GUISPECTOR_BATCH_EXECUTION_SCHEMA_VERSION:
+        raise GUISpectorSidecarError("GUISpector batch execution schema drifted")
+    if execution.get("evaluation_identity") != packet.get("evaluation_identity"):
+        raise GUISpectorSidecarError("GUISpector batch execution binding drifted")
+    packet_cases = [
+        _mapping(row, "GUISpector evaluation case")
+        for row in _list(packet.get("cases"), "GUISpector evaluation cases")
+    ]
+    rows = [
+        _mapping(row, "GUISpector batch row")
+        for row in _list(execution.get("rows"), "GUISpector batch rows")
+    ]
+    if len(rows) != len(packet_cases):
+        raise GUISpectorSidecarError("GUISpector batch execution is incomplete")
+
+    all_steps: list[float] = []
+    all_elapsed: list[float] = []
+    successful_steps: list[float] = []
+    successful_elapsed: list[float] = []
+    input_tokens: list[float] = []
+    output_tokens: list[float] = []
+    requirement_references: list[str] = []
+    requirement_predictions: list[str] = []
+    criterion_references: list[str] = []
+    criterion_predictions: list[str] = []
+    normalized_rows: list[dict[str, Any]] = []
+    status_counts = {"met": 0, "unmet": 0, "partial": 0, "error": 0}
+
+    for case, row in zip(packet_cases, rows):
+        if (
+            row.get("execution_index") != case.get("execution_index")
+            or row.get("case_id") != case.get("case_id")
+            or row.get("condition_id") != case.get("condition_id")
+        ):
+            raise GUISpectorSidecarError("GUISpector batch execution order drifted")
+        steps = _nonnegative_integer(row.get("steps_taken"), "batch steps")
+        elapsed = _finite_number(row.get("elapsed_s"), "batch elapsed time")
+        all_steps.append(float(steps))
+        all_elapsed.append(elapsed)
+        raw_status = _nonempty(row.get("status"), "batch status")
+        status = _STATUS_ALIASES.get(raw_status, raw_status)
+        if status not in status_counts:
+            raise GUISpectorSidecarError("GUISpector batch status is unsupported")
+
+        if status == "error":
+            if row.get("decision") is not None:
+                raise GUISpectorSidecarError("error batch row carries a decision")
+            _nonempty(row.get("error"), "batch error")
+            status_counts["error"] += 1
+            normalized_rows.append(
+                {
+                    "execution_index": case["execution_index"],
+                    "case_id": case["case_id"],
+                    "condition_id": case["condition_id"],
+                    "run_id": row.get("run_id"),
+                    "status": "error",
+                    "steps_taken": steps,
+                    "elapsed_s": elapsed,
+                    "error": row["error"],
+                }
+            )
+            continue
+
+        requirement = _mapping(
+            case.get("guispector_requirement"),
+            "GUISpector requirement",
+        )
+        expected_names = [
+            _nonempty(
+                _mapping(value, "GUISpector acceptance criterion").get(
+                    "criterion_name"
+                ),
+                "GUISpector acceptance criterion name",
+            )
+            for value in _list(
+                requirement.get("acceptance_criteria"),
+                "GUISpector acceptance criteria",
+            )
+        ]
+        decision = normalize_guispector_decision(
+            _mapping(row.get("decision"), "GUISpector batch decision"),
+            expected_names,
+        )
+        if decision["requirement_label"] != status:
+            raise GUISpectorSidecarError("batch status and decision status differ")
+        usage = _mapping(row.get("usage"), "GUISpector batch usage")
+        tokens_in = _nonnegative_integer(
+            usage.get("tokens_in"),
+            "batch input tokens",
+        )
+        tokens_out = _nonnegative_integer(
+            usage.get("tokens_out"),
+            "batch output tokens",
+        )
+        reference = _mapping(case.get("internal_reference"), "internal reference")
+        reference_criteria = [
+            _mapping(value, "internal reference criterion")
+            for value in _list(
+                reference.get("acceptance_criteria"),
+                "internal reference criteria",
+            )
+        ]
+        requirement_references.append(
+            _nonempty(reference.get("requirement_status"), "reference status")
+        )
+        requirement_predictions.append(decision["requirement_label"])
+        criterion_references.extend(
+            "met" if value.get("met") is True else "unmet"
+            for value in reference_criteria
+        )
+        criterion_predictions.extend(
+            value["label"] for value in decision["acceptance_criteria"]
+        )
+        successful_steps.append(float(steps))
+        successful_elapsed.append(elapsed)
+        input_tokens.append(float(tokens_in))
+        output_tokens.append(float(tokens_out))
+        status_counts[status] += 1
+        normalized_rows.append(
+            {
+                "execution_index": case["execution_index"],
+                "case_id": case["case_id"],
+                "condition_id": case["condition_id"],
+                "run_id": row.get("run_id"),
+                "status": status,
+                "steps_taken": steps,
+                "elapsed_s": elapsed,
+                "usage": {
+                    "tokens_in": tokens_in,
+                    "tokens_out": tokens_out,
+                },
+                "decision": decision,
+            }
+        )
+
+    attempt_count = len(rows)
+    decision_count = len(requirement_predictions)
+    criterion_count = len(criterion_predictions)
+    paper_input_costs = [value / 1_000_000 * 3.0 for value in input_tokens]
+    paper_output_costs = [value / 1_000_000 * 12.0 for value in output_tokens]
+    paper_total_costs = [
+        input_cost + output_cost
+        for input_cost, output_cost in zip(paper_input_costs, paper_output_costs)
+    ]
+    report: dict[str, Any] = {
+        "schema_version": GUISPECTOR_BATCH_METRICS_SCHEMA_VERSION,
+        "status": "batch_metrics_complete_with_execution_errors",
+        "evaluation_identity": packet["evaluation_identity"],
+        "attempt_count": attempt_count,
+        "decision_count": decision_count,
+        "execution_error_count": status_counts["error"],
+        "decision_completion_rate": decision_count / attempt_count if attempt_count else None,
+        "terminal_status_counts": status_counts,
+        "criterion_judgment_count": criterion_count,
+        "criterion_judgment_coverage": (
+            criterion_count / packet["scope"]["acceptance_criterion_count"]
+            if packet["scope"]["acceptance_criterion_count"]
+            else None
+        ),
+        "all_attempt_efficiency": {
+            "steps": _summary_statistics(all_steps),
+            "elapsed_seconds": _summary_statistics(all_elapsed),
+            "token_usage": "unavailable_for_failed_upstream_runs",
+        },
+        "completed_decision_efficiency": {
+            "steps": _summary_statistics(successful_steps),
+            "elapsed_seconds": _summary_statistics(successful_elapsed),
+            "input_tokens": _summary_statistics(input_tokens),
+            "output_tokens": _summary_statistics(output_tokens),
+            "paper_rate_normalized_input_cost_usd": _summary_statistics(
+                paper_input_costs
+            ),
+            "paper_rate_normalized_output_cost_usd": _summary_statistics(
+                paper_output_costs
+            ),
+            "paper_rate_normalized_total_cost_usd": _summary_statistics(
+                paper_total_costs
+            ),
+        },
+        "completed_decision_metrics": {
+            "requirement_level": _one_vs_rest(
+                requirement_references,
+                requirement_predictions,
+                _REQUIREMENT_LABELS,
+            ),
+            "acceptance_criterion_level": _one_vs_rest(
+                criterion_references,
+                criterion_predictions,
+                _CRITERION_LABELS,
+            ),
+        },
+        "published_guispector_reference": {
+            **packet["published_reference_metrics"],
+            "efficiency_average_of_five_app_means": {
+                "steps_mean": 24.435,
+                "steps_sd": 16.225,
+                "elapsed_seconds_mean": 317.553,
+                "elapsed_seconds_sd": 259.339,
+                "input_tokens_mean": 221738.099,
+                "input_tokens_sd": 147628.799,
+                "output_tokens_mean": 2268.960,
+                "output_tokens_sd": 1076.168,
+                "input_cost_usd_at_paper_rate": 0.665,
+                "output_cost_usd_at_paper_rate": 0.027,
+            },
+        },
+        "paper_comparison_eligible": False,
+        "formal_evaluation": False,
+        "normalized_rows": normalized_rows,
+        "limitations": [
+            packet["reference_profile"]["limitation"],
+            "Execution errors are abstentions and are never mapped to unmet labels.",
+            "Efficiency comparisons use a fixed five-action GLM compatibility budget, while the paper used a different model and protocol.",
+            "Failed upstream runs did not persist aggregate token usage, so token and normalized-cost statistics cover completed decisions only.",
+        ],
+    }
+    report["batch_metrics_identity"] = _identity(
+        report,
+        "batch_metrics_identity",
+    )
+    return report
+
+
 def guispector_runtime_preflight() -> dict[str, Any]:
     """Report only prerequisite presence; never expose secret values or run Docker."""
 
@@ -611,12 +880,15 @@ def guispector_runtime_preflight() -> dict[str, Any]:
 
 
 __all__ = [
+    "GUISPECTOR_BATCH_EXECUTION_SCHEMA_VERSION",
+    "GUISPECTOR_BATCH_METRICS_SCHEMA_VERSION",
     "GUISPECTOR_COMPARISON_SCHEMA_VERSION",
     "GUISPECTOR_DECISION_IMPORT_SCHEMA_VERSION",
     "GUISPECTOR_EVALUATION_SCHEMA_VERSION",
     "GUISPECTOR_PREFLIGHT_SCHEMA_VERSION",
     "GUISpectorSidecarError",
     "build_guispector_comparison",
+    "build_guispector_batch_metrics",
     "build_guispector_evaluation",
     "guispector_runtime_preflight",
     "normalize_guispector_decision",

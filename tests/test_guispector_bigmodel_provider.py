@@ -170,7 +170,10 @@ class BigModelProviderTests(unittest.TestCase):
             input_items=INPUT_ITEMS + history,
             computer_tools=COMPUTER_TOOLS,
         )
-        self.assertEqual(request["tool_choice"], "required")
+        self.assertEqual(
+            request["tool_choice"],
+            {"type": "function", "function": {"name": "finish"}},
+        )
         self.assertEqual(
             [tool["function"]["name"] for tool in request["tools"]],
             ["finish"],
@@ -257,6 +260,16 @@ class BigModelProviderTests(unittest.TestCase):
         with self.assertRaisesRegex(BigModelProviderError, "disallowed key"):
             normalize_bigmodel_response(
                 _tool_response("key", {"keys": "CTRL+x;rm"}),
+                computer_tools=COMPUTER_TOOLS,
+            )
+
+    def test_unsupported_action_reports_only_safe_shape(self) -> None:
+        with self.assertRaisesRegex(
+            BigModelProviderError,
+            r"unsupported browser action \(name=terminate; fields=answer\)",
+        ):
+            normalize_bigmodel_response(
+                _tool_response("terminate", {"answer": "done"}),
                 computer_tools=COMPUTER_TOOLS,
             )
 
