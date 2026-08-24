@@ -15,6 +15,9 @@ if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
 from req2web_inspector.phase6_replay import (  # noqa: E402
+    _APP_JS,
+    _INDEX_HTML,
+    _STYLES_CSS,
     Phase6ReplayError,
     validate_phase6_reviewer_bundle,
 )
@@ -159,9 +162,9 @@ class Phase6ReviewerBundleTests(unittest.TestCase):
             self.assertNotIn("http://", text)
 
     def test_single_inspector_has_viewport_comparison_and_state_monitor(self) -> None:
-        page = (self.bundle_root / "index.html").read_text(encoding="utf-8")
-        styles = (self.bundle_root / "styles.css").read_text(encoding="utf-8")
-        script = (self.bundle_root / "app.js").read_text(encoding="utf-8")
+        page = _INDEX_HTML.decode("utf-8")
+        styles = _STYLES_CSS.decode("utf-8")
+        script = _APP_JS.decode("utf-8")
         self.assertIn("<title>Req2Web Inspector</title>", page)
         self.assertNotIn("Phase 6 Inspector", page)
         self.assertIn('id="preview-fit"', page)
@@ -179,9 +182,9 @@ class Phase6ReviewerBundleTests(unittest.TestCase):
         self.assertIn(".external-summary", styles)
 
     def test_single_inspector_has_compact_user_entry_and_explanations(self) -> None:
-        page = (self.bundle_root / "index.html").read_text(encoding="utf-8")
-        styles = (self.bundle_root / "styles.css").read_text(encoding="utf-8")
-        script = (self.bundle_root / "app.js").read_text(encoding="utf-8")
+        page = _INDEX_HTML.decode("utf-8")
+        styles = _STYLES_CSS.decode("utf-8")
+        script = _APP_JS.decode("utf-8")
         self.assertIn('id="requirement-form"', page)
         self.assertIn('id="run-history"', page)
         self.assertIn('id="import-form"', page)
@@ -227,42 +230,29 @@ class Phase6ReviewerBundleTests(unittest.TestCase):
         self.assertEqual(result["status"], "validated_precomputed_replay")
         self.assertEqual(result["counts"]["row_count"], 12)
 
-    def test_human_handoff_is_visible_and_packets_are_included(self) -> None:
-        page = (self.bundle_root / "index.html").read_text(encoding="utf-8")
-        self.assertIn("Three decisions remain outside automation", page)
-        self.assertIn("Judge retrieval relevance", page)
-        self.assertIn("Approve license and materials", page)
-        self.assertIn("Prepare submission material", page)
-        prelabel_path = (
-            self.bundle_root
-            / "human_tasks"
-            / "retrieval"
-            / "llm_prelabel_template.json"
-        )
-        prelabel = json.loads(prelabel_path.read_text(encoding="utf-8"))
-        self.assertEqual(prelabel["annotation_slot"], "llm_prelabel")
-        self.assertEqual(prelabel["status"], "template_unscored")
-        self.assertEqual(len(prelabel["units"]), 60)
-        assignment_path = (
-            self.bundle_root
-            / "human_tasks"
-            / "retrieval"
-            / "human_review_assignment.json"
-        )
-        assignment = json.loads(assignment_path.read_text(encoding="utf-8"))
-        self.assertEqual(assignment["candidate_count"], 420)
-        self.assertEqual(assignment["blind_overlap_audit_count"], 84)
-        self.assertEqual(
-            assignment["judgments_per_reviewer"],
-            {"human_reviewer_1": 252, "human_reviewer_2": 252},
-        )
-        instructions = (
-            self.bundle_root / "human_tasks" / "README.md"
-        ).read_text(encoding="utf-8")
-        self.assertIn("Do not calculate metrics manually", instructions)
-        self.assertIn("in this bundle calls an API", instructions)
-        self.assertIn("84 blind-overlap items", instructions)
-        self.assertIn("assemble_retrieval_qrels.py", instructions)
+    def test_final_inspector_omits_development_surfaces(self) -> None:
+        page = _INDEX_HTML.decode("utf-8")
+        script = _APP_JS.decode("utf-8")
+        self.assertNotIn('id="human-work"', page)
+        self.assertNotIn("Human handoff", page)
+        self.assertNotIn('id="retrieval"', page)
+        self.assertNotIn("Retrieval laboratory", page)
+        self.assertNotIn("Paper</th>", page)
+        self.assertNotIn("renderRetrievalComparison", script)
+
+    def test_guispector_is_default_off_and_has_explicit_provider_controls(self) -> None:
+        page = _INDEX_HTML.decode("utf-8")
+        script = _APP_JS.decode("utf-8")
+        self.assertIn('id="guispector-enable" type="checkbox"', page)
+        self.assertNotIn('id="guispector-enable" type="checkbox" checked', page)
+        self.assertIn('id="guispector-provider"', page)
+        self.assertIn('id="guispector-api-key" type="password"', page)
+        self.assertIn('id="guispector-confirm" type="checkbox"', page)
+        self.assertIn("function testGuispectorConnection()", script)
+        self.assertIn("/api/guispector/test-connection", script)
+        self.assertIn("apiKey.value = '';", script)
+        self.assertNotIn("published_reference_metrics: published", script)
+        self.assertNotIn("localStorage", script)
 
 
 if __name__ == "__main__":

@@ -262,11 +262,8 @@ def build_phase6_release_candidate(
             "blocking_gate": "owner_license_decision_required",
             "human_work_remaining": [
                 "owner license selection and legal review",
-                (
-                    "approved model prelabels, split two-human review, and "
-                    "joint blind-overlap resolution"
-                ),
-                "video recording and paper writing",
+                "final public archive approval and repository hygiene review",
+                "video recording and paper writing when submission work resumes",
             ],
             "claim_boundary": (
                 "precomputed engineering replay only; not H1/gold, formal quality, "

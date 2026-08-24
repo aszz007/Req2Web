@@ -25,6 +25,10 @@ from req2web_inspector.phase6_replay import (  # noqa: E402
 from req2web_inspector.guispector_sidecar import (  # noqa: E402
     guispector_runtime_preflight,
 )
+from req2web_inspector.guispector_optional import (  # noqa: E402
+    optional_provider_capabilities,
+    test_optional_provider_connection,
+)
 from req2web_inspector.live_draft import (  # noqa: E402
     InspectorLiveDraftError,
     LocalDraftRunStore,
@@ -141,9 +145,12 @@ class _InspectorHandler(SimpleHTTPRequestHandler):
             "optional_guispector_verification": {
                 "packet_status": "prepared_not_executed",
                 "canonical_flow_modified": False,
+                "option": optional_provider_capabilities(),
                 **guispector_runtime_preflight(),
             },
-            "external_api_or_paid_service": "not_used",
+            "external_api_or_paid_service": (
+                "not_used_until_explicit_optional_connection_test"
+            ),
         }
 
     def _send_file(self, path: Path, *, download_name: str | None = None) -> None:
@@ -290,6 +297,9 @@ class _InspectorHandler(SimpleHTTPRequestHandler):
                 self._json_response(201, record)
                 return
             value = self._read_json_body()
+            if path == "/api/guispector/test-connection":
+                self._json_response(200, test_optional_provider_connection(value))
+                return
             if path == "/api/intake/analyze":
                 self._json_response(200, analyze_requirement(value))
                 return

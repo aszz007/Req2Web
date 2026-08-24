@@ -478,15 +478,6 @@ def _material_inventory() -> dict[str, Any]:
                 "origin": "project-authored read-only interoperability sidecar",
                 "redistribution_status": "pending_owner_license_decision",
             },
-            {
-                "material": (
-                    "Provider-neutral LLM prelabel template, deterministic two-human "
-                    "review assignment with an 84-candidate blind overlap audit, "
-                    "exploratory metric protocol, and descriptive local efficiency report"
-                ),
-                "origin": "project-authored local experiment preparation",
-                "redistribution_status": "pending_owner_license_decision",
-            },
         ],
         "excluded_materials": [
             "H1 or gold data",
@@ -524,10 +515,8 @@ _INDEX_HTML = """<!doctype html>
       <a href="#overview">Overview</a>
       <a href="#intake">Create</a>
       <a href="#run-history">Runs</a>
-      <a href="#human-work">Human handoff</a>
-      <a href="#retrieval">Retrieval</a>
       <a href="#case-inspector">Evidence</a>
-      <a href="#external-verification">External check</a>
+      <a href="#external-verification">Optional check</a>
       <a href="#final-result">Result</a>
     </nav>
     <span class="local-status"><i></i> Local replay</span>
@@ -544,11 +533,11 @@ _INDEX_HTML = """<!doctype html>
           <a class="button secondary" href="#case-inspector">Replay frozen evidence</a>
         </div>
       </div>
-      <aside class="release-card" aria-label="Release status">
+      <aside class="release-card" aria-label="Current capability">
         <span class="section-kicker">Current capability</span>
         <strong>Replay, drafts, optional canonical generation</strong>
         <p>Deterministic controls call no model. Optional local-Qwen actions are single-flight, zero-retry, and keep requirement advice, F1-F4 generation, browser facts, and semantic acceptance separate.</p>
-        <div class="status-line warning"><i></i> Public license decision pending</div>
+        <div class="status-line"><i></i> User actions are explicit and local-first</div>
       </aside>
     </section>
 
@@ -634,56 +623,6 @@ _INDEX_HTML = """<!doctype html>
       <div><strong>Three ledgers stay separate.</strong><p>Historical first-pass delivery, objective browser checks, and semantic alignment answer different questions and are never merged into one score.</p></div>
     </section>
 
-    <section class="human-section" id="human-work">
-      <div class="section-intro">
-        <div><span class="section-kicker">Human handoff</span><h2 class="module-title">Three decisions remain outside automation <button class="info-tip" type="button" aria-label="About human handoff" data-tooltip="Retrieval relevance judgment, license ownership, and authored submission materials require people. They are separate from local tool operation and do not block deterministic drafts.">!</button></h2></div>
-        <p>These tasks still require independent judgment, legal ownership, or authored submission work even when the local tool flow is complete.</p>
-      </div>
-      <div class="human-grid">
-        <article class="task-card">
-          <div class="task-meta"><span>01</span><em>LLM prelabel + two reviewers</em></div>
-          <h3>Judge retrieval relevance</h3>
-          <p>A provider-neutral model packet covers all 420 method-blind candidates. Two people then review 252 items each: 168 assisted primary items plus the same 84-item blind overlap audit. They jointly resolve only that overlap after both individual packets are frozen.</p>
-          <div class="task-links">
-            <a href="human_tasks/retrieval/llm_prelabel_template.json" download>LLM prelabel packet</a>
-            <a href="human_tasks/retrieval/human_review_assignment.json" download>Human assignment</a>
-            <a href="human_tasks/README.md">Exact instructions</a>
-          </div>
-          <small>No API is called by the bundle. The labels remain exploratory and are never presented as independent human gold or H1.</small>
-        </article>
-        <article class="task-card">
-          <div class="task-meta"><span>02</span><em>Project owner + legal review</em></div>
-          <h3>Approve license and materials</h3>
-          <p>Select the software and content license, confirm screenshot and project-authored case redistribution, and approve the exact candidate archive identity.</p>
-          <a class="task-link" href="MATERIALS.json">Open material inventory</a>
-          <small>Done when license text, notices, material approval, and archive SHA-256 are recorded together.</small>
-        </article>
-        <article class="task-card">
-          <div class="task-meta"><span>03</span><em>Authors</em></div>
-          <h3>Prepare submission material</h3>
-          <p>Record the short demonstration, write the paper, select screenshots, and assemble the final submission without expanding the evaluation claims.</p>
-          <small>Done when the video, paper, limitations, artifact link, and submission metadata are reviewed by the authors.</small>
-        </article>
-      </div>
-    </section>
-
-    <section class="panel retrieval-panel" id="retrieval">
-      <div class="section-heading">
-        <div><span class="section-kicker">Retrieval laboratory</span><h2 class="module-title">Compare retrieval candidates <button class="info-tip" type="button" aria-label="About retrieval comparison" data-tooltip="BM25, RRF, and TF-IDF use the same corpus and frozen queries. Candidate overlap, downstream structural influence, speed, and later human relevance judgments are deliberately reported separately; raw backend scores are not compared.">!</button></h2><p class="muted">Candidate differences, downstream utility, and efficiency stay separate. Human-reviewed relevance is still pending.</p></div>
-        <div id="retrieval-gate"></div>
-      </div>
-      <div id="retrieval-summary" class="retrieval-summary"></div>
-      <div class="control-row">
-        <label for="retrieval-unit-select"><span>Case-role candidate view</span><select id="retrieval-unit-select"></select></label>
-        <p>Raw scores are backend-specific and must not be compared across methods.</p>
-      </div>
-      <div id="retrieval-candidates" class="retrieval-candidates"></div>
-      <div class="details-grid">
-        <details><summary>Metric policy and exact comparison report</summary><pre id="retrieval-json"></pre></details>
-        <details><summary>Assisted review protocol and descriptive efficiency</summary><pre id="retrieval-experiment-json"></pre></details>
-      </div>
-    </section>
-
     <section class="case-toolbar" id="case-inspector">
       <div class="toolbar-title"><span class="section-kicker">Evidence explorer</span><strong class="module-title">Select one frozen row <button class="info-tip" type="button" aria-label="About the evidence explorer" data-tooltip="Replays one of twelve immutable engineering rows. It does not regenerate, repair, or relabel the historical evidence.">!</button></strong></div>
       <label for="case-select"><span class="sr-only">Evidence row</span><select id="case-select"></select></label>
@@ -746,30 +685,43 @@ _INDEX_HTML = """<!doctype html>
       <div class="section-heading">
         <div>
           <span class="section-kicker">Optional external verification</span>
-          <h2 class="module-title">Check the same result package with GUISpector <button class="info-tip" type="button" aria-label="About the optional GUISpector check" data-tooltip="Exports each frozen requirement, its fixed acceptance criteria, and the exact runnable package URL for GUISpector. Imported GUISpector decisions use its requirement-level and criterion-level precision, recall, and F1 formulas. This sidecar never changes Req2Web generation or acceptance evidence.">!</button></h2>
-          <p class="muted">The integration packet is ready. An external GUISpector deployment, its configured model service, and an explicit operator-started run are still required.</p>
+          <h2 class="module-title">Use GUISpector as a separate acceptance strategy <button class="info-tip" type="button" aria-label="About the optional GUISpector check" data-tooltip="Sends one selected package to a separately operated GUISpector verifier. The module is off by default, requires an explicit model-provider action, and never changes Req2Web generation, browser evidence, semantic evidence, or the canonical result.">!</button></h2>
+          <p class="muted">This optional module is disabled until you turn it on. It is not a benchmark comparison and its decisions remain a separate acceptance view.</p>
         </div>
-        <div id="guispector-runtime-status" class="capability-pill pending">Checking optional runtime</div>
+        <div id="guispector-runtime-status" class="capability-pill unavailable">Off by default</div>
       </div>
-      <div id="guispector-summary" class="external-summary"></div>
-      <div class="external-grid">
-        <article class="external-card">
-          <span class="section-kicker">Prepared input</span>
-          <h3>One exact package at a time</h3>
-          <p>GUISpector receives the frozen requirement, two fixed acceptance conditions, and the exact packaged page address. It does not receive hidden data or rewrite the package.</p>
-          <label for="guispector-case-select"><span>Prepared package</span><select id="guispector-case-select"></select></label>
-          <div id="guispector-case" class="external-case"></div>
-        </article>
-        <article class="external-card">
-          <span class="section-kicker">Comparable output</span>
-          <h3>Same metric names, honest coverage</h3>
-          <div id="guispector-metrics"></div>
-          <p class="media-note">The present twelve packages are internally labeled as met. Unmet and partial classes therefore remain undefined until an independently labeled mixed set is evaluated.</p>
-        </article>
-      </div>
-      <div class="external-actions">
-        <a class="button secondary" href="guispector_evaluation.json" download>Download evaluation packet</a>
-        <details><summary>Exact packet, published reference values, and claim boundary</summary><pre id="guispector-json"></pre></details>
+      <label class="optional-switch" for="guispector-enable">
+        <input id="guispector-enable" type="checkbox">
+        <span><strong>Enable optional GUISpector controls</strong><small>No model or external service is called merely by enabling the panel.</small></span>
+      </label>
+      <div id="guispector-controls" hidden>
+        <div id="guispector-summary" class="external-summary"></div>
+        <div class="external-grid">
+          <article class="external-card">
+            <span class="section-kicker">Provider connection</span>
+            <h3>Select one supported provider profile</h3>
+            <p>The API key is used for one explicit connection test, is never written to the repository or browser storage, and is cleared after the request.</p>
+            <label for="guispector-provider"><span>Provider</span><select id="guispector-provider"><option value="zhipu_bigmodel">Zhipu BigModel</option><option value="alibaba_gui_plus">Alibaba GUI Plus</option></select></label>
+            <label for="guispector-model"><span>Compatible model</span><input id="guispector-model" type="text" value="glm-4.6v" readonly></label>
+            <label for="guispector-api-key"><span>API key</span><input id="guispector-api-key" type="password" autocomplete="off" spellcheck="false" placeholder="Used once and not saved"></label>
+            <label id="guispector-workspace-field" for="guispector-workspace" hidden><span>Alibaba workspace ID or Beijing endpoint</span><input id="guispector-workspace" type="text" autocomplete="off" spellcheck="false"></label>
+            <label class="explicit-confirmation" for="guispector-confirm"><input id="guispector-confirm" type="checkbox"><span>I understand that the connection test makes one external model request and may incur provider cost.</span></label>
+            <button id="guispector-test-connection" class="button secondary" type="button">Test selected provider</button>
+            <div id="guispector-connection-result" class="media-note" aria-live="polite">No provider request has been made.</div>
+          </article>
+          <article class="external-card">
+            <span class="section-kicker">Prepared input</span>
+            <h3>One exact package at a time</h3>
+            <p>GUISpector receives the frozen requirement, two fixed acceptance conditions, and the exact packaged page address. It does not receive hidden data or rewrite the package.</p>
+            <label for="guispector-case-select"><span>Prepared package</span><select id="guispector-case-select"></select></label>
+            <div id="guispector-case" class="external-case"></div>
+          </article>
+        </div>
+        <div class="external-actions">
+          <a class="button secondary" href="guispector_evaluation.json" download>Download evaluation packet</a>
+          <a id="guispector-open-runtime" class="button secondary" href="http://127.0.0.1:8000/" target="_blank" rel="noopener">Open local GUISpector</a>
+          <details><summary>Exact packet and claim boundary</summary><pre id="guispector-json"></pre></details>
+        </div>
       </div>
     </section>
 
@@ -867,21 +819,6 @@ main { padding: 2rem 0 5rem; }
 .separation-note { display: grid; grid-template-columns: 150px 1fr; gap: 1.1rem; align-items: start; margin: 1rem 0 4rem; padding: 1rem 1.15rem; border: 1px solid #bfdbfe; border-radius: 12px; background: var(--accent-soft); }
 .notice-label { color: var(--accent-dark); font-size: .72rem; font-weight: 800; text-transform: uppercase; letter-spacing: .08em; }
 .separation-note p { margin: .2rem 0 0; color: #475467; line-height: 1.5; }
-.human-section { margin-bottom: 4rem; }
-.section-intro { display: flex; justify-content: space-between; gap: 3rem; align-items: end; margin-bottom: 1.25rem; }
-.section-intro h2 { margin: .45rem 0 0; font-size: clamp(1.65rem, 3vw, 2.35rem); letter-spacing: -.035em; }
-.section-intro > p { max-width: 590px; margin: 0; color: var(--muted); line-height: 1.6; }
-.human-grid { display: grid; grid-template-columns: repeat(3, 1fr); border: 1px solid var(--line); border-radius: var(--radius); background: var(--card); overflow: hidden; }
-.task-card { display: flex; min-width: 0; min-height: 310px; flex-direction: column; padding: 1.4rem; border-right: 1px solid var(--line); }
-.task-card:last-child { border-right: 0; }
-.task-meta { display: flex; justify-content: space-between; align-items: center; gap: 1rem; }
-.task-meta span { color: var(--accent); font-size: .8rem; font-weight: 850; }
-.task-meta em { color: var(--muted); font-size: .72rem; font-style: normal; font-weight: 650; text-align: right; }
-.task-card h3 { margin: 2rem 0 .55rem; font-size: 1.2rem; letter-spacing: -.02em; }
-.task-card p { margin: 0; color: var(--muted); line-height: 1.62; }
-.task-card small { display: block; margin-top: auto; padding-top: 1rem; border-top: 1px solid var(--line); color: #667085; line-height: 1.5; }
-.task-links { display: flex; flex-wrap: wrap; gap: .55rem; margin: 1rem 0; }
-.task-links a, .task-link { width: fit-content; margin: 1rem 0; padding: .46rem .65rem; border-radius: 8px; background: var(--accent-soft); color: var(--accent-dark); text-decoration: none; font-size: .76rem; font-weight: 750; }
 .panel { min-width: 0; padding: 1.4rem; border: 1px solid var(--line); border-radius: var(--radius); background: var(--card); box-shadow: var(--shadow); }
 .panel h2 { margin: .35rem 0 .7rem; font-size: 1.3rem; letter-spacing: -.025em; }
 .module-title { display: flex; min-width: 0; align-items: center; gap: .45rem; }
@@ -906,6 +843,7 @@ main { padding: 2rem 0 5rem; }
 .field-label, .requirement-form label { display: grid; gap: .4rem; color: #344054; font-size: .78rem; font-weight: 750; }
 .field-label small { color: var(--muted); font-weight: 500; }
 textarea, input { width: 100%; padding: .72rem .8rem; border: 1px solid var(--line-strong); border-radius: 9px; background: white; color: var(--ink); font: inherit; line-height: 1.5; resize: vertical; }
+input[readonly] { background: var(--soft); color: #475467; }
 textarea:focus, input:focus, select:focus { outline: 3px solid #bfdbfe; outline-offset: 1px; border-color: #84adff; }
 .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: .75rem; margin: .8rem 0; }
 .form-actions { display: flex; flex-wrap: wrap; align-items: center; gap: .55rem; margin-top: .9rem; }
@@ -965,22 +903,8 @@ textarea:focus, input:focus, select:focus { outline: 3px solid #bfdbfe; outline-
 .run-card .badges { margin-bottom: .45rem; }
 .run-actions { display: flex; flex-wrap: wrap; gap: .4rem; margin-top: .65rem; }
 .run-actions a, .run-actions button { padding: .4rem .52rem; border: 1px solid var(--line-strong); border-radius: 7px; background: white; color: var(--accent-dark); font: inherit; font-size: .7rem; font-weight: 750; text-decoration: none; cursor: pointer; }
-.retrieval-panel { margin: 0 0 3.2rem; padding: 1.6rem; }
-.retrieval-summary { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: .7rem; margin: 1.25rem 0; }
-.retrieval-card { min-width: 0; padding: .9rem; border: 1px solid var(--line); border-radius: 10px; background: #fcfcfd; color: #475467; line-height: 1.52; font-size: .82rem; }
-.retrieval-card strong { display: block; margin-bottom: .25rem; color: var(--ink); font-size: .96rem; }
-.control-row { display: flex; align-items: end; justify-content: space-between; gap: 2rem; margin: 1.7rem 0 .9rem; padding-top: 1.3rem; border-top: 1px solid var(--line); }
-.control-row label { display: grid; gap: .45rem; width: min(650px, 100%); color: #344054; font-size: .8rem; font-weight: 750; }
-.control-row p { max-width: 440px; margin: 0; color: var(--muted); font-size: .78rem; line-height: 1.5; }
 select { width: 100%; min-width: 0; padding: .68rem .8rem; border: 1px solid var(--line-strong); border-radius: 9px; background: white; color: var(--ink); font: inherit; }
 select:focus, a:focus-visible, summary:focus-visible { outline: 3px solid #bfdbfe; outline-offset: 2px; }
-.retrieval-candidates { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: .75rem; }
-.retrieval-candidates .retrieval-card { background: white; }
-.candidate-list { margin: .65rem 0 0; padding-left: 1.25rem; }
-.candidate-list li { margin: .65rem 0; color: var(--ink); line-height: 1.35; }
-.candidate-list small { display: block; margin-top: .16rem; color: var(--muted); overflow-wrap: anywhere; }
-.details-grid { display: grid; grid-template-columns: 1fr 1fr; gap: .75rem; margin-top: 1rem; }
-.details-grid details { padding: .8rem .9rem; border: 1px solid var(--line); border-radius: 10px; }
 .case-toolbar { position: sticky; top: 78px; z-index: 20; display: grid; grid-template-columns: 190px minmax(300px, 1fr) auto; align-items: center; gap: 1rem; margin-bottom: 1rem; padding: .8rem 1rem; border: 1px solid var(--line); border-radius: 12px; background: rgba(255, 255, 255, .96); box-shadow: var(--shadow); backdrop-filter: blur(14px); }
 .toolbar-title { display: grid; gap: .15rem; }
 .toolbar-title strong { font-size: .86rem; }
@@ -1014,6 +938,12 @@ summary { cursor: pointer; color: #344054; font-size: .82rem; font-weight: 750; 
 .interaction-list { margin: .8rem 0; padding-left: 1.5rem; color: var(--muted); font-size: .82rem; line-height: 1.5; }
 .interaction-list small { display: block; overflow-wrap: anywhere; }
 .external-panel { margin-top: 1rem; }
+#external-verification, #final-result { scroll-margin-top: 190px; }
+.optional-switch { display: flex; align-items: flex-start; gap: .75rem; margin: 1rem 0; padding: .9rem; border: 1px solid var(--line); border-radius: 11px; background: #fcfcfd; cursor: pointer; }
+.optional-switch input, .explicit-confirmation input { width: auto; flex: 0 0 auto; margin-top: .15rem; }
+.optional-switch span { display: grid; gap: .18rem; }
+.optional-switch small { color: var(--muted); font-weight: 500; line-height: 1.45; }
+[hidden] { display: none !important; }
 .external-summary { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: .65rem; margin: 1.1rem 0; }
 .external-stat { min-width: 0; padding: .8rem; border: 1px solid var(--line); border-radius: 10px; background: #fcfcfd; }
 .external-stat strong { display: block; color: var(--ink); font-size: 1.25rem; letter-spacing: -.03em; }
@@ -1023,14 +953,11 @@ summary { cursor: pointer; color: #344054; font-size: .82rem; font-weight: 750; 
 .external-card h3 { margin: .4rem 0 .45rem; font-size: 1rem; }
 .external-card > p { color: var(--muted); font-size: .8rem; line-height: 1.55; }
 .external-card label { display: grid; gap: .4rem; margin-top: .8rem; color: #344054; font-size: .76rem; font-weight: 750; }
+.external-card .explicit-confirmation { display: flex; align-items: flex-start; gap: .6rem; font-weight: 600; line-height: 1.45; }
 .external-case { min-width: 0; margin-top: .75rem; padding: .75rem; border: 1px solid #bfdbfe; border-radius: 9px; background: var(--accent-soft); }
 .external-case strong, .external-case span { overflow-wrap: anywhere; }
 .external-case p { margin: .35rem 0; color: #475467; font-size: .77rem; line-height: 1.5; }
 .external-case ul { margin: .45rem 0 0; padding-left: 1.2rem; color: #475467; font-size: .75rem; line-height: 1.5; }
-.metric-table { width: 100%; border-collapse: collapse; font-size: .75rem; }
-.metric-table th, .metric-table td { padding: .52rem .4rem; border-bottom: 1px solid var(--line); text-align: left; }
-.metric-table th { color: var(--muted); font-size: .68rem; text-transform: uppercase; letter-spacing: .04em; }
-.metric-table td:last-child { color: var(--warning); font-weight: 750; }
 .external-actions { display: flex; flex-wrap: wrap; align-items: flex-start; gap: .75rem; margin-top: .85rem; }
 .external-actions details { flex: 1 1 520px; margin: 0; }
 .page-panel { margin-top: 1rem; }
@@ -1061,26 +988,21 @@ footer a { white-space: nowrap; text-decoration: none; font-weight: 750; }
   .metrics { grid-template-columns: repeat(3, 1fr); }
   .metric { border-bottom: 1px solid var(--line); }
   .node-grid { grid-template-columns: repeat(2, 1fr); }
-  .retrieval-candidates { grid-template-columns: 1fr; }
 }
 @media (max-width: 820px) {
   .app-shell { width: min(100% - 1rem, 1480px); }
   .hero { grid-template-columns: 1fr; min-height: 0; padding: 3.5rem .2rem; }
   .release-card { max-width: 520px; }
-  .section-intro, .section-heading, .control-row { flex-direction: column; align-items: stretch; }
+  .section-heading { flex-direction: column; align-items: stretch; }
   .intake-side { grid-template-columns: 1fr; }
   .canonical-controls > div, .canonical-controls .button { grid-column: 1 / -1; }
   .import-form { grid-template-columns: 1fr; }
   .stage-list, .outcome-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .run-list { grid-template-columns: 1fr; }
-  .human-grid { grid-template-columns: 1fr; }
-  .task-card { min-height: 0; border-right: 0; border-bottom: 1px solid var(--line); }
-  .task-card:last-child { border-bottom: 0; }
-  .task-card small { margin-top: 1rem; }
   .metrics { grid-template-columns: 1fr 1fr; }
   .metric { border-right: 1px solid var(--line); }
   .separation-note { grid-template-columns: 1fr; }
-  .retrieval-summary, .details-grid, .overview-grid, .node-grid, .evidence-cards, .external-grid { grid-template-columns: 1fr; }
+  .overview-grid, .node-grid, .evidence-cards, .external-grid { grid-template-columns: 1fr; }
   .external-summary { grid-template-columns: 1fr 1fr; }
   .case-toolbar { top: 74px; grid-template-columns: 1fr; }
   .badges { display: none; }
@@ -1100,7 +1022,7 @@ footer a { white-space: nowrap; text-decoration: none; font-weight: 750; }
   .button { text-align: center; }
   .metrics { grid-template-columns: 1fr; }
   .metric { min-height: 0; border-right: 0; }
-  .panel, .retrieval-panel { padding: 1rem; }
+  .panel { padding: 1rem; }
   .media-heading, .preview-controls { align-items: flex-start; flex-direction: column; }
   .browser-capture, .preview-stage { padding: .5rem; }
   .segmented-control { width: 100%; }
@@ -1358,6 +1280,7 @@ function setIntakeBusy(busy, label = '') {
 
 async function initializeLiveInspector() {
   const capability = byId('live-capability');
+  const guispectorStatus = byId('guispector-runtime-status');
   try {
     const value = await requestJson('/api/capabilities');
     const available = value.deterministic_guided_draft === 'available';
@@ -1381,10 +1304,8 @@ async function initializeLiveInspector() {
       ? `Available: ${value.canonical_model_flow.profile.profile_name}`
       : 'Not connected';
     byId('canonical-flow-status').className = `module-status ${canonicalAvailable ? 'available' : 'unavailable'}`;
-    byId('guispector-runtime-status').textContent = guispector.status === 'ready_for_operator_started_external_run'
-      ? 'External runtime ready · not run'
-      : 'Packet ready · external run not connected';
-    byId('guispector-runtime-status').className = `capability-pill ${guispector.status === 'ready_for_operator_started_external_run' ? 'available' : 'unavailable'}`;
+    guispectorStatus.dataset.apiAvailable = 'true';
+    guispectorStatus.dataset.runtimeReady = String(guispector.status === 'ready_for_operator_started_external_run');
     byId('canonical-b-aux').disabled = !value.canonical_model_flow.requirement_assist_available;
     if (!value.canonical_model_flow.requirement_assist_available) byId('canonical-b-aux').checked = false;
     byId('import-package-button').disabled = !importAvailable;
@@ -1401,8 +1322,8 @@ async function initializeLiveInspector() {
     byId('generate-canonical').dataset.available = 'false';
     byId('generate-canonical').disabled = true;
     byId('canonical-flow-status').textContent = 'Not connected';
-    byId('guispector-runtime-status').textContent = 'Packet ready · external run not connected';
-    byId('guispector-runtime-status').className = 'capability-pill unavailable';
+    guispectorStatus.dataset.apiAvailable = 'false';
+    guispectorStatus.dataset.runtimeReady = 'false';
     byId('canonical-flow-status').className = 'module-status unavailable';
     byId('semantic-assist-status').textContent = 'Not connected';
     byId('semantic-assist-status').className = 'module-status unavailable';
@@ -1410,6 +1331,7 @@ async function initializeLiveInspector() {
     byId('import-package').disabled = true;
     byId('run-list').innerHTML = '<p class="muted">Start the repository Inspector server to create and revisit local drafts. The standalone reviewer bundle remains read-only.</p>';
   }
+  updateOptionalGuispectorStatus();
 
   byId('fill-example').addEventListener('click', () => {
     byId('requirement-input').value = 'I need a field-service page where a technician can search for equipment, report a problem, see clear validation errors, retry a failed submission, and confirm the final status.';
@@ -1644,24 +1566,14 @@ function renderGuispectorCase(report, index) {
 
 function renderGuispector(report) {
   const scope = report.scope;
-  const reference = report.reference_profile;
   const current = report.current_result;
   const summary = [
     [scope.result_package_count, 'prepared result packages'],
     [scope.acceptance_criterion_count, 'fixed acceptance criteria'],
     [current.decision_count, 'external decisions imported'],
-    ['No', 'formal comparison claim'],
+    ['Separate', 'acceptance result ledger'],
   ];
   byId('guispector-summary').innerHTML = summary.map(([value, label]) => `<div class="external-stat"><strong>${escapeHtml(value)}</strong><span>${escapeHtml(label)}</span></div>`).join('');
-  const published = report.published_reference_metrics;
-  const rows = [
-    ['Requirement met', published.requirement_level_f1.met],
-    ['Requirement unmet', published.requirement_level_f1.unmet],
-    ['Requirement partial', published.requirement_level_f1.partial],
-    ['Criterion met', published.acceptance_criterion_level_f1.met],
-    ['Criterion unmet', published.acceptance_criterion_level_f1.unmet],
-  ];
-  byId('guispector-metrics').innerHTML = `<table class="metric-table"><thead><tr><th>F1 class</th><th>Paper</th><th>This packet</th></tr></thead><tbody>${rows.map(([label, value]) => `<tr><td>${escapeHtml(label)}</td><td>${Number(value).toFixed(3)}</td><td>Not run</td></tr>`).join('')}</tbody></table>`;
   const select = byId('guispector-case-select');
   select.innerHTML = report.cases.map((item, index) => `<option value="${index}">${String(item.execution_index).padStart(2, '0')} · ${escapeHtml(item.case_id)} · ${escapeHtml(item.condition_id)}</option>`).join('');
   select.addEventListener('change', () => renderGuispectorCase(report, Number(select.value)));
@@ -1672,11 +1584,76 @@ function renderGuispector(report) {
     upstream: report.upstream,
     scope,
     input_policy: report.input_policy,
-    reference_profile: reference,
-    published_reference_metrics: published,
     current_result: current,
   });
   renderGuispectorCase(report, 0);
+}
+
+function selectedGuispectorModel() {
+  return byId('guispector-provider').value === 'alibaba_gui_plus'
+    ? 'gui-plus-2026-02-26'
+    : 'glm-4.6v';
+}
+
+function updateGuispectorProvider() {
+  const guiPlus = byId('guispector-provider').value === 'alibaba_gui_plus';
+  byId('guispector-model').value = selectedGuispectorModel();
+  byId('guispector-workspace-field').hidden = !guiPlus;
+}
+
+function updateOptionalGuispectorStatus() {
+  const enabled = byId('guispector-enable').checked;
+  const status = byId('guispector-runtime-status');
+  byId('guispector-controls').hidden = !enabled;
+  if (!enabled) {
+    status.textContent = 'Off by default';
+    status.className = 'capability-pill unavailable';
+    return;
+  }
+  const runtimeReady = status.dataset.runtimeReady === 'true';
+  status.textContent = runtimeReady
+    ? 'Enabled · local runtime ready'
+    : 'Enabled · local runtime setup may be required';
+  status.className = `capability-pill ${runtimeReady ? 'available' : 'pending'}`;
+  byId('guispector-test-connection').disabled = status.dataset.apiAvailable !== 'true';
+  if (status.dataset.apiAvailable !== 'true') {
+    byId('guispector-connection-result').textContent = 'Start the repository Inspector service to test a provider. Portable replay remains available.';
+  }
+}
+
+async function testGuispectorConnection() {
+  const apiKey = byId('guispector-api-key');
+  const result = byId('guispector-connection-result');
+  if (!byId('guispector-confirm').checked) {
+    result.className = 'failure';
+    result.textContent = 'Confirm the one-call external model action before continuing.';
+    return;
+  }
+  byId('guispector-test-connection').disabled = true;
+  result.className = 'media-note';
+  result.textContent = 'Testing the selected provider with one request. No automatic retry is allowed.';
+  try {
+    const value = await requestJson('/api/guispector/test-connection', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({
+        provider_id: byId('guispector-provider').value,
+        model: selectedGuispectorModel(),
+        api_key: apiKey.value,
+        workspace_id: byId('guispector-workspace').value,
+        confirm_external_model_action: true,
+      }),
+    });
+    result.className = 'success';
+    result.textContent = `${value.provider_model} connection passed. The key was not saved and no GUISpector verification was run.`;
+  } catch (error) {
+    result.className = 'failure';
+    result.textContent = error.message;
+  } finally {
+    apiKey.value = '';
+    byId('guispector-confirm').checked = false;
+    byId('guispector-test-connection').disabled = byId('guispector-runtime-status').dataset.apiAvailable !== 'true';
+  }
 }
 
 function renderRequirement(value) {
@@ -1696,47 +1673,6 @@ function renderEvidence(value) {
     ).join('')}</div>`;
   }).join('');
   byId('evidence-json').textContent = pretty(value);
-}
-
-function renderRetrievalCandidates(report, unitIndex) {
-  const unit = report.units[unitIndex];
-  byId('retrieval-candidates').innerHTML = report.methods.map(method => {
-    const rows = unit.candidates[method].map(item =>
-      `<li><strong>${escapeHtml(item.title)}</strong><small>${escapeHtml(item.summary)}</small><small>${escapeHtml(item.doc_id)} · score ${item.score}</small></li>`
-    ).join('');
-    return `<article class="retrieval-card"><strong>${method.toUpperCase()}</strong><ol class="candidate-list">${rows}</ol></article>`;
-  }).join('');
-}
-
-function renderRetrievalComparison(report, experiment) {
-  const pairwise = report.pairwise_summary;
-  const ranking = report.ranking_evaluation;
-  byId('retrieval-gate').innerHTML = ranking.status === 'not_computed_no_independent_qrels'
-    ? '<div class="failure"><strong>No relevance winner.</strong> The model prelabel template and two-human assignment are prepared; no labels have been collected.</div>'
-    : '<div class="success">Exploratory assisted-review metrics available</div>';
-  const utilityCards = report.method_runs.map(run =>
-    `<div class="retrieval-card"><strong>${run.backend.toUpperCase()}</strong>${run.utility.guidance_count} guidance items · ${run.utility.adopted} adopted · ${run.utility.role_has_influence_count}/60 role units with influence · consistency ${run.utility.all_consistency_passed ? 'pass' : 'fail'}</div>`
-  );
-  pairwise.comparisons.forEach(comparison => {
-    utilityCards.push(`<div class="retrieval-card"><strong>${comparison.methods.map(method => method.toUpperCase()).join(' vs ')}</strong>${comparison.top1_changed_count}/60 Top-1 changes · mean overlap ${comparison.mean_overlap_count_at_k}/5 · mean Jaccard ${comparison.mean_jaccard_at_k}</div>`);
-  });
-  experiment.efficiency.methods.forEach(method => {
-    utilityCards.push(`<div class="retrieval-card"><strong>${method.backend.toUpperCase()} efficiency</strong>${method.load_plus_first_suite_elapsed_ms} ms load + first suite · ${method.warm_suite_median_ms} ms warm median · ${(method.python_traced_peak_bytes_load_plus_first_suite / 1048576).toFixed(2)} MiB Python traced peak<br><small>Descriptive only; not part of the winner rule.</small></div>`);
-  });
-  byId('retrieval-summary').innerHTML = utilityCards.join('');
-  const select = byId('retrieval-unit-select');
-  select.innerHTML = report.units.map((unit, index) =>
-    `<option value="${index}">${escapeHtml(unit.case_id)} · ${escapeHtml(unit.role)}</option>`
-  ).join('');
-  select.addEventListener('change', () => renderRetrievalCandidates(report, Number(select.value)));
-  byId('retrieval-json').textContent = pretty({
-    status: report.status,
-    ranking_evaluation: report.ranking_evaluation,
-    metric_policy: report.metric_policy,
-    claim_boundary: report.claim_boundary,
-  });
-  byId('retrieval-experiment-json').textContent = pretty(experiment);
-  renderRetrievalCandidates(report, 0);
 }
 
 async function showCase(item) {
@@ -1796,13 +1732,8 @@ async function showCase(item) {
 
 async function main() {
   const catalog = await getJson('catalog.json');
-  const [retrieval, retrievalExperiment, guispector] = await Promise.all([
-    getJson(catalog.retrieval_comparison),
-    getJson(catalog.retrieval_experiment),
-    getJson(catalog.guispector_evaluation),
-  ]);
+  const guispector = await getJson(catalog.guispector_evaluation);
   renderMetrics(catalog.counts);
-  renderRetrievalComparison(retrieval, retrievalExperiment);
   renderGuispector(guispector);
   const select = byId('case-select');
   select.innerHTML = catalog.cases.map(item =>
@@ -1812,7 +1743,11 @@ async function main() {
   byId('preview-fit').addEventListener('click', () => setPreviewMode('fit'));
   byId('preview-audit').addEventListener('click', () => setPreviewMode('audit'));
   byId('final-page').addEventListener('load', connectPreviewStateMonitor);
+  byId('guispector-enable').addEventListener('change', updateOptionalGuispectorStatus);
+  byId('guispector-provider').addEventListener('change', updateGuispectorProvider);
+  byId('guispector-test-connection').addEventListener('click', testGuispectorConnection);
   window.addEventListener('resize', renderPreviewLayout);
+  updateGuispectorProvider();
   await initializeLiveInspector();
   await showCase(catalog.cases[0]);
 }
@@ -1830,12 +1765,9 @@ Req2Web Inspector. It replays twelve frozen Phase 5 engineering rows and lets
 a reviewer inspect the requirement, evidence
 projection, validated F1-F4 outputs, preserved failure location, final
 PageSpec, objective Chrome evidence, semantic sidecar, screenshot, interaction
-trace, runnable final page, and a deterministic BM25/RRF/TF-IDF retrieval
-comparison with a blinded metric protocol and descriptive local efficiency
-evidence. It also includes a read-only GUISpector interoperability packet that
-maps the same twelve exact pages to their frozen requirements and twenty-four
-acceptance criteria. The packet is prepared but no external GUISpector run is
-included.
+trace, and runnable final page. A default-off GUISpector option maps the same
+twelve exact pages to their frozen requirements and twenty-four acceptance
+criteria. Its result remains separate from Req2Web's canonical evidence.
 
 When served from the repository with `scripts/run_req2web_inspector.py`, the
 same interface also accepts irregular requirements, runs deterministic input
@@ -1853,14 +1785,12 @@ acceptance for new drafts remain explicitly not executed.
 No GPU, model, hidden material, network connection, or browser automation is
 required. The replay does not regenerate or repair any evidence.
 
-The optional GUISpector packet is `guispector_evaluation.json`. A later
-operator-started GUISpector run requires a separate upstream checkout, Docker,
-and the model-service credentials required by that upstream project. Imported
-decisions can be evaluated with `scripts/guispector_result_package_bridge.py`.
-The resulting precision, recall, and F1 values use one-vs-rest requirement
-classes (`met`, `unmet`, `partial`) and criterion classes (`met`, `unmet`). The
-current frozen set has only internal positive references, so absent classes
-remain undefined and the result is not independent gold or formal evaluation.
+The optional GUISpector packet is `guispector_evaluation.json`. The module is
+off by default. A user may explicitly select a supported provider profile and
+run one connection test; the API key is not persisted and there is no automatic
+retry. Full verification remains an operator-started action in the local
+GUISpector runtime. It is an optional acceptance strategy, not a paper
+comparison, independent gold, or formal evaluation.
 
 ## Run
 
@@ -1894,14 +1824,9 @@ all frozen replay functions continue to work.
 - The separate semantic sidecar accepted 12/12 results and marked 24/24
   criteria supported with zero retry.
 - The 48 F1-F4 generation calls and 12 semantic calls remain separate ledgers.
-- The retrieval panel compares BM25, RRF, and TF-IDF over sixty frozen
-  case-role query units. One provider-neutral model-prelabel template and a
-  deterministic two-human assignment are prepared. Without completed model and
-  human labels it shows candidate, downstream, and efficiency diagnostics only,
-  and declares no relevance-quality winner.
-- The Human handoff section links directly to the prelabel template, the review
-  assignment, detailed instructions, and the exact license and submission tasks
-  that still require people.
+- Development annotation, experiment-comparison, release-management, and
+  submission-work panels are intentionally absent from the user-facing
+  Inspector.
 
 This is bounded engineering evidence, not H1/gold, formal evaluation, broad
 generalization, training, LoRA, production, or user-study evidence.
@@ -1911,72 +1836,6 @@ generalization, training, LoRA, production, or user-study evidence.
 The bundle is technically runnable, but public redistribution is not yet
 authorized by a repository license. See `MATERIALS.json`. The project owner
 must make an explicit license decision before publication.
-""".encode("utf-8")
-
-
-_HUMAN_TASKS_MD = """# Req2Web Inspector Human Tasks
-
-Only human judgment, ownership decisions, and authored submission material
-remain. Do not calculate metrics manually and do not edit generated evidence.
-
-## 1. Retrieval relevance
-
-1. Give `llm_prelabel_template.json` to an approved model operator. The operator
-   may use a closed provider only after the project owner separately approves
-   the provider, model, price cap, credential path, and exact action. No script
-   in this bundle calls an API.
-2. The model operator changes only the declared completion fields: packet
-   `status`, model identity, raw-response hash, paid-API flag, and each
-   candidate's 0-3 suggestion, short rationale, and confidence. All 420
-   candidates must be completed without changing the method-blind input.
-3. A maintainer prepares deterministic human packets from the completed model
-   packet and the frozen assignment:
-
-```powershell
-python scripts/prepare_retrieval_human_review.py `
-  --completed-llm-packet path/to/llm_prelabels_completed.json
-```
-
-4. Give the two human packets to two different people. Each person reviews 252
-   items: 168 primary items with the model suggestion visible and the same 84
-   blind-audit items with it hidden. They complete their own packets before
-   seeing each other's blind ratings.
-5. After both packets are frozen, the same two people jointly resolve only the
-   84 blind-overlap items in `joint_resolution_template.json`. Do not add a third
-   reviewer or relabel an insufficient pool to create a winner.
-6. A maintainer runs the repository assembler. It rejects packet drift,
-   calculates linearly weighted Cohen kappa over the blind overlap, preserves
-   model and human judgment ledgers, and creates immutable exploratory qrels:
-
-```powershell
-python scripts/assemble_retrieval_qrels.py `
-  --review-root outputs/phase6_retrieval_human_review_v1 `
-  --reviewer-1-packet path/to/human_reviewer_1_completed.json `
-  --reviewer-2-packet path/to/human_reviewer_2_completed.json `
-  --joint-resolution-packet path/to/joint_resolution_completed.json `
-  --reviewer-1-id reviewer-a --reviewer-2-id reviewer-b `
-  --output outputs/completed_retrieval_qrels_v3.json
-```
-
-Done means the model packet, both human packets, and the joint packet validate;
-all raw judgments are retained; weighted kappa is reported; and the result is
-labeled `LLM-assisted, split-human-reviewed exploratory qrels`, never
-independent human gold or H1.
-
-## 2. License and material approval
-
-The project owner selects the software and content/data licenses, confirms the
-redistribution status of project-authored cases, outputs, screenshots, pages,
-and semantic records, and records the decision owner, date, notice files, and
-exact release archive SHA-256. `MATERIALS.json` is the review inventory.
-
-## 3. Submission material
-
-When the authors are ready, they record the 3-5 minute demonstration, write the
-four-page paper, select screenshots, add the artifact link, and retain the
-published limitations. These materials must not expand the bounded engineering
-claim into H1/gold, formal quality, broad generalization, training, production,
-or user-study claims.
 """.encode("utf-8")
 
 
@@ -2378,24 +2237,9 @@ def build_phase6_reviewer_bundle(
         _write_json(temp_root / "retrieval_comparison.json", retrieval_comparison)
         _write_json(temp_root / "retrieval_experiment.json", retrieval_experiment)
         _write_json(temp_root / "guispector_evaluation.json", guispector_evaluation)
-        _copy_regular_file(
-            experiment_root / "annotation" / "llm_prelabel_template.json",
-            temp_root
-            / "human_tasks"
-            / "retrieval"
-            / "llm_prelabel_template.json",
-        )
-        _copy_regular_file(
-            experiment_root / "annotation" / "human_review_assignment.json",
-            temp_root
-            / "human_tasks"
-            / "retrieval"
-            / "human_review_assignment.json",
-        )
         _write_json(temp_root / "catalog.json", catalog)
         _write_json(temp_root / "MATERIALS.json", _material_inventory())
         _write_bytes(temp_root / "README.md", _README_MD)
-        _write_bytes(temp_root / "human_tasks" / "README.md", _HUMAN_TASKS_MD)
         _write_bytes(temp_root / "index.html", _INDEX_HTML)
         _write_bytes(temp_root / "styles.css", _STYLES_CSS)
         _write_bytes(temp_root / "app.js", _APP_JS)
