@@ -20,6 +20,7 @@ from req2web_inspector.semantic_assist import (  # noqa: E402
     SemanticRequirementAssistStore,
     provider_capabilities,
 )
+from req2web_inspector.local_data import semantic_assist_runs_root  # noqa: E402
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -44,7 +45,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--result-root",
         type=Path,
-        default=ROOT / "outputs" / "req2web_semantic_assist_runs",
+        default=semantic_assist_runs_root(ROOT),
     )
     parser.add_argument(
         "--confirm-local-model-action",

@@ -10,6 +10,9 @@ from pathlib import Path
 LOCAL_DATA_ROOT_ENV = "REQ2WEB_LOCAL_DATA_ROOT"
 LOCAL_DATA_DIRECTORY_NAME = "Req2Web_LocalData"
 INSPECTOR_REPLAY_BUNDLE_NAME = "inspector_replay_bundle_v1"
+INSPECTOR_DRAFT_RUNS_NAME = "deterministic_draft_runs_v1"
+SEMANTIC_ASSIST_RUNS_NAME = "semantic_assist_runs_v1"
+CANONICAL_FLOW_RUNS_NAME = "canonical_flow_runs_v1"
 
 
 def resolve_local_data_root(
@@ -61,11 +64,62 @@ def inspector_release_candidate_root(
     return root / "release_candidates" / "inspector_release_candidate_v1"
 
 
+def inspector_draft_runs_root(
+    repository_root: Path,
+    local_data_root: Path | None = None,
+    environment: Mapping[str, str] | None = None,
+) -> Path:
+    """Return the local history root for deterministic Inspector drafts."""
+
+    root = resolve_local_data_root(
+        repository_root,
+        explicit_root=local_data_root,
+        environment=environment,
+    )
+    return root / "runs" / INSPECTOR_DRAFT_RUNS_NAME
+
+
+def semantic_assist_runs_root(
+    repository_root: Path,
+    local_data_root: Path | None = None,
+    environment: Mapping[str, str] | None = None,
+) -> Path:
+    """Return the local history root for advisory requirement assistance."""
+
+    root = resolve_local_data_root(
+        repository_root,
+        explicit_root=local_data_root,
+        environment=environment,
+    )
+    return root / "runs" / SEMANTIC_ASSIST_RUNS_NAME
+
+
+def canonical_flow_runs_root(
+    repository_root: Path,
+    local_data_root: Path | None = None,
+    environment: Mapping[str, str] | None = None,
+) -> Path:
+    """Return the local history root for complete canonical flow runs."""
+
+    root = resolve_local_data_root(
+        repository_root,
+        explicit_root=local_data_root,
+        environment=environment,
+    )
+    return root / "runs" / CANONICAL_FLOW_RUNS_NAME
+
+
 __all__ = [
+    "CANONICAL_FLOW_RUNS_NAME",
+    "INSPECTOR_DRAFT_RUNS_NAME",
     "INSPECTOR_REPLAY_BUNDLE_NAME",
     "LOCAL_DATA_DIRECTORY_NAME",
     "LOCAL_DATA_ROOT_ENV",
+    "SEMANTIC_ASSIST_RUNS_NAME",
+    "canonical_flow_runs_root",
+    "inspector_draft_runs_root",
     "inspector_release_candidate_root",
     "inspector_replay_bundle_root",
     "resolve_local_data_root",
+    "semantic_assist_runs_root",
 ]

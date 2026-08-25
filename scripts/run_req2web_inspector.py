@@ -40,7 +40,10 @@ from req2web_inspector.live_draft import (  # noqa: E402
 )
 from req2web_inspector.local_data import (  # noqa: E402
     LOCAL_DATA_ROOT_ENV,
+    canonical_flow_runs_root,
+    inspector_draft_runs_root,
     inspector_replay_bundle_root,
+    semantic_assist_runs_root,
 )
 from req2web_inspector.semantic_assist import (  # noqa: E402
     HIGH_GPU_PROFILE,
@@ -532,7 +535,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--run-root",
         type=Path,
-        default=ROOT / "outputs" / "req2web_inspector_runs",
+        default=inspector_draft_runs_root(ROOT),
         help="Module-owned directory for immutable local deterministic draft runs.",
     )
     parser.add_argument(
@@ -576,7 +579,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--semantic-assist-root",
         type=Path,
-        default=ROOT / "outputs" / "req2web_semantic_assist_runs",
+        default=semantic_assist_runs_root(ROOT),
         help="Module-owned immutable semantic-assist evidence directory.",
     )
     parser.add_argument(
@@ -622,7 +625,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--canonical-run-root",
         type=Path,
-        default=ROOT / "outputs" / "req2web_inspector_canonical_runs",
+        default=canonical_flow_runs_root(ROOT),
         help="Module-owned canonical model run and evidence directory.",
     )
     parser.add_argument(

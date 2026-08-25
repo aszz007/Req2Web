@@ -11,11 +11,17 @@ if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
 from req2web_inspector.local_data import (  # noqa: E402
+    CANONICAL_FLOW_RUNS_NAME,
+    INSPECTOR_DRAFT_RUNS_NAME,
     INSPECTOR_REPLAY_BUNDLE_NAME,
     LOCAL_DATA_ROOT_ENV,
+    SEMANTIC_ASSIST_RUNS_NAME,
+    canonical_flow_runs_root,
+    inspector_draft_runs_root,
     inspector_release_candidate_root,
     inspector_replay_bundle_root,
     resolve_local_data_root,
+    semantic_assist_runs_root,
 )
 
 
@@ -48,6 +54,20 @@ class InspectorLocalDataTests(unittest.TestCase):
         self.assertEqual(replay.name, INSPECTOR_REPLAY_BUNDLE_NAME)
         self.assertNotIn("phase", replay.name.lower())
         self.assertEqual(candidate.name, "inspector_release_candidate_v1")
+
+    def test_run_histories_have_separate_stable_roots(self) -> None:
+        draft = inspector_draft_runs_root(ROOT, environment={})
+        semantic = semantic_assist_runs_root(ROOT, environment={})
+        canonical = canonical_flow_runs_root(ROOT, environment={})
+
+        self.assertEqual(draft.name, INSPECTOR_DRAFT_RUNS_NAME)
+        self.assertEqual(semantic.name, SEMANTIC_ASSIST_RUNS_NAME)
+        self.assertEqual(canonical.name, CANONICAL_FLOW_RUNS_NAME)
+        self.assertEqual(
+            {draft.parent, semantic.parent, canonical.parent},
+            {ROOT.parent / "Req2Web_LocalData" / "runs"},
+        )
+        self.assertEqual(len({draft, semantic, canonical}), 3)
 
 
 if __name__ == "__main__":
