@@ -15,6 +15,8 @@ import shutil
 import statistics
 from typing import Any, Mapping, Sequence
 
+from .local_data import guispector_runtime_root
+
 
 GUISPECTOR_EVALUATION_SCHEMA_VERSION = "req2web.guispector.evaluation.v1"
 GUISPECTOR_DECISION_IMPORT_SCHEMA_VERSION = "req2web.guispector.decision_import.v1"
@@ -31,6 +33,7 @@ GLM_46V_0_TO_32K_INPUT_CNY_PER_MILLION = 1.0
 GLM_46V_0_TO_32K_CACHE_HIT_CNY_PER_MILLION = 0.2
 GLM_46V_0_TO_32K_OUTPUT_CNY_PER_MILLION = 3.0
 START_URL_TOKEN = "{REQ2WEB_INSPECTOR_BASE_URL}"
+REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 
 _REQUIREMENT_LABELS = ("met", "unmet", "partial")
 _CRITERION_LABELS = ("met", "unmet")
@@ -1162,15 +1165,17 @@ def guispector_runtime_preflight() -> dict[str, Any]:
 
     docker_available = shutil.which("docker") is not None
     upstream_root_text = os.environ.get("REQ2WEB_GUISPECTOR_ROOT", "").strip()
-    upstream_root_configured = False
-    if upstream_root_text:
-        root = Path(upstream_root_text)
-        upstream_root_configured = root.is_dir() and (
-            (root / "docker-compose.yml").is_file()
-            or (root / "docker-compose.yaml").is_file()
-            or (root / "compose.yml").is_file()
-            or (root / "docker-compose.req2web.yml").is_file()
-        )
+    root = (
+        Path(upstream_root_text).expanduser()
+        if upstream_root_text
+        else guispector_runtime_root(REPOSITORY_ROOT)
+    )
+    upstream_root_configured = root.is_dir() and (
+        (root / "docker-compose.yml").is_file()
+        or (root / "docker-compose.yaml").is_file()
+        or (root / "compose.yml").is_file()
+        or (root / "docker-compose.req2web.yml").is_file()
+    )
     zhipu_api_key_configured = bool(os.environ.get("ZHIPU_API_KEY", "").strip())
     openai_api_key_configured = bool(os.environ.get("OPENAI_API_KEY", "").strip())
     dashscope_api_key_configured = bool(os.environ.get("DASHSCOPE_API_KEY", "").strip())

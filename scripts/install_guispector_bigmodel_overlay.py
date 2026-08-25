@@ -18,16 +18,19 @@ import sys
 
 
 EXPECTED_UPSTREAM_COMMIT = "1472b7027099402758337897db5ea0b8d4e6ed4e"
-DEFAULT_RUNTIME_ROOT = Path("outputs/guispector_runtime_1472b702/upstream")
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 SRC = REPOSITORY_ROOT / "src"
 if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
-from req2web_inspector.local_data import inspector_replay_bundle_root  # noqa: E402
+from req2web_inspector.local_data import (  # noqa: E402
+    guispector_runtime_root,
+    inspector_replay_bundle_root,
+)
 
 
 DEFAULT_REPLAY_BUNDLE_ROOT = inspector_replay_bundle_root(REPOSITORY_ROOT)
+DEFAULT_RUNTIME_ROOT = guispector_runtime_root(REPOSITORY_ROOT)
 
 
 class OverlayInstallError(RuntimeError):

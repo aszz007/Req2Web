@@ -13,6 +13,7 @@ INSPECTOR_REPLAY_BUNDLE_NAME = "inspector_replay_bundle_v1"
 INSPECTOR_DRAFT_RUNS_NAME = "deterministic_draft_runs_v1"
 SEMANTIC_ASSIST_RUNS_NAME = "semantic_assist_runs_v1"
 CANONICAL_FLOW_RUNS_NAME = "canonical_flow_runs_v1"
+GUISPECTOR_RUNTIME_NAME = "guispector_runtime_v1"
 
 
 def resolve_local_data_root(
@@ -109,14 +110,31 @@ def canonical_flow_runs_root(
     return root / "runs" / CANONICAL_FLOW_RUNS_NAME
 
 
+def guispector_runtime_root(
+    repository_root: Path,
+    local_data_root: Path | None = None,
+    environment: Mapping[str, str] | None = None,
+) -> Path:
+    """Return the pinned optional GUISpector checkout location."""
+
+    root = resolve_local_data_root(
+        repository_root,
+        explicit_root=local_data_root,
+        environment=environment,
+    )
+    return root / "optional_tools" / GUISPECTOR_RUNTIME_NAME / "upstream"
+
+
 __all__ = [
     "CANONICAL_FLOW_RUNS_NAME",
+    "GUISPECTOR_RUNTIME_NAME",
     "INSPECTOR_DRAFT_RUNS_NAME",
     "INSPECTOR_REPLAY_BUNDLE_NAME",
     "LOCAL_DATA_DIRECTORY_NAME",
     "LOCAL_DATA_ROOT_ENV",
     "SEMANTIC_ASSIST_RUNS_NAME",
     "canonical_flow_runs_root",
+    "guispector_runtime_root",
     "inspector_draft_runs_root",
     "inspector_release_candidate_root",
     "inspector_replay_bundle_root",

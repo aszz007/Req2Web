@@ -12,11 +12,13 @@ if str(SRC) not in sys.path:
 
 from req2web_inspector.local_data import (  # noqa: E402
     CANONICAL_FLOW_RUNS_NAME,
+    GUISPECTOR_RUNTIME_NAME,
     INSPECTOR_DRAFT_RUNS_NAME,
     INSPECTOR_REPLAY_BUNDLE_NAME,
     LOCAL_DATA_ROOT_ENV,
     SEMANTIC_ASSIST_RUNS_NAME,
     canonical_flow_runs_root,
+    guispector_runtime_root,
     inspector_draft_runs_root,
     inspector_release_candidate_root,
     inspector_replay_bundle_root,
@@ -68,6 +70,14 @@ class InspectorLocalDataTests(unittest.TestCase):
             {ROOT.parent / "Req2Web_LocalData" / "runs"},
         )
         self.assertEqual(len({draft, semantic, canonical}), 3)
+
+    def test_optional_guispector_runtime_is_outside_the_repository(self) -> None:
+        runtime = guispector_runtime_root(ROOT, environment={})
+
+        self.assertEqual(runtime.name, "upstream")
+        self.assertEqual(runtime.parent.name, GUISPECTOR_RUNTIME_NAME)
+        self.assertEqual(runtime.parent.parent.name, "optional_tools")
+        self.assertFalse(runtime.is_relative_to(ROOT))
 
 
 if __name__ == "__main__":
