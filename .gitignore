@@ -24,8 +24,15 @@ data/raw/
 
 # Machine-specific workspace state and generated outputs
 .vscode/
+.local-tools/
 outputs/
 release/
 
 # Temporary audit output
 *.tmp
+/.tmp*/
+/tmp*/
+/.phase4-*/
+/.phase5-*/
+/p4-full-flow-*/
+/%SystemDrive%/
