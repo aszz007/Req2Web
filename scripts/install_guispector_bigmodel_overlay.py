@@ -19,6 +19,15 @@ import sys
 
 EXPECTED_UPSTREAM_COMMIT = "1472b7027099402758337897db5ea0b8d4e6ed4e"
 DEFAULT_RUNTIME_ROOT = Path("outputs/guispector_runtime_1472b702/upstream")
+REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
+SRC = REPOSITORY_ROOT / "src"
+if str(SRC) not in sys.path:
+    sys.path.insert(0, str(SRC))
+
+from req2web_inspector.local_data import inspector_replay_bundle_root  # noqa: E402
+
+
+DEFAULT_REPLAY_BUNDLE_ROOT = inspector_replay_bundle_root(REPOSITORY_ROOT)
 
 
 class OverlayInstallError(RuntimeError):
@@ -85,10 +94,60 @@ def _git_head(runtime_root: Path) -> str:
     return result.stdout.strip()
 
 
-def install(repository_root: Path, runtime_root: Path) -> dict[str, object]:
+def _ensure_replay_mount(compose_path: Path, replay_bundle_root: Path) -> bool:
+    replay_source = replay_bundle_root.as_posix()
+    agent_mount = (
+        f'      - "{replay_source}:/app/req2web_inspector_replay_v1:ro"'
+    )
+    legacy_agent_mount = (
+        "      - ../../../release/phase6_reviewer_v17:"
+        "/app/req2web_reviewer_v17:ro"
+    )
+    pages_mount = f'      - "{replay_source}:/usr/share/nginx/html:ro"'
+    legacy_pages_mount = (
+        "      - ../../../release/phase6_reviewer_v17:"
+        "/usr/share/nginx/html:ro"
+    )
+    agent_anchor = "      - ./gui_spector:/app/gui_spector:ro"
+    pages_anchor = (
+        "  req2web-pages:\n"
+        "    image: nginx:1.27-alpine\n"
+        "    volumes:"
+    )
+    text = compose_path.read_text(encoding="utf-8")
+    changed = False
+    if agent_mount not in text:
+        if legacy_agent_mount in text:
+            text = text.replace(legacy_agent_mount, agent_mount, 1)
+        elif text.count(agent_anchor) == 1:
+            text = text.replace(agent_anchor, f"{agent_anchor}\n{agent_mount}", 1)
+        else:
+            raise OverlayInstallError("Unexpected GUISpector agent volume shape")
+        changed = True
+    if pages_anchor in text and pages_mount not in text:
+        if legacy_pages_mount in text:
+            text = text.replace(legacy_pages_mount, pages_mount, 1)
+        elif text.count(pages_anchor) == 1:
+            text = text.replace(pages_anchor, f"{pages_anchor}\n{pages_mount}", 1)
+        else:
+            raise OverlayInstallError("Unexpected Req2Web page volume shape")
+        changed = True
+    if changed:
+        compose_path.write_text(text, encoding="utf-8", newline="\n")
+    return changed
+
+
+def install(
+    repository_root: Path,
+    runtime_root: Path,
+    replay_bundle_root: Path,
+) -> dict[str, object]:
     runtime_root = runtime_root.resolve()
+    replay_bundle_root = replay_bundle_root.resolve(strict=True)
     if _git_head(runtime_root) != EXPECTED_UPSTREAM_COMMIT:
         raise OverlayInstallError("GUISpector checkout is not the pinned inspected revision")
+    if not (replay_bundle_root / "guispector_evaluation.json").is_file():
+        raise OverlayInstallError("Inspector replay bundle is incomplete")
 
     required = [
         runtime_root / "gui_spector/src/gui_spector/verfication/agent.py",
@@ -155,29 +214,7 @@ def install(repository_root: Path, runtime_root: Path) -> dict[str, object]:
             changed.append(str(init_path.relative_to(runtime_root)))
 
     compose_path = runtime_root / "docker-compose.req2web.yml"
-    if _replace_once(
-        compose_path,
-        '''    ports:
-      - "127.0.0.1:5900:5900"
-    volumes:
-      - ./webapp:/app/webapp:ro
-      - ./gui_spector:/app/gui_spector:ro
-      - guispector_media:/app/webapp/media
-    depends_on:
-      mysql:
-''',
-        '''    ports:
-      - "127.0.0.1:5900:5900"
-    volumes:
-      - ./webapp:/app/webapp:ro
-      - ./gui_spector:/app/gui_spector:ro
-      - ../../../release/phase6_reviewer_v17:/app/req2web_reviewer_v17:ro
-      - guispector_media:/app/webapp/media
-    depends_on:
-      mysql:
-''',
-        "../../../release/phase6_reviewer_v17:/app/req2web_reviewer_v17:ro",
-    ):
+    if _ensure_replay_mount(compose_path, replay_bundle_root):
         changed.append(str(compose_path.relative_to(runtime_root)))
     if _replace_once(
         compose_path,
@@ -896,6 +933,7 @@ class Migration(migrations.Migration):
         "schema_version": "req2web.guispector_provider_overlay_install.v2",
         "upstream_commit": EXPECTED_UPSTREAM_COMMIT,
         "runtime_root": str(runtime_root),
+        "replay_bundle_root": str(replay_bundle_root),
         "changed_files": changed,
         "api_key_read": False,
         "api_call_made": False,
@@ -912,10 +950,19 @@ def main() -> int:
         default=DEFAULT_RUNTIME_ROOT,
         help="Pinned GUISpector checkout root.",
     )
+    parser.add_argument(
+        "--replay-bundle-root",
+        type=Path,
+        default=DEFAULT_REPLAY_BUNDLE_ROOT,
+        help="Validated external Inspector replay bundle mounted read-only.",
+    )
     args = parser.parse_args()
-    repository_root = Path(__file__).resolve().parents[1]
     try:
-        result = install(repository_root, args.runtime_root)
+        result = install(
+            REPOSITORY_ROOT,
+            args.runtime_root,
+            args.replay_bundle_root,
+        )
     except (OverlayInstallError, OSError, subprocess.CalledProcessError) as exc:
         print(json.dumps({"installed": False, "error": str(exc)}, ensure_ascii=False))
         return 1

@@ -17,6 +17,7 @@ from req2web_inspector.phase6_replay import (  # noqa: E402
     Phase6ReplayError,
     build_phase6_reviewer_bundle,
 )
+from req2web_inspector.local_data import inspector_replay_bundle_root  # noqa: E402
 
 
 DEFAULT_RETURN_ROOT = Path(
@@ -93,7 +94,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--output-root",
         type=Path,
-        default=ROOT / "release" / "phase6_reviewer_v17",
+        default=inspector_replay_bundle_root(ROOT),
+        help="Untracked stable local-data location for the Inspector replay bundle.",
     )
     return parser
 

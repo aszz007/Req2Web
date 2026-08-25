@@ -20,6 +20,7 @@ from req2web_inspector.guispector_sidecar import (  # noqa: E402
     guispector_runtime_preflight,
     validate_guispector_evaluation,
 )
+from req2web_inspector.local_data import inspector_replay_bundle_root  # noqa: E402
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -33,7 +34,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--bundle-root",
         type=Path,
-        default=ROOT / "release" / "phase6_reviewer_v17",
+        default=inspector_replay_bundle_root(ROOT),
     )
     parser.add_argument(
         "--decisions",

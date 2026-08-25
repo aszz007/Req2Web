@@ -21,12 +21,17 @@ from req2web_inspector.phase6_replay import (  # noqa: E402
     Phase6ReplayError,
     validate_phase6_reviewer_bundle,
 )
+from req2web_inspector.local_data import inspector_replay_bundle_root  # noqa: E402
 
 
 class Phase6ReviewerBundleTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
-        cls.bundle_root = ROOT / "release" / "phase6_reviewer_v17"
+        cls.bundle_root = inspector_replay_bundle_root(ROOT)
+        if not cls.bundle_root.is_dir():
+            raise unittest.SkipTest(
+                "external Inspector replay bundle is unavailable"
+            )
         cls.manifest = validate_phase6_reviewer_bundle(cls.bundle_root)
 
     def test_frozen_counts_and_separate_ledgers(self) -> None:

@@ -38,6 +38,10 @@ from req2web_inspector.live_draft import (  # noqa: E402
     LocalDraftRunStore,
     analyze_requirement,
 )
+from req2web_inspector.local_data import (  # noqa: E402
+    LOCAL_DATA_ROOT_ENV,
+    inspector_replay_bundle_root,
+)
 from req2web_inspector.semantic_assist import (  # noqa: E402
     HIGH_GPU_PROFILE,
     LOCAL_INTEGRITY_PROFILE,
@@ -516,7 +520,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--bundle-root",
         type=Path,
-        default=ROOT / "release" / "phase6_reviewer_v17",
+        default=inspector_replay_bundle_root(ROOT),
+        help=(
+            "Precomputed Inspector replay bundle. The default is the stable "
+            f"replay path under {LOCAL_DATA_ROOT_ENV}, or a Req2Web_LocalData "
+            "directory beside the repository when that variable is unset."
+        ),
     )
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8765)

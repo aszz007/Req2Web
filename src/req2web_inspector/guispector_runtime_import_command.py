@@ -21,7 +21,9 @@ from setups.models import AcceptanceCriterion, Requirement, Setup
 
 
 PACKET_SCHEMA_VERSION = "req2web.guispector.evaluation.v1"
-DEFAULT_PACKET = Path("/app/req2web_reviewer_v17/guispector_evaluation.json")
+DEFAULT_PACKET = Path(
+    "/app/req2web_inspector_replay_v1/guispector_evaluation.json"
+)
 DEFAULT_BASE_URL = "http://req2web-pages"
 TOKEN = "{REQ2WEB_INSPECTOR_BASE_URL}"
 PROVIDERS = {

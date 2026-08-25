@@ -18,6 +18,10 @@ from req2web_inspector.phase6_release_candidate import (  # noqa: E402
     build_phase6_release_candidate,
     validate_phase6_release_candidate,
 )
+from req2web_inspector.local_data import (  # noqa: E402
+    inspector_release_candidate_root,
+    inspector_replay_bundle_root,
+)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -30,12 +34,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--reviewer-root",
         type=Path,
-        default=ROOT / "release" / "phase6_reviewer_v17",
+        default=inspector_replay_bundle_root(ROOT),
     )
     parser.add_argument(
         "--output-root",
         type=Path,
-        default=ROOT / "release" / "phase6_release_candidate_v17",
+        default=inspector_release_candidate_root(ROOT),
     )
     parser.add_argument("--validate-only", action="store_true")
     return parser

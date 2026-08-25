@@ -25,6 +25,7 @@ data/raw/
 # Machine-specific workspace state and generated outputs
 .vscode/
 outputs/
+release/
 
 # Temporary audit output
 *.tmp
