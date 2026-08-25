@@ -184,7 +184,10 @@ class CanonicalInspectorRunStore:
         self._record_lock = threading.RLock()
         self._model_slot = threading.Lock()
         self._threads: dict[str, threading.Thread] = {}
+        self._cancel_events: dict[str, threading.Event] = {}
+        self._cancel_requested_at: dict[str, str] = {}
         self._prepare_root()
+        self._close_interrupted_records()
 
     def _prepare_root(self) -> None:
         if self.root.exists():
@@ -213,6 +216,41 @@ class CanonicalInspectorRunStore:
         if self.integrity_evidence.is_symlink() or not self.integrity_evidence.is_file():
             raise InspectorCanonicalRunError("model integrity evidence is invalid")
 
+    def _close_interrupted_records(self) -> None:
+        """Fail closed records whose owning service ended before a terminal state."""
+
+        for path in self.root.iterdir():
+            if not path.is_dir() or not RUN_ID.fullmatch(path.name):
+                continue
+            record_path = path / "run.json"
+            if not record_path.is_file():
+                continue
+            record = _read_json(record_path, "canonical run")
+            if record.get("status") not in {"queued", "running", "cancel_requested"}:
+                continue
+            previous_status = str(record["status"])
+            for stage in record.get("stages", []):
+                if isinstance(stage, dict) and stage.get("status") in {
+                    "pending",
+                    "loading",
+                    "preparing_generation",
+                    "generate_started",
+                }:
+                    stage["status"] = "interrupted_service_restart"
+            record["status"] = "interrupted_service_restart"
+            record["completed_at"] = _now()
+            record["updated_at"] = record["completed_at"]
+            record["failure"] = {
+                "stage_id": record.get("active_stage", "unknown"),
+                "error_type": "InspectorServiceInterrupted",
+                "message": (
+                    "The previous Inspector service ended before this run reached "
+                    "a terminal record. No automatic resume or retry was attempted."
+                ),
+                "previous_status": previous_status,
+            }
+            _atomic_json(record_path, record)
+
     def capability(self) -> dict[str, object]:
         return {
             **runtime_capabilities(),
@@ -225,6 +263,8 @@ class CanonicalInspectorRunStore:
             "real_browser_acceptance_available": True,
             "semantic_acceptance_available": True,
             "deterministic_g0_prebuilt_before_model": True,
+            "safe_cancellation": "explicit_stage_boundary_no_retry",
+            "restart_reconciliation": "interrupted_no_automatic_resume",
             "model_action_active": self.is_busy(),
         }
 
@@ -338,6 +378,8 @@ class CanonicalInspectorRunStore:
                 "status": "queued",
                 "created_at": _now(),
                 "updated_at": _now(),
+                "active_stage": "input",
+                "cancel_requested": False,
                 "input": request,
                 "diagnostics": diagnostics,
                 "options": {
@@ -384,6 +426,7 @@ class CanonicalInspectorRunStore:
                 },
             }
             _atomic_json(run_dir / "run.json", record)
+            cancel_event = threading.Event()
             thread = threading.Thread(
                 target=self._execute,
                 args=(run_id,),
@@ -391,6 +434,7 @@ class CanonicalInspectorRunStore:
                 daemon=True,
             )
             with self._record_lock:
+                self._cancel_events[run_id] = cancel_event
                 self._threads[run_id] = thread
             thread.start()
             return record
@@ -399,9 +443,83 @@ class CanonicalInspectorRunStore:
             raise
 
     def _save(self, run_id: str, record: dict[str, Any]) -> None:
-        record["updated_at"] = _now()
+        timestamp = _now()
+        record["updated_at"] = timestamp
         with self._record_lock:
+            cancel_event = self._cancel_events.get(run_id)
+            if cancel_event is not None and cancel_event.is_set():
+                record["cancel_requested"] = True
+                record["cancel_requested_at"] = self._cancel_requested_at.get(
+                    run_id,
+                    timestamp,
+                )
+                if record.get("status") in {"queued", "running", "cancel_requested"}:
+                    record["status"] = "cancel_requested"
+            if record.get("status") in {"queued", "running", "cancel_requested"}:
+                record["heartbeat_at"] = timestamp
             _atomic_json(self._run_dir(run_id) / "run.json", record)
+
+    def _is_cancel_requested(self, run_id: str) -> bool:
+        with self._record_lock:
+            event = self._cancel_events.get(run_id)
+            return event is not None and event.is_set()
+
+    def cancel(self, run_id: str, value: object) -> dict[str, Any]:
+        """Request a safe stop after the currently executing stage."""
+
+        if not isinstance(value, Mapping) or value.get("confirm_cancel") is not True:
+            raise InspectorCanonicalRunError(
+                "explicit confirmation is required to cancel a canonical run"
+            )
+        with self._record_lock:
+            record = self.get(run_id)
+            if record.get("status") not in {"queued", "running", "cancel_requested"}:
+                raise InspectorCanonicalRunError("canonical run is already terminal")
+            event = self._cancel_events.get(run_id)
+            if event is None:
+                raise InspectorCanonicalRunError(
+                    "canonical run is not owned by the current Inspector process"
+                )
+            requested_at = self._cancel_requested_at.setdefault(run_id, _now())
+            event.set()
+            record.setdefault("status_before_cancel", record.get("status"))
+            record["status"] = "cancel_requested"
+            record["cancel_requested"] = True
+            record["cancel_requested_at"] = requested_at
+            record["cancellation_message"] = (
+                "Cancellation is recorded now. An active model or browser call is "
+                "allowed to close its current evidence boundary before the run stops."
+            )
+            self._save(run_id, record)
+            return record
+
+    def _finish_canceled(
+        self,
+        run_id: str,
+        record: dict[str, Any],
+        *,
+        after_stage: str,
+    ) -> None:
+        for stage in record.get("stages", []):
+            if isinstance(stage, dict) and stage.get("status") in {
+                "pending",
+                "loading",
+                "preparing_generation",
+                "generate_started",
+            }:
+                stage["status"] = "not_executed_user_canceled"
+        record["status"] = "canceled_by_user"
+        record["active_stage"] = after_stage
+        record["cancellation"] = {
+            "status": "completed_safe_stop",
+            "requested_at": self._cancel_requested_at.get(run_id),
+            "stopped_after_stage": after_stage,
+            "automatic_retry_count": 0,
+            "partial_evidence_preserved": True,
+            "result_package_available": isinstance(record.get("result"), Mapping),
+        }
+        record["completed_at"] = _now()
+        self._save(run_id, record)
 
     def _execute(self, run_id: str) -> None:
         run_dir = self._run_dir(run_id)
@@ -409,10 +527,20 @@ class CanonicalInspectorRunStore:
         active_stage = "upstream"
         try:
             record["status"] = "running"
+            record["active_stage"] = active_stage
             self._save(run_id, record)
+            if self._is_cancel_requested(run_id):
+                self._finish_canceled(
+                    run_id,
+                    record,
+                    after_stage="input",
+                )
+                return
             b_aux_sidecar: Mapping[str, object] | None = None
             if record["options"]["run_requirement_assist"]:
                 active_stage = "b_aux"
+                record["active_stage"] = active_stage
+                self._save(run_id, record)
                 try:
                     assert self.requirement_assist_runner is not None
                     assist = self.requirement_assist_runner(record["input"])
@@ -436,8 +564,16 @@ class CanonicalInspectorRunStore:
                         detail=str(exc),
                     )
                 self._save(run_id, record)
+                if self._is_cancel_requested(run_id):
+                    self._finish_canceled(
+                        run_id,
+                        record,
+                        after_stage="b_aux",
+                    )
+                    return
 
             active_stage = "upstream"
+            record["active_stage"] = active_stage
             preview = record["diagnostics"]["canonical_b_preview"]
             case = {
                 "case_id": f"inspector-{run_id}",
@@ -453,7 +589,15 @@ class CanonicalInspectorRunStore:
                 output_root=run_dir / "upstream",
             )
             _set_stage(record, "upstream", "completed")
+            if self._is_cancel_requested(run_id):
+                self._finish_canceled(
+                    run_id,
+                    record,
+                    after_stage="upstream",
+                )
+                return
             _set_stage(record, "model", "loading")
+            record["active_stage"] = "model"
             self._save(run_id, record)
 
             def progress(
@@ -464,6 +608,7 @@ class CanonicalInspectorRunStore:
                 if node_id == "runtime":
                     _set_stage(record, "model", status)
                 else:
+                    record["active_stage"] = node_id
                     _set_stage(record, node_id, status)
                     if attempt is not None:
                         record.setdefault("live_attempts", {})[node_id] = {
@@ -523,6 +668,7 @@ class CanonicalInspectorRunStore:
                 run_id=run_id,
                 b_aux_sidecar=b_aux_sidecar,
                 progress_callback=progress,
+                cancel_requested=lambda: self._is_cancel_requested(run_id),
                 _raw_node_generator=self._raw_node_generator,
             )
             record["canonical_summary"] = summary
@@ -541,7 +687,21 @@ class CanonicalInspectorRunStore:
                 attempt_path = attempts_root / node_id / "attempt_result.json"
                 if attempt_path.is_file():
                     attempt = _read_json(attempt_path, f"{node_id} attempt")
-                    _set_stage(record, node_id, str(attempt["status"]))
+                    failure = attempt.get("failure")
+                    canceled_before_generate = (
+                        isinstance(failure, Mapping)
+                        and failure.get("failure_code")
+                        == "operator_canceled_before_model_node"
+                    )
+                    _set_stage(
+                        record,
+                        node_id,
+                        (
+                            "canceled_before_generate"
+                            if canceled_before_generate
+                            else str(attempt["status"])
+                        ),
+                    )
                     output_path = attempts_root / node_id / "validated_node_output.json"
                     raw_path = attempts_root / node_id / "raw_response.bin"
                     record["node_evidence"][node_id] = {
@@ -594,10 +754,19 @@ class CanonicalInspectorRunStore:
                 ),
             }
             self._save(run_id, record)
+            if self._is_cancel_requested(run_id):
+                self._finish_canceled(
+                    run_id,
+                    record,
+                    after_stage=str(record.get("active_stage", active_stage)),
+                )
+                return
 
             browser_audit: dict[str, object] | None = None
             if record["options"]["run_browser_acceptance"]:
                 active_stage = "browser"
+                record["active_stage"] = active_stage
+                self._save(run_id, record)
                 source_identity = make_identity(
                     summary,
                     revision=f"{RUN_SCHEMA_VERSION}.canonical_summary.v1",
@@ -648,9 +817,18 @@ class CanonicalInspectorRunStore:
                     }
                     _set_stage(record, "browser", "failed_closed", detail=str(exc))
                 self._save(run_id, record)
+                if self._is_cancel_requested(run_id):
+                    self._finish_canceled(
+                        run_id,
+                        record,
+                        after_stage="browser",
+                    )
+                    return
 
             if record["options"]["run_semantic_acceptance"]:
                 active_stage = "semantic"
+                record["active_stage"] = active_stage
+                self._save(run_id, record)
                 if browser_audit is None:
                     _set_stage(
                         record,
@@ -710,10 +888,26 @@ class CanonicalInspectorRunStore:
                         }
                         _set_stage(record, "semantic", "failed_closed", detail=str(exc))
                 self._save(run_id, record)
+                if self._is_cancel_requested(run_id):
+                    self._finish_canceled(
+                        run_id,
+                        record,
+                        after_stage="semantic",
+                    )
+                    return
 
-            record["status"] = str(summary["status"])
-            record["completed_at"] = _now()
-            self._save(run_id, record)
+            with self._record_lock:
+                if self._is_cancel_requested(run_id):
+                    self._finish_canceled(
+                        run_id,
+                        record,
+                        after_stage=str(record.get("active_stage", active_stage)),
+                    )
+                    return
+                record["status"] = str(summary["status"])
+                record["active_stage"] = "completed"
+                record["completed_at"] = _now()
+                self._save(run_id, record)
         except Exception as exc:
             try:
                 _set_stage(record, active_stage, "failed_closed", detail=str(exc))
@@ -731,6 +925,8 @@ class CanonicalInspectorRunStore:
             self._model_slot.release()
             with self._record_lock:
                 self._threads.pop(run_id, None)
+                self._cancel_events.pop(run_id, None)
+                self._cancel_requested_at.pop(run_id, None)
 
     def wait(self, run_id: str, timeout: float | None = None) -> dict[str, Any]:
         with self._record_lock:

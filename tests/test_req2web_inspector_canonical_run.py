@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 import shutil
 import sys
+import threading
 import unittest
 from unittest.mock import patch
 import uuid
@@ -333,6 +334,147 @@ class CanonicalInspectorRunStoreTests(unittest.TestCase):
             record["semantic"]["page_spec_conformance_status"],
             "fail",
         )
+
+    def test_safe_cancellation_preserves_fallback_and_skips_later_checks(self) -> None:
+        case = synthetic_commerce_b_input()
+        first_node_started = threading.Event()
+        release_first_node = threading.Event()
+        browser_called = False
+        semantic_called = False
+
+        def slow_raw_node_generator(node_id, authority_state):
+            if node_id == "F1":
+                first_node_started.set()
+                if not release_first_node.wait(timeout=10):
+                    raise AssertionError("test did not release F1")
+            return self._raw_node_generator(node_id, authority_state)
+
+        def browser_must_not_run(**_kwargs):
+            nonlocal browser_called
+            browser_called = True
+            raise AssertionError("browser ran after cancellation")
+
+        def semantic_must_not_run(**_kwargs):
+            nonlocal semantic_called
+            semantic_called = True
+            raise AssertionError("semantic ran after cancellation")
+
+        store = CanonicalInspectorRunStore(
+            root=self.root / "runs-cancel",
+            index_dir=ROOT / "data/processed/rag",
+            model_root=self.model_root,
+            integrity_evidence=self.evidence,
+            requirement_assist_runner=self._assist,
+            browser_runner=browser_must_not_run,
+            semantic_runner=semantic_must_not_run,
+            _raw_node_generator=slow_raw_node_generator,
+        )
+        inventory = {
+            "inventory_identity": {
+                "identity_kind": "canonical_json",
+                "sha256": "sha256:" + ("e" * 64),
+                "byte_length": 1,
+                "revision": "test.inventory.v1",
+            }
+        }
+        with patch(
+            "req2web_runtime.phase4_local_qwen_langgraph_integrated.validate_model_inventory_metadata",
+            return_value=inventory,
+        ):
+            created = store.create(
+                {
+                    "requirement": case["requirement"],
+                    "target_device": case["target_device"],
+                    "task_type": case["task_type"],
+                    "constraints": case["constraints"],
+                    "confirm_local_model_action": True,
+                    "run_requirement_assist": False,
+                    "run_browser_acceptance": True,
+                    "run_semantic_acceptance": True,
+                }
+            )
+            self.assertTrue(first_node_started.wait(timeout=10))
+            with self.assertRaisesRegex(
+                InspectorCanonicalRunError,
+                "explicit confirmation",
+            ):
+                store.cancel(created["run_id"], {"confirm_cancel": False})
+            requested = store.cancel(
+                created["run_id"],
+                {"confirm_cancel": True},
+            )
+            self.assertEqual(requested["status"], "cancel_requested")
+            release_first_node.set()
+            record = store.wait(created["run_id"], timeout=30)
+
+        self.assertEqual(record["status"], "canceled_by_user")
+        self.assertTrue(record["cancel_requested"])
+        self.assertEqual(record["cancellation"]["automatic_retry_count"], 0)
+        self.assertTrue(record["cancellation"]["partial_evidence_preserved"])
+        self.assertTrue(record["cancellation"]["result_package_available"])
+        self.assertTrue(record["result"]["deterministic_g0_available"])
+        self.assertFalse(record["result"]["model_result_available"])
+        statuses = {item["stage_id"]: item["status"] for item in record["stages"]}
+        self.assertEqual(statuses["F2"], "canceled_before_generate")
+        self.assertEqual(statuses["browser"], "not_executed_user_canceled")
+        self.assertEqual(statuses["semantic"], "not_executed_user_canceled")
+        self.assertFalse(browser_called)
+        self.assertFalse(semantic_called)
+        self.assertTrue(
+            store.artifact_path(record["run_id"], "result-package.zip").is_file()
+        )
+        with self.assertRaisesRegex(
+            InspectorCanonicalRunError,
+            "already terminal",
+        ):
+            store.cancel(record["run_id"], {"confirm_cancel": True})
+
+    def test_restart_marks_incomplete_records_interrupted_without_retry(self) -> None:
+        store = self._store()
+        run_id = "canonical-" + ("a" * 12)
+        run_dir = store.root / run_id
+        run_dir.mkdir()
+        record_path = run_dir / "run.json"
+        record_path.write_text(
+            json.dumps(
+                {
+                    "schema_version": "req2web.inspector.canonical_run.v1",
+                    "run_id": run_id,
+                    "status": "running",
+                    "active_stage": "F4",
+                    "stages": [
+                        {"stage_id": "F1", "status": "completed"},
+                        {"stage_id": "F4", "status": "generate_started"},
+                        {"stage_id": "browser", "status": "pending"},
+                    ],
+                },
+                ensure_ascii=False,
+            ),
+            encoding="utf-8",
+        )
+
+        reopened = CanonicalInspectorRunStore(
+            root=store.root,
+            index_dir=ROOT / "data/processed/rag",
+            model_root=self.model_root,
+            integrity_evidence=self.evidence,
+            requirement_assist_runner=self._assist,
+            browser_runner=self._browser,
+            semantic_runner=self._semantic,
+            _raw_node_generator=self._raw_node_generator,
+        )
+        interrupted = reopened.get(run_id)
+
+        self.assertEqual(interrupted["status"], "interrupted_service_restart")
+        self.assertEqual(interrupted["failure"]["stage_id"], "F4")
+        self.assertEqual(interrupted["failure"]["previous_status"], "running")
+        self.assertIn("No automatic resume or retry", interrupted["failure"]["message"])
+        statuses = {
+            item["stage_id"]: item["status"] for item in interrupted["stages"]
+        }
+        self.assertEqual(statuses["F1"], "completed")
+        self.assertEqual(statuses["F4"], "interrupted_service_restart")
+        self.assertEqual(statuses["browser"], "interrupted_service_restart")
 
 
 if __name__ == "__main__":

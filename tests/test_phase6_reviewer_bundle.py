@@ -216,6 +216,15 @@ class Phase6ReviewerBundleTests(unittest.TestCase):
         self.assertIn("/api/imports", script)
         self.assertIn(".split(/\\r?\\n/)", script)
         self.assertIn("Support keyboard operation\\nKeep recovery guidance", script)
+        self.assertIn("Copy selected advice into constraints", script)
+        self.assertIn("Advice is never written into canonical B", script)
+        self.assertIn("data-advice-index", script)
+        self.assertIn("Stop safely after the current stage", script)
+        self.assertIn("/cancel", script)
+        self.assertIn("interrupted by service restart", script)
+        self.assertIn("function recoveryGuidance(record)", script)
+        self.assertIn("'cancel_requested'", script)
+        self.assertIn(".recovery-box", styles)
 
     def test_standalone_validator_uses_only_the_bundle(self) -> None:
         completed = subprocess.run(

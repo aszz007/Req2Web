@@ -83,6 +83,10 @@ class Phase4LocalQwenLangGraphError(ValueError):
     """Raised when the local canonical graph cannot continue safely."""
 
 
+class _OperatorCancellationRequested(Phase4LocalQwenLangGraphError):
+    """Stop before the next model node after an explicit user cancellation."""
+
+
 def _canonical(value: object) -> bytes:
     try:
         return json.dumps(
@@ -913,6 +917,7 @@ def run_phase4_local_qwen_langgraph_integrated(
         [str, str, Mapping[str, object] | None], None
     ]
     | None = None,
+    cancel_requested: Callable[[], bool] | None = None,
     _raw_node_generator: Callable[[str, Mapping[str, object]], bytes] | None = None,
 ) -> dict[str, object]:
     """Execute one case through the sole formal graph on a local GPU profile."""
@@ -1068,6 +1073,10 @@ def run_phase4_local_qwen_langgraph_integrated(
         output: dict[str, object] | None = None
         generate_started = False
         try:
+            if cancel_requested is not None and cancel_requested():
+                raise _OperatorCancellationRequested(
+                    f"operator cancellation requested before {node_id}"
+                )
             if _raw_node_generator is not None:
                 raw = _raw_node_generator(node_id, authority_state)
                 if not isinstance(raw, bytes) or not raw:
@@ -1152,8 +1161,13 @@ def run_phase4_local_qwen_langgraph_integrated(
             generate_started = generate_started or (attempt_root / "generation_started.json").is_file()
             if raw is None and (attempt_root / "raw_response.bin").is_file():
                 raw = (attempt_root / "raw_response.bin").read_bytes()
+            operator_canceled = isinstance(exc, _OperatorCancellationRequested)
             failure = {
-                "failure_code": "local_model_node_failed_closed",
+                "failure_code": (
+                    "operator_canceled_before_model_node"
+                    if operator_canceled
+                    else "local_model_node_failed_closed"
+                ),
                 "failure_stage": node_id,
                 "retry_allowed": False,
                 "fallback_allowed": False,

@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 from functools import partial
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
+import importlib.util
 import json
 import mimetypes
 from pathlib import Path
@@ -19,6 +20,9 @@ if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
 from req2web_inspector.phase6_replay import (  # noqa: E402
+    _APP_JS,
+    _INDEX_HTML,
+    _STYLES_CSS,
     Phase6ReplayError,
     validate_phase6_reviewer_bundle,
 )
@@ -52,6 +56,139 @@ CANONICAL_LOW_GPU_PROFILE = "local_low_gpu_nf4"
 CANONICAL_INTEGRITY_PROFILE = "local_integrity_nf4"
 CANONICAL_HIGH_GPU_PROFILE = "high_gpu_bf16"
 
+_CURRENT_UI_ASSETS = {
+    "/": ("text/html; charset=utf-8", _INDEX_HTML),
+    "/index.html": ("text/html; charset=utf-8", _INDEX_HTML),
+    "/styles.css": ("text/css; charset=utf-8", _STYLES_CSS),
+    "/app.js": ("text/javascript; charset=utf-8", _APP_JS),
+}
+
+
+def _startup_preflight(args: argparse.Namespace) -> dict[str, object]:
+    """Check the selected local runtime without loading a model or calling a service."""
+
+    model_actions = bool(
+        args.enable_local_semantic_assist or args.enable_local_canonical_run
+    )
+    checks: list[dict[str, object]] = []
+
+    def add(name: str, passed: bool, detail: str, *, blocking: bool = True) -> None:
+        checks.append(
+            {
+                "name": name,
+                "passed": passed,
+                "blocking": blocking,
+                "detail": detail,
+            }
+        )
+
+    repository_python = ROOT / ".venv" / "Scripts" / "python.exe"
+    running_python = Path(sys.executable).resolve()
+    add(
+        "repository_virtual_environment",
+        not repository_python.is_file() or running_python == repository_python.resolve(),
+        (
+            f"running with {running_python}"
+            if running_python == repository_python.resolve(strict=False)
+            else f"recommended interpreter is {repository_python}"
+        ),
+        blocking=False,
+    )
+    retrieval_required = not args.read_only
+    add(
+        "retrieval_index",
+        (not retrieval_required)
+        or (args.index_dir.is_dir() and not args.index_dir.is_symlink()),
+        (
+            "not required in read-only replay mode"
+            if not retrieval_required
+            else str(args.index_dir)
+        ),
+        blocking=retrieval_required,
+    )
+
+    if model_actions:
+        model_inputs: list[tuple[str, Path | None, Path | None]] = []
+        if args.enable_local_semantic_assist:
+            model_inputs.append(
+                (
+                    "semantic",
+                    args.semantic_model_root or args.local_model_root,
+                    args.semantic_integrity_evidence
+                    or args.local_integrity_evidence,
+                )
+            )
+        if args.enable_local_canonical_run:
+            model_inputs.append(
+                (
+                    "canonical",
+                    args.local_model_root or args.semantic_model_root,
+                    args.local_integrity_evidence
+                    or args.semantic_integrity_evidence,
+                )
+            )
+        for route, model_root, integrity_evidence in model_inputs:
+            add(
+                f"{route}_model_root",
+                model_root is not None
+                and model_root.is_dir()
+                and not model_root.is_symlink(),
+                "missing" if model_root is None else str(model_root),
+            )
+            add(
+                f"{route}_model_integrity_evidence",
+                integrity_evidence is not None
+                and integrity_evidence.is_file()
+                and not integrity_evidence.is_symlink(),
+                "missing" if integrity_evidence is None else str(integrity_evidence),
+            )
+        required_packages = ["torch", "transformers"]
+        if args.enable_local_canonical_run:
+            required_packages.extend(["langgraph", "playwright"])
+        selected_profiles = {
+            args.semantic_profile if args.enable_local_semantic_assist else None,
+            args.canonical_profile if args.enable_local_canonical_run else None,
+        }
+        if selected_profiles & {
+            LOCAL_LOW_GPU_PROFILE,
+            LOCAL_INTEGRITY_PROFILE,
+            CANONICAL_LOW_GPU_PROFILE,
+            CANONICAL_INTEGRITY_PROFILE,
+        }:
+            required_packages.append("bitsandbytes")
+        for package in sorted(set(required_packages)):
+            add(
+                f"python_package:{package}",
+                importlib.util.find_spec(package) is not None,
+                "available" if importlib.util.find_spec(package) is not None else "missing",
+            )
+        try:
+            import torch  # type: ignore
+
+            cuda_available = bool(torch.cuda.is_available())
+            cuda_detail = (
+                torch.cuda.get_device_name(0)
+                if cuda_available and torch.cuda.device_count() > 0
+                else "CUDA GPU0 is unavailable"
+            )
+        except Exception as exc:  # pragma: no cover - depends on local CUDA install
+            cuda_available = False
+            cuda_detail = f"{type(exc).__name__}: {exc}"
+        add("cuda_gpu0", cuda_available, cuda_detail)
+
+    ready = not any(
+        item["blocking"] and not item["passed"] for item in checks
+    )
+    return {
+        "schema_version": "req2web.inspector.startup_preflight.v1",
+        "status": "ready" if ready else "failed_closed",
+        "ready": ready,
+        "checks": checks,
+        "model_loaded": False,
+        "model_call_count": 0,
+        "external_service_called": False,
+    }
+
 
 class _InspectorHandler(SimpleHTTPRequestHandler):
     run_store: LocalDraftRunStore | None = None
@@ -81,6 +218,13 @@ class _InspectorHandler(SimpleHTTPRequestHandler):
         ).encode("utf-8")
         self.send_response(status)
         self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Content-Length", str(len(content)))
+        self.end_headers()
+        self.wfile.write(content)
+
+    def _asset_response(self, content_type: str, content: bytes) -> None:
+        self.send_response(200)
+        self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(content)))
         self.end_headers()
         self.wfile.write(content)
@@ -241,6 +385,10 @@ class _InspectorHandler(SimpleHTTPRequestHandler):
 
     def do_GET(self) -> None:
         path = unquote(urlsplit(self.path).path)
+        current_asset = _CURRENT_UI_ASSETS.get(path)
+        if current_asset is not None:
+            self._asset_response(*current_asset)
+            return
         if path.startswith("/api/"):
             try:
                 if self._api_get(path):
@@ -297,6 +445,21 @@ class _InspectorHandler(SimpleHTTPRequestHandler):
                 self._json_response(201, record)
                 return
             value = self._read_json_body()
+            parts = path.strip("/").split("/")
+            if (
+                len(parts) == 4
+                and parts[:2] == ["api", "canonical-runs"]
+                and parts[3] == "cancel"
+            ):
+                if self.canonical_run_store is None:
+                    raise InspectorLiveDraftError(
+                        "local canonical model runs are disabled"
+                    )
+                self._json_response(
+                    202,
+                    self.canonical_run_store.cancel(parts[2], value),
+                )
+                return
             if path == "/api/guispector/test-connection":
                 self._json_response(200, test_optional_provider_connection(value))
                 return
@@ -454,6 +617,14 @@ def build_parser() -> argparse.ArgumentParser:
         help="Module-owned canonical model run and evidence directory.",
     )
     parser.add_argument(
+        "--preflight-only",
+        action="store_true",
+        help=(
+            "Validate the selected local runtime and exit without loading a model, "
+            "calling a service, or starting the server."
+        ),
+    )
+    parser.add_argument(
         "--validate-only",
         action="store_true",
         help="Validate the precomputed bundle and exit without starting a server.",
@@ -491,6 +662,20 @@ def main(argv: list[str] | None = None) -> int:
     if args.host not in {"127.0.0.1", "localhost", "::1"}:
         print(
             "[REQ2WEB-INSPECTOR] failed closed: the default reviewer server is local-only",
+            file=sys.stderr,
+        )
+        return 2
+    preflight = _startup_preflight(args)
+    if args.preflight_only:
+        stream = sys.stdout if preflight["ready"] else sys.stderr
+        print(
+            json.dumps(preflight, ensure_ascii=False, sort_keys=True, separators=(",", ":")),
+            file=stream,
+        )
+        return 0 if preflight["ready"] else 2
+    if not preflight["ready"]:
+        print(
+            json.dumps(preflight, ensure_ascii=False, sort_keys=True, separators=(",", ":")),
             file=sys.stderr,
         )
         return 2

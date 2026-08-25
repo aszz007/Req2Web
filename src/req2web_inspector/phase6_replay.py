@@ -871,6 +871,12 @@ textarea:focus, input:focus, select:focus { outline: 3px solid #bfdbfe; outline-
 .finding { padding: .65rem .75rem; border-left: 3px solid #98a2b3; border-radius: 6px; background: var(--soft); color: #475467; font-size: .78rem; line-height: 1.48; }
 .finding.warning, .finding.blocking { border-left-color: #f79009; background: var(--warning-soft); }
 .finding strong { color: var(--ink); }
+.advice-choice { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: start; gap: .65rem; }
+.advice-choice input { width: auto; margin: .18rem 0 0; }
+.recovery-box { margin: .8rem 0; padding: .75rem .8rem; border: 1px solid #bfdbfe; border-radius: 9px; background: var(--accent-soft); color: #344054; font-size: .78rem; line-height: 1.5; }
+.recovery-box strong { display: block; margin-bottom: .2rem; color: var(--ink); }
+.run-live { display: flex; flex-wrap: wrap; gap: .45rem; margin: .7rem 0; color: var(--muted); font-size: .74rem; }
+.run-live span { padding: .32rem .48rem; border-radius: 7px; background: var(--soft); overflow-wrap: anywhere; }
 .stage-list { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: .45rem; margin: .8rem 0; padding: 0; list-style: none; }
 .stage-list li { min-width: 0; padding: .55rem; border: 1px solid var(--line); border-radius: 8px; color: #475467; font-size: .72rem; line-height: 1.35; }
 .stage-list strong { display: block; margin-bottom: .2rem; color: var(--ink); overflow-wrap: anywhere; }
@@ -1098,13 +1104,35 @@ function renderSemanticAssist(value) {
   const sidecar = value.sidecar || {};
   const items = sidecar.advisory_items || [];
   const advisory = items.length
-    ? `<ul class="finding-list">${items.map(item => `<li class="finding notice"><strong>${escapeHtml(item.advisory_kind.replaceAll('_', ' '))}</strong><br>${escapeHtml(item.statement)}</li>`).join('')}</ul>`
+    ? `<ul class="finding-list">${items.map((item, index) => `<li class="finding notice advice-choice"><input id="semantic-advice-${index}" type="checkbox" data-advice-index="${index}"><label for="semantic-advice-${index}"><strong>${escapeHtml(item.advisory_kind.replaceAll('_', ' '))}</strong><br>${escapeHtml(item.statement)}</label></li>`).join('')}</ul><div class="form-actions"><button id="apply-semantic-advice" class="button secondary" type="button">Copy selected advice into constraints</button></div>`
     : '<p class="failure">No advisory sidecar was accepted. The deterministic requirement and draft paths are unchanged.</p>';
   const worker = value.worker?.worker_result || {};
   const memory = worker.cuda_peak_reserved_bytes
     ? `<p class="muted">${escapeHtml(value.profile.profile_name)} - ${worker.input_token_length} input tokens - ${Math.round(worker.cuda_peak_reserved_bytes / 1048576)} MiB peak CUDA reservation.</p>`
     : '';
-  byId('intake-result').innerHTML = `<div class="result-box"><h3>${value.status === 'advisory_available' ? 'Semantic advice is available' : 'Semantic assistant failed closed'}</h3>${advisory}${memory}<details><summary>Exact advisory evidence</summary><pre>${escapeHtml(pretty(value))}</pre></details><p class="media-note">Canonical requirement writeback: disabled. F1-F4 consumption: disabled. Model calls: ${sidecar.call_count || 0}. Automatic retries: 0.</p></div>`;
+  byId('intake-result').innerHTML = `<div class="result-box"><h3>${value.status === 'advisory_available' ? 'Semantic advice is available' : 'Semantic assistant failed closed'}</h3>${advisory}${memory}<details><summary>Exact advisory evidence</summary><pre>${escapeHtml(pretty(value))}</pre></details><p class="media-note">Advice is never written into canonical B or sent to F1-F4 automatically. Copying a selected item only adds it to the editable constraints box; a later check or run is still an explicit user action. Model calls: ${sidecar.call_count || 0}. Automatic retries: 0.</p></div>`;
+  const applyButton = byId('apply-semantic-advice');
+  if (applyButton) {
+    applyButton.addEventListener('click', () => {
+      const selected = [...byId('intake-result').querySelectorAll('[data-advice-index]:checked')]
+        .map(input => items[Number(input.dataset.adviceIndex)]?.statement)
+        .filter(Boolean);
+      if (!selected.length) {
+        applyButton.textContent = 'Select at least one item';
+        return;
+      }
+      const field = byId('constraints-input');
+      const existing = field.value.split(/\\r?\\n/).map(item => item.trim()).filter(Boolean);
+      const combined = [...existing];
+      for (const statement of selected) {
+        const normalized = String(statement).trim().slice(0, 500);
+        if (normalized && !combined.includes(normalized) && combined.length < 12) combined.push(normalized);
+      }
+      field.value = combined.join('\\n').slice(0, 6000);
+      applyButton.textContent = combined.length >= 12 ? 'Constraints updated (12-item limit reached)' : 'Selected advice copied';
+      field.focus({preventScroll: true});
+    });
+  }
 }
 
 function stageMarkup(item) {
@@ -1176,10 +1204,83 @@ function outcomeSummaryMarkup(record, imported, canonical) {
 }
 
 function canonicalHistoryStatus(record) {
-  if (record.status === 'queued' || record.status === 'running') return record.status;
+  if (['queued', 'running', 'cancel_requested'].includes(record.status)) return record.status.replaceAll('_', ' ');
+  if (record.status === 'canceled_by_user') return record.result?.entrypoint ? 'canceled; package preserved' : 'canceled safely';
+  if (record.status === 'interrupted_service_restart') return 'interrupted by service restart';
   if (record.result?.entrypoint && record.result?.model_result_available === false) return 'model failed; deterministic package ready';
   if (record.result?.entrypoint) return 'package ready';
   return 'failed closed; no package';
+}
+
+function isActiveCanonicalRun(record) {
+  return record.mode === 'canonical_local_qwen_full_flow' && ['queued', 'running', 'cancel_requested'].includes(record.status);
+}
+
+function elapsedLabel(record) {
+  const start = Date.parse(record.created_at || '');
+  if (!Number.isFinite(start)) return 'elapsed time unavailable';
+  const end = isActiveCanonicalRun(record)
+    ? Date.now()
+    : (Date.parse(record.completed_at || record.updated_at || '') || Date.now());
+  const seconds = Math.max(0, Math.floor((end - start) / 1000));
+  if (seconds < 60) return `${seconds}s elapsed`;
+  const minutes = Math.floor(seconds / 60);
+  return `${minutes}m ${seconds % 60}s elapsed`;
+}
+
+function recoveryGuidance(record) {
+  if (record.status === 'cancel_requested') {
+    return ['Safe stop requested', 'The current model or browser step is closing its evidence boundary. Req2Web will not start another model node and will not retry automatically.'];
+  }
+  if (record.status === 'canceled_by_user') {
+    return record.result?.entrypoint
+      ? ['Stopped safely; package preserved', 'Open or download the preserved package. Browser and semantic checks that had not started remain clearly marked as not executed.']
+      : ['Stopped safely before a package was ready', 'Review the completed stage evidence, then start a new run only if you still need a package. Nothing is resumed automatically.'];
+  }
+  if (record.status === 'interrupted_service_restart') {
+    return ['Previous service stopped', 'This record cannot be resumed because a model or browser process boundary was lost. Review the preserved trace and start a new explicit run if needed.'];
+  }
+  if (record.status === 'failed_closed_before_package') {
+    const stage = record.failure?.stage_id || record.active_stage || 'unknown stage';
+    return ['No package was produced', `The run stopped at ${stage}. Read the failure and that stage's evidence, correct the local configuration or input, then start a new explicit run.`];
+  }
+  if (record.result?.entrypoint && record.result?.model_result_available === false) {
+    return ['A usable fallback package is available', 'The model result was rejected, so inspect the failed F1-F4 node before judging generation quality. The deterministic package is deliverable but is not model success.'];
+  }
+  const browser = record.browser?.browser_execution_status || stageStatus(record, 'browser');
+  if (browser === 'failed_closed' || browser === 'fail') {
+    return ['Package ready; browser check needs attention', 'Open the page and browser evidence. The package remains available, while the failed browser fact stays separate.'];
+  }
+  const semantic = record.semantic?.status || stageStatus(record, 'semantic');
+  if (semantic === 'failed_closed') {
+    return ['Objective result remains available', 'Semantic assistance did not complete. Use the package and browser evidence; do not infer semantic acceptance from this run.'];
+  }
+  if (isActiveCanonicalRun(record)) {
+    return ['Run in progress', 'A local model step may take many minutes. The record is refreshed automatically; use safe cancellation only if you no longer need the remaining stages.'];
+  }
+  return null;
+}
+
+async function requestCanonicalCancellation(runId, trigger) {
+  trigger.disabled = true;
+  trigger.textContent = 'Requesting safe stop...';
+  try {
+    const record = await requestJson(`/api/canonical-runs/${runId}/cancel`, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({confirm_cancel: true}),
+    });
+    renderRunTrace(record, false);
+    await loadRuns();
+  } catch (error) {
+    byId('intake-result').insertAdjacentHTML('afterbegin', `<div class="failure">${escapeHtml(error.message)}</div>`);
+  }
+}
+
+function attachCancelHandlers(container) {
+  container.querySelectorAll('[data-cancel-run]').forEach(button => {
+    button.addEventListener('click', () => requestCanonicalCancellation(button.dataset.cancelRun, button));
+  });
 }
 
 function renderRunTrace(record, scroll = true) {
@@ -1217,7 +1318,14 @@ function renderRunTrace(record, scroll = true) {
   const title = result.title || record.input?.requirement || 'Local run trace';
   const detail = result.summary || result.selected_delivery_kind || record.status.replaceAll('_', ' ');
   const outcomeSummary = outcomeSummaryMarkup(record, imported, canonical);
-  byId('intake-result').innerHTML = `<div class="result-box"><h3>${escapeHtml(title)}</h3><p>${escapeHtml(detail)}</p>${outcomeSummary}${failure}<details><summary>Detailed stage trace</summary><ul class="stage-list">${(record.stages || []).map(stageMarkup).join('')}</ul></details>${actions}${evidenceActions}<details><summary>Exact local run record</summary><pre>${escapeHtml(pretty(record))}</pre></details><p class="media-note">${escapeHtml(note)}</p></div>`;
+  const recovery = canonical ? recoveryGuidance(record) : null;
+  const recoveryMarkup = recovery ? `<div class="recovery-box"><strong>${escapeHtml(recovery[0])}</strong>${escapeHtml(recovery[1])}</div>` : '';
+  const liveMarkup = canonical ? `<div class="run-live"><span>Status: ${escapeHtml(record.status.replaceAll('_', ' '))}</span><span>Current stage: ${escapeHtml(record.active_stage || 'not recorded')}</span><span>${escapeHtml(elapsedLabel(record))}</span></div>` : '';
+  const cancel = isActiveCanonicalRun(record) && record.status !== 'cancel_requested'
+    ? `<div class="form-actions"><button class="button secondary" type="button" data-cancel-run="${escapeHtml(record.run_id)}">Stop safely after the current stage</button></div>`
+    : '';
+  byId('intake-result').innerHTML = `<div class="result-box"><h3>${escapeHtml(title)}</h3><p>${escapeHtml(detail)}</p>${liveMarkup}${outcomeSummary}${recoveryMarkup}${failure}${cancel}<details><summary>Detailed stage trace</summary><ul class="stage-list">${(record.stages || []).map(stageMarkup).join('')}</ul></details>${actions}${evidenceActions}<details><summary>Exact local run record</summary><pre>${escapeHtml(pretty(record))}</pre></details><p class="media-note">${escapeHtml(note)}</p></div>`;
+  attachCancelHandlers(byId('intake-result'));
   if (scroll) byId('intake-result').scrollIntoView({behavior: 'smooth', block: 'nearest'});
 }
 
@@ -1235,12 +1343,17 @@ function renderRuns(records) {
       || record.result?.selected_delivery_kind
       || record.failure?.message
       || record.status.replaceAll('_', ' ');
-    const actions = record.result?.entrypoint
+    const packageActions = record.result?.entrypoint
       ? `<a href="${escapeHtml(record.result.entrypoint)}" target="_blank" rel="noopener">Open page</a><a href="${escapeHtml(record.result.download)}">Download</a>`
       : '';
+    const cancelAction = isActiveCanonicalRun(record) && record.status !== 'cancel_requested'
+      ? `<button type="button" data-cancel-run="${escapeHtml(record.run_id)}">Stop safely</button>`
+      : '';
+    const actions = `${packageActions}${cancelAction}`;
     const statusLabel = imported ? 'imported package ready' : canonical ? canonicalHistoryStatus(record) : (complete ? 'deterministic draft ready' : 'failed closed');
     const recordUrl = canonical ? `/api/canonical-runs/${record.run_id}` : `/api/runs/${record.run_id}`;
-    return `<article class="run-card"><div class="badges">${badge(statusLabel, !complete && record.status !== 'running' && record.status !== 'queued')}</div><h3>${escapeHtml(title)}</h3><p>${escapeHtml(detail)}</p><p>${escapeHtml(record.created_at || 'time unavailable')} - ${escapeHtml(record.run_id)}</p><div class="run-actions"><button type="button" data-record-url="${escapeHtml(recordUrl)}">Inspect trace</button>${actions}</div></article>`;
+    const active = isActiveCanonicalRun(record);
+    return `<article class="run-card"><div class="badges">${badge(statusLabel, !complete && !active)}</div><h3>${escapeHtml(title)}</h3><p>${escapeHtml(detail)}</p>${canonical ? `<p>Stage: ${escapeHtml(record.active_stage || 'not recorded')} - ${escapeHtml(elapsedLabel(record))}</p>` : ''}<p>${escapeHtml(record.created_at || 'time unavailable')} - ${escapeHtml(record.run_id)}</p><div class="run-actions"><button type="button" data-record-url="${escapeHtml(recordUrl)}">Inspect trace</button>${actions}</div></article>`;
   }).join('');
   byId('run-list').querySelectorAll('[data-record-url]').forEach(button => {
     button.addEventListener('click', async () => {
@@ -1251,6 +1364,7 @@ function renderRuns(records) {
       }
     });
   });
+  attachCancelHandlers(byId('run-list'));
 }
 
 async function loadRuns() {
@@ -1412,7 +1526,7 @@ async function initializeLiveInspector() {
         const current = await requestJson(`/api/canonical-runs/${record.run_id}`);
         renderRunTrace(current, false);
         await loadRuns();
-        if (!['queued', 'running'].includes(current.status)) break;
+        if (!['queued', 'running', 'cancel_requested'].includes(current.status)) break;
       }
     } catch (error) {
       byId('intake-result').innerHTML = `<div class="failure"><strong>Complete local flow failed closed.</strong> ${escapeHtml(error.message)}</div>`;
