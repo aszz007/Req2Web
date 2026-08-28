@@ -242,7 +242,7 @@ class F4PriorFailureTests(unittest.TestCase):
 
 
 class F4SavepointReplayTests(unittest.TestCase):
-    SAVEPOINT_ROOT = _ROOT / "phase4_f3_savepoint_20260804"
+    SAVEPOINT_ROOT = _ROOT / "fixtures" / "phase4" / "f3"
 
     def test_canonical_sidecar_needs_source_raw_live_replay(self):
         root = self.SAVEPOINT_ROOT
@@ -287,7 +287,7 @@ class F4SavepointReplayTests(unittest.TestCase):
 
 
 class F4GenericAuditRefNormalizationTests(unittest.TestCase):
-    SAVEPOINT_ROOT = _ROOT / "phase4_f3_savepoint_20260804"
+    SAVEPOINT_ROOT = _ROOT / "fixtures" / "phase4" / "f3"
 
     def state(self):
         return f4._replay_f3_savepoint_local(

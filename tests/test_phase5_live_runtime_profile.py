@@ -19,7 +19,7 @@ from req2web_runtime.phase5_live_runtime_profile import (  # noqa: E402
 
 
 BASE_PROFILE = (
-    ROOT / "p4-05-stability-full-direct-20260805-g" / "remote_profile.json"
+    ROOT / "fixtures" / "phase4" / "stability" / "remote_profile.json"
 )
 
 

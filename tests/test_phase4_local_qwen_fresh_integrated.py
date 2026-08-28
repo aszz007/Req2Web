@@ -16,9 +16,7 @@ from req2web_runtime.phase4_local_qwen import Phase4LocalQwenPilotRunner
 
 class Phase4LocalQwenFreshIntegratedTests(unittest.TestCase):
     ROOT = Path(__file__).resolve().parents[1]
-    QUALIFICATION_ROOT = (
-        ROOT / "phase4_integrated_savepoint_20260804_raw_self_contained"
-    )
+    QUALIFICATION_ROOT = ROOT / "fixtures" / "phase4" / "integrated_raw"
     TEST_ROOT = ROOT / ".p4-03i-fresh-integrated-test-results"
 
     @classmethod

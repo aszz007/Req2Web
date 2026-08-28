@@ -193,7 +193,9 @@ def _candidate_bytes() -> bytes:
     value = json.loads(
         (
             ROOT
-            / "phase4_fresh_integrated_revalidation_savepoint_20260804"
+            / "fixtures"
+            / "phase4"
+            / "revalidation"
             / "candidate_composition_record.json"
         ).read_text(encoding="utf-8")
     )
@@ -211,7 +213,7 @@ def _field_gate_pass_candidate(raw: bytes) -> bytes:
 
 
 class Phase4FreshDeliveryTests(unittest.TestCase):
-    SOURCE_ROOT = ROOT / "phase4_fresh_integrated_revalidation_savepoint_20260804"
+    SOURCE_ROOT = ROOT / "fixtures" / "phase4" / "revalidation"
 
     def test_langgraph_source_statuses_use_the_canonical_delivery_contract(self) -> None:
         for composition, assembler in (
@@ -390,7 +392,7 @@ class Phase4FreshDeliveryTerminalIntegrationTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
         source_savepoint = (
-            ROOT / "phase4_fresh_integrated_revalidation_savepoint_20260804"
+            ROOT / "fixtures" / "phase4" / "revalidation"
         )
         if not source_savepoint.is_dir():
             raise unittest.SkipTest(

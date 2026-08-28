@@ -33,9 +33,7 @@ from req2web_runtime.phase4_local_qwen import (
 
 class Phase4LocalQwenFreshIntegratedRevalidationTests(unittest.TestCase):
     ROOT = Path(__file__).resolve().parents[1]
-    QUALIFICATION_ROOT = (
-        ROOT / "phase4_integrated_savepoint_20260804_raw_self_contained"
-    )
+    QUALIFICATION_ROOT = ROOT / "fixtures" / "phase4" / "integrated_raw"
 
     @classmethod
     def setUpClass(cls) -> None:

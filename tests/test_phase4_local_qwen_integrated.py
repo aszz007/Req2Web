@@ -21,8 +21,8 @@ from req2web_runtime.phase4_local_qwen_integrated import (
 
 
 class IntegratedSavepointFoundationTests(unittest.TestCase):
-    F3_ROOT = _ROOT / "phase4_f3_savepoint_20260804"
-    F4_ROOT = _ROOT / "phase4_f4_savepoint_20260804"
+    F3_ROOT = _ROOT / "fixtures" / "phase4" / "f3"
+    F4_ROOT = _ROOT / "fixtures" / "phase4" / "f4"
     TEST_ROOT = _ROOT / ".phase4-integrated-test-output"
 
     def setUp(self):
