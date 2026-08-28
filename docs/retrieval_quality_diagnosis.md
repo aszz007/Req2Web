@@ -27,10 +27,18 @@
 
 ```powershell
 .\.venv\Scripts\python.exe .\scripts\diagnose_retrieval_quality.py `
-  --output-dir .\outputs\retrieval_quality_diagnosis_v1
+  --output-dir ..\Req2Web_LocalData\runs\component_report_runs_v1\retrieval_quality_diagnosis_v1
 ```
 
-机器报告为 `outputs/retrieval_quality_diagnosis_v1/diagnosis.json` 与 `target_units.csv`。前者逐单元保留**完整原查询**、原 top-2 的 `doc_id/score/dataset/subset/role/title/summary/relevance_judgment`、每条 Guidance 的 disposition/rule/reason、消融字段差异及两组反事实候选；CSV 是审计索引。脚本不复制 Retriever 或上游链路实现。
+The machine report is stored as
+`../Req2Web_LocalData/replay/component_examples_v1/retrieval_quality_diagnosis_v1/diagnosis.json`
+and `target_units.csv`. The JSON retains the complete original query, the
+original top-two compact results, every Guidance disposition, the ablation
+differences, and both counterfactual candidate sets. The CSV is the audit
+index. The script does not duplicate the Retriever or upstream flow.
+The replay copy is immutable historical evidence. New executions default to
+`../Req2Web_LocalData/runs/component_report_runs_v1/retrieval_quality_diagnosis_v1`
+so they cannot overwrite that snapshot.
 
 ## 根因分布
 

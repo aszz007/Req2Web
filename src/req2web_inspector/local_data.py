@@ -14,6 +14,8 @@ INSPECTOR_DRAFT_RUNS_NAME = "deterministic_draft_runs_v1"
 SEMANTIC_ASSIST_RUNS_NAME = "semantic_assist_runs_v1"
 CANONICAL_FLOW_RUNS_NAME = "canonical_flow_runs_v1"
 GUISPECTOR_RUNTIME_NAME = "guispector_runtime_v1"
+COMPONENT_EXAMPLES_NAME = "component_examples_v1"
+COMPONENT_REPORT_RUNS_NAME = "component_report_runs_v1"
 
 
 def resolve_local_data_root(
@@ -125,8 +127,40 @@ def guispector_runtime_root(
     return root / "optional_tools" / GUISPECTOR_RUNTIME_NAME / "upstream"
 
 
+def component_examples_root(
+    repository_root: Path,
+    local_data_root: Path | None = None,
+    environment: Mapping[str, str] | None = None,
+) -> Path:
+    """Return the stable replay root for generated component examples."""
+
+    root = resolve_local_data_root(
+        repository_root,
+        explicit_root=local_data_root,
+        environment=environment,
+    )
+    return root / "replay" / COMPONENT_EXAMPLES_NAME
+
+
+def component_report_runs_root(
+    repository_root: Path,
+    local_data_root: Path | None = None,
+    environment: Mapping[str, str] | None = None,
+) -> Path:
+    """Return the stable root for newly generated component reports."""
+
+    root = resolve_local_data_root(
+        repository_root,
+        explicit_root=local_data_root,
+        environment=environment,
+    )
+    return root / "runs" / COMPONENT_REPORT_RUNS_NAME
+
+
 __all__ = [
     "CANONICAL_FLOW_RUNS_NAME",
+    "COMPONENT_EXAMPLES_NAME",
+    "COMPONENT_REPORT_RUNS_NAME",
     "GUISPECTOR_RUNTIME_NAME",
     "INSPECTOR_DRAFT_RUNS_NAME",
     "INSPECTOR_REPLAY_BUNDLE_NAME",
@@ -134,6 +168,8 @@ __all__ = [
     "LOCAL_DATA_ROOT_ENV",
     "SEMANTIC_ASSIST_RUNS_NAME",
     "canonical_flow_runs_root",
+    "component_examples_root",
+    "component_report_runs_root",
     "guispector_runtime_root",
     "inspector_draft_runs_root",
     "inspector_release_candidate_root",

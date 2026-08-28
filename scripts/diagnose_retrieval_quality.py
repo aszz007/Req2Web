@@ -22,6 +22,7 @@ if str(ROOT / "src") not in sys.path:
     sys.path.insert(0, str(ROOT / "src"))
 
 from req2web_generation.demo_regression import RegressionCaseSet
+from req2web_inspector.local_data import component_report_runs_root
 from req2web_rag import RetrieverConfig, create_retriever
 
 
@@ -234,7 +235,11 @@ def main() -> None:
     parser.add_argument("--fixture", type=Path, default=Path("fixtures/demo_v2_regression_cases_v1.json"))
     parser.add_argument("--package-root", type=Path, default=Path("outputs/demo_v2_regression_v1"))
     parser.add_argument("--index-dir", type=Path, default=Path("data/processed/rag"))
-    parser.add_argument("--output-dir", type=Path, default=Path("outputs/retrieval_quality_diagnosis_v1"))
+    parser.add_argument(
+        "--output-dir",
+        type=Path,
+        default=component_report_runs_root(ROOT) / "retrieval_quality_diagnosis_v1",
+    )
     args = parser.parse_args()
     write_diagnosis(generate_diagnosis(fixture=args.fixture, package_root=args.package_root, index_dir=args.index_dir), args.output_dir)
 

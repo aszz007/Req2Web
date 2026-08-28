@@ -25,7 +25,7 @@ result = DeterministicResultPackager().package(
     page_spec=page_spec,
     render_result=render_result,
     consistency_report=report,
-    package_dir=Path("outputs/result_package_v1/example"),
+    package_dir=Path("../Req2Web_LocalData/runs/component_output_runs_v1/result_package_v1/example"),
 )
 ```
 
@@ -143,7 +143,7 @@ manifest 声明除自身以外的全部 8 个包内文件，不包含自身哈�
   "做一个带搜索、购物车和结算的移动电商页面" `
   --target-device mobile `
   --constraint "输入错误时给出可恢复提示" `
-  --output-dir .\outputs\result_package_v1\ecommerce
+  --output-dir ..\Req2Web_LocalData\runs\component_output_runs_v1\result_package_v1\ecommerce
 ```
 
 宠物情绪识别示例：
@@ -153,7 +153,7 @@ manifest 声明除自身以外的全部 8 个包内文件，不包含自身哈�
   "做一个宠物情绪识别 App，用户拍照后展示识别结果" `
   --target-device mobile `
   --constraint "相机权限被拒绝时给出恢复提示" `
-  --output-dir .\outputs\result_package_v1\pet-recognition
+  --output-dir ..\Req2Web_LocalData\runs\component_output_runs_v1\result_package_v1\pet-recognition
 ```
 
 CLI 依次复用 `MinimalAgentChain`、`PageSpecBuilder`、`DeterministicPageRenderer`、`MinimalConsistencyChecker` 和 `DeterministicResultPackager`。成功时向标准输出写 `ResultPackage` JSON 并返回 0；失败时向标准错误写明确错误、返回 2，且不发布完整包。
@@ -172,6 +172,13 @@ v1 不包含：
 
 端到端确定性结果包完成后，下一工作对话应先按 `docs/demo_spec.md` 做 Demo 里程碑验收和缺口决策，而不是自动扩展截图、控制台或视觉评估功能。
 
-当前两个真实验收包继续固定为 9 个文件，位于 `outputs/result_package_v1/ecommerce` 与 `outputs/result_package_v1/pet-recognition`。它们不包含截图；相同输入独立生成到不同目录时，PageSpec、页面、报告、摘要和包级 manifest 均逐字节一致。
+The two retained validation examples still contain nine files each. Their
+current local replay paths are
+`../Req2Web_LocalData/replay/component_examples_v1/result_package_v1/ecommerce`
+and
+`../Req2Web_LocalData/replay/component_examples_v1/result_package_v1/pet-recognition`.
+They contain no screenshot. Identical inputs generated into independent
+directories produce byte-identical PageSpec, page, report, summary, and
+package-manifest files. These generated examples stay outside Git.
 
 检索增强交付使用独立且向后兼容的 [结果包 v2](result_package_v2.md)；本文件描述的 v1 接口、目录、摘要和验证规则保持不变。
