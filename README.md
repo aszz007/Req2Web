@@ -41,4 +41,6 @@ Raw public datasets and downloaded archives are intentionally excluded from Git.
 - `docs/demo_spec.md`: first Demo scope and acceptance criteria.
 - `docs/dataset_selection_workflow.md`: authoritative dataset-screening procedure.
 - `docs/project_memory.md`: current project state and decisions.
+- `docs/repository_hygiene_checklist.md`: evidence-based local workspace and
+  repository maintenance checklist.
 
