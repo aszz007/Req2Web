@@ -43,4 +43,8 @@ Raw public datasets and downloaded archives are intentionally excluded from Git.
 - `docs/project_memory.md`: current project state and decisions.
 - `docs/repository_hygiene_checklist.md`: evidence-based local workspace and
   repository maintenance checklist.
+- `docs/repository_output_reference_manifest.md`: retained and archived output
+  roots after the bounded repository-hygiene audit.
+- `docs/local_environment_rebuild.md`: safe parallel `.venv` rebuild and
+  replacement checks.
 
