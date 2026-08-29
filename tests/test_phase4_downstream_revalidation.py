@@ -17,26 +17,28 @@ from req2web_runtime.phase4_downstream_revalidation import (  # noqa: E402
     Phase4DownstreamRevalidationError,
     run_phase4_downstream_status_revalidation,
 )
+from req2web_inspector.local_data import framework_evidence_root  # noqa: E402
+
+
+EVIDENCE_ROOT = framework_evidence_root(ROOT)
 
 
 FLOW_SUMMARY = (
-    ROOT
-    / "outputs"
-    / "phase4_browser_final_20260807"
+    EVIDENCE_ROOT
+    / "p4_browser_final"
     / "remote_result"
     / "flow_summary.json"
 )
 FINAL_BROWSER_SUMMARY = (
-    ROOT
-    / "outputs"
-    / "phase4_browser_final_20260807"
+    EVIDENCE_ROOT
+    / "p4_browser_final"
     / "final_browser_summary.json"
 )
 LEGACY_CANARY_ROOT = (
-    ROOT / "outputs" / "phase4_browser_canary_20260807"
+    EVIDENCE_ROOT / "p4_browser_canary"
 )
 BROWSER_AUDIT_ROOT = (
-    ROOT / "outputs" / "phase4_browser_canary_20260807_v2"
+    EVIDENCE_ROOT / "p4_browser_canary_v2"
 )
 TEST_OUTPUT = ROOT / ".phase4-downstream-revalidation-test"
 FROZEN_EVIDENCE_PRESENT = all(

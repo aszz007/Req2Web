@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 import shutil
 import sys
+import unittest
 from unittest import TestCase
 
 
@@ -17,10 +18,14 @@ diagnosis = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(diagnosis)
 
 
+@unittest.skipUnless(
+    (diagnosis.framework_evidence_root(ROOT) / "demo_regression").is_dir(),
+    "local deterministic regression evidence is unavailable",
+)
 class RetrievalQualityDiagnosisTest(TestCase):
     def setUp(self) -> None:
         self.fixture = ROOT / "fixtures" / "demo_v2_regression_cases_v1.json"
-        self.packages = ROOT / "outputs" / "demo_v2_regression_v1"
+        self.packages = diagnosis.framework_evidence_root(ROOT) / "demo_regression"
         self.index = ROOT / "data" / "processed" / "rag"
         self.temp = ROOT / "tests" / ".tmp_retrieval_quality_diagnosis"
         shutil.rmtree(self.temp, ignore_errors=True)

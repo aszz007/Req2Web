@@ -18,6 +18,7 @@ from req2web_rag.retrieval_comparison import (  # noqa: E402
     run_retrieval_comparison,
     validate_retrieval_comparison,
 )
+from req2web_inspector.local_data import retrieval_work_runs_root  # noqa: E402
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -40,7 +41,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--output-root",
         type=Path,
-        default=ROOT / "outputs" / "phase6_retrieval_comparison_v3",
+        default=retrieval_work_runs_root(ROOT) / "comparison",
     )
     parser.add_argument(
         "--qrels",

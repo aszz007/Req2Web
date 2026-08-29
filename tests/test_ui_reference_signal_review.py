@@ -3,6 +3,7 @@ from __future__ import annotations
 import importlib.util
 import json
 from pathlib import Path
+import unittest
 from unittest import TestCase
 from unittest.mock import patch
 
@@ -15,11 +16,15 @@ review = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(review)
 
 
+@unittest.skipUnless(
+    (review.framework_evidence_root(ROOT) / "demo_regression").is_dir(),
+    "local deterministic regression evidence is unavailable",
+)
 class UiReferenceSignalReviewTest(TestCase):
     def test_frozen_inputs_cover_42_documents_four_targets_and_twelve_cases(self) -> None:
         report = review.generate_review(
             documents_path=ROOT / "data" / "processed" / "rag" / "documents.jsonl",
-            package_root=ROOT / "outputs" / "demo_v2_regression_v1",
+            package_root=review.framework_evidence_root(ROOT) / "demo_regression",
         )
         self.assertEqual(report["scope"]["document_count"], 42)
         self.assertEqual(report["scope"]["target_case_count"], 4)
@@ -30,7 +35,7 @@ class UiReferenceSignalReviewTest(TestCase):
     def test_target_verdicts_preserve_audit_only_and_semantic_rejection(self) -> None:
         report = review.generate_review(
             documents_path=ROOT / "data" / "processed" / "rag" / "documents.jsonl",
-            package_root=ROOT / "outputs" / "demo_v2_regression_v1",
+            package_root=review.framework_evidence_root(ROOT) / "demo_regression",
         )
         verdicts = {item["case_id"]: item["verdict"] for item in report["target_units"]}
         self.assertEqual(verdicts["mobile-appointment"], "safe_candidate_with_minimal_controlled_vocab_extension")
@@ -41,7 +46,7 @@ class UiReferenceSignalReviewTest(TestCase):
     def test_write_is_byte_deterministic(self) -> None:
         report = review.generate_review(
             documents_path=ROOT / "data" / "processed" / "rag" / "documents.jsonl",
-            package_root=ROOT / "outputs" / "demo_v2_regression_v1",
+            package_root=review.framework_evidence_root(ROOT) / "demo_regression",
         )
         self.assertEqual(review._json_bytes(report), review._json_bytes(report))
         target_rows = [{field: "" for field in review.TARGET_CSV_FIELDS}]
@@ -75,7 +80,7 @@ class UiReferenceSignalReviewTest(TestCase):
     def test_compact_boundary_records_existing_loss(self) -> None:
         report = review.generate_review(
             documents_path=ROOT / "data" / "processed" / "rag" / "documents.jsonl",
-            package_root=ROOT / "outputs" / "demo_v2_regression_v1",
+            package_root=review.framework_evidence_root(ROOT) / "demo_regression",
         )
         boundary = report["field_boundary"]
         self.assertIn("metadata.component_labels", boundary["lost_from_compact_result"])

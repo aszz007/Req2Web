@@ -17,7 +17,10 @@ from req2web_inspector.phase6_replay import (  # noqa: E402
     Phase6ReplayError,
     build_phase6_reviewer_bundle,
 )
-from req2web_inspector.local_data import inspector_replay_bundle_root  # noqa: E402
+from req2web_inspector.local_data import (  # noqa: E402
+    framework_evidence_root,
+    inspector_replay_bundle_root,
+)
 
 
 DEFAULT_RETURN_ROOT = Path(
@@ -49,12 +52,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--revalidation-root",
         type=Path,
-        default=ROOT / "outputs" / "phase5_publication_v16_policy_revalidation_20260809",
+        default=framework_evidence_root(ROOT) / "p5_policy_replay",
     )
     parser.add_argument(
         "--browser-root",
         type=Path,
-        default=ROOT / "outputs" / "phase5_publication_v16_browser_audit_20260809_r2",
+        default=framework_evidence_root(ROOT) / "p5_browser_final",
     )
     parser.add_argument(
         "--semantic-manifest",
@@ -84,12 +87,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--retrieval-comparison-root",
         type=Path,
-        default=ROOT / "outputs" / "phase6_retrieval_comparison_v3",
+        default=framework_evidence_root(ROOT) / "retrieval_comparison",
     )
     parser.add_argument(
         "--retrieval-experiment-root",
         type=Path,
-        default=ROOT / "outputs" / "phase6_retrieval_experiment_v5",
+        default=framework_evidence_root(ROOT) / "retrieval_experiment",
     )
     parser.add_argument(
         "--output-root",

@@ -14,19 +14,23 @@ from req2web_inspector.local_data import (  # noqa: E402
     CANONICAL_FLOW_RUNS_NAME,
     COMPONENT_EXAMPLES_NAME,
     COMPONENT_REPORT_RUNS_NAME,
+    FRAMEWORK_EVIDENCE_NAME,
     GUISPECTOR_RUNTIME_NAME,
     INSPECTOR_DRAFT_RUNS_NAME,
     INSPECTOR_REPLAY_BUNDLE_NAME,
     LOCAL_DATA_ROOT_ENV,
+    RETRIEVAL_WORK_RUNS_NAME,
     SEMANTIC_ASSIST_RUNS_NAME,
     canonical_flow_runs_root,
     component_examples_root,
     component_report_runs_root,
+    framework_evidence_root,
     guispector_runtime_root,
     inspector_draft_runs_root,
     inspector_release_candidate_root,
     inspector_replay_bundle_root,
     resolve_local_data_root,
+    retrieval_work_runs_root,
     semantic_assist_runs_root,
 )
 
@@ -98,6 +102,22 @@ class InspectorLocalDataTests(unittest.TestCase):
         self.assertEqual(reports.parent.name, "runs")
         self.assertNotEqual(reports, examples)
         self.assertFalse(reports.is_relative_to(ROOT))
+
+    def test_framework_evidence_has_one_stable_replay_root(self) -> None:
+        evidence = framework_evidence_root(ROOT, environment={})
+
+        self.assertEqual(evidence.name, FRAMEWORK_EVIDENCE_NAME)
+        self.assertEqual(evidence.parent.name, "replay")
+        self.assertFalse(evidence.is_relative_to(ROOT))
+
+    def test_retrieval_work_runs_do_not_overwrite_replay_evidence(self) -> None:
+        evidence = framework_evidence_root(ROOT, environment={})
+        runs = retrieval_work_runs_root(ROOT, environment={})
+
+        self.assertEqual(runs.name, RETRIEVAL_WORK_RUNS_NAME)
+        self.assertEqual(runs.parent.name, "runs")
+        self.assertNotEqual(runs, evidence)
+        self.assertFalse(runs.is_relative_to(ROOT))
 
 
 if __name__ == "__main__":

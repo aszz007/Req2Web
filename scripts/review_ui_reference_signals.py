@@ -22,7 +22,10 @@ if str(ROOT / "src") not in sys.path:
     sys.path.insert(0, str(ROOT / "src"))
 
 from req2web_generation.guided_builder import _COMPONENT_PRESENTATION, _CONCEPT_KEYWORDS
-from req2web_inspector.local_data import component_report_runs_root
+from req2web_inspector.local_data import (
+    component_report_runs_root,
+    framework_evidence_root,
+)
 
 
 SCHEMA_VERSION = "req2web.ui_reference.signal.review.v1"
@@ -422,7 +425,11 @@ def write_review(report: dict[str, Any], output_dir: Path) -> None:
 def main() -> int:
     parser = argparse.ArgumentParser(description="Read-only UI-reference structure signal review")
     parser.add_argument("--documents", type=Path, default=ROOT / "data" / "processed" / "rag" / "documents.jsonl")
-    parser.add_argument("--package-root", type=Path, default=ROOT / "outputs" / "demo_v2_regression_v1")
+    parser.add_argument(
+        "--package-root",
+        type=Path,
+        default=framework_evidence_root(ROOT) / "demo_regression",
+    )
     parser.add_argument(
         "--output-dir",
         type=Path,

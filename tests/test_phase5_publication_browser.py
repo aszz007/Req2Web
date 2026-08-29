@@ -24,14 +24,16 @@ from req2web_runtime.phase5_publication_browser import (  # noqa: E402
     run_phase5_publication_browser,
     validate_phase5_publication_browser_summary,
 )
+from req2web_inspector.local_data import framework_evidence_root  # noqa: E402
 
 
 TEST_ROOT = ROOT / ".phase5-publication-browser-test"
+EVIDENCE_ROOT = framework_evidence_root(ROOT)
 LIVE_REVALIDATION_ROOT = (
-    ROOT / "outputs" / "phase5_publication_v16_policy_revalidation_20260809"
+    EVIDENCE_ROOT / "p5_policy_replay"
 )
 LIVE_BROWSER_ROOT = (
-    ROOT / "outputs" / "phase5_publication_v16_browser_audit_20260809_r2"
+    EVIDENCE_ROOT / "p5_browser_final"
 )
 
 

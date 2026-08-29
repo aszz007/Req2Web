@@ -25,35 +25,35 @@ from req2web_evaluation.phase5_semantic_qwen_runtime import (  # noqa: E402
 from req2web_evaluation.phase5_semantic_evaluator import (  # noqa: E402
     Phase5SemanticEvaluatorError,
 )
+from req2web_inspector.local_data import framework_evidence_root  # noqa: E402
+
+
+EVIDENCE_ROOT = framework_evidence_root(ROOT)
 
 
 AUDIT_ROOT = (
-    ROOT
-    / "outputs"
-    / "phase4_browser_canary_20260807_v2"
+    EVIDENCE_ROOT
+    / "p4_browser_canary_v2"
     / "audits"
     / "case01"
 )
 PACKAGE_ROOT = (
-    ROOT
-    / "outputs"
-    / "phase4_browser_canary_20260807"
+    EVIDENCE_ROOT
+    / "p4_browser_canary"
     / "packages"
     / "case01"
     / "result_package_v1"
 )
 ENGLISH_AUDIT_ROOT = (
-    ROOT
-    / "outputs"
-    / "phase4_english_browser_audit_v13_03"
+    EVIDENCE_ROOT
+    / "p4_english_browser"
     / "canary"
     / "audits"
     / "case01"
 )
 ENGLISH_PACKAGE_ROOT = (
-    ROOT
-    / "outputs"
-    / "phase4_english_fresh_return_v13_03"
+    EVIDENCE_ROOT
+    / "p4_english_return"
     / "final10_remote_result"
     / "p4-canonical-english-fresh-v13-03"
     / "cases"

@@ -38,6 +38,7 @@ from req2web_evaluation.phase5_publication_semantic import (  # noqa: E402
 from req2web_evaluation.phase5_semantic_evaluator import (  # noqa: E402
     SEMANTIC_EVALUATOR_PROMPT_REVISION,
 )
+from req2web_inspector.local_data import framework_evidence_root  # noqa: E402
 from req2web_evaluation.phase5_semantic_qwen_runtime import (  # noqa: E402
     HIGH_GPU_PROFILE,
     MODEL_INPUT_SCHEMA_VERSION,
@@ -663,8 +664,9 @@ class Phase5PublicationSemanticTest(unittest.TestCase):
             aggregate_cli._load_json(path, "semantic summary")
 
     def test_current_evidence_prepares_when_available(self) -> None:
-        source = ROOT / "outputs" / "phase5_publication_v16_policy_revalidation_20260809"
-        browser = ROOT / "outputs" / "phase5_publication_v16_browser_audit_20260809_r2"
+        evidence = framework_evidence_root(ROOT)
+        source = evidence / "p5_policy_replay"
+        browser = evidence / "p5_browser_final"
         if not source.is_dir() or not browser.is_dir():
             self.skipTest("current publication browser evidence is unavailable")
         manifest = prepare_phase5_publication_semantic_manifest(

@@ -24,12 +24,12 @@ from req2web_runtime.phase4_browser_acceptance import (  # noqa: E402
     run_real_browser_case_audit,
     validate_real_browser_case_audit,
 )
+from req2web_inspector.local_data import framework_evidence_root  # noqa: E402
 
 
 PACKAGE_ROOT = (
-    ROOT
-    / "outputs"
-    / "demo_v2_form_structure_run_a"
+    framework_evidence_root(ROOT)
+    / "demo_form"
     / "packages"
     / "ecommerce"
 )
@@ -131,6 +131,10 @@ def _write_json(path: Path, value: object) -> None:
     )
 
 
+@unittest.skipUnless(
+    PACKAGE_ROOT.is_dir(),
+    "local deterministic package evidence is unavailable",
+)
 class Phase4BrowserAcceptanceTest(unittest.TestCase):
     def test_final_summary_keeps_non_executable_cases_separate(self) -> None:
         identity = {

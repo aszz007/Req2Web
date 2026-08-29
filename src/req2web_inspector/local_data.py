@@ -16,6 +16,8 @@ CANONICAL_FLOW_RUNS_NAME = "canonical_flow_runs_v1"
 GUISPECTOR_RUNTIME_NAME = "guispector_runtime_v1"
 COMPONENT_EXAMPLES_NAME = "component_examples_v1"
 COMPONENT_REPORT_RUNS_NAME = "component_report_runs_v1"
+FRAMEWORK_EVIDENCE_NAME = "framework_evidence_v1"
+RETRIEVAL_WORK_RUNS_NAME = "retrieval_work_runs_v1"
 
 
 def resolve_local_data_root(
@@ -157,23 +159,57 @@ def component_report_runs_root(
     return root / "runs" / COMPONENT_REPORT_RUNS_NAME
 
 
+def framework_evidence_root(
+    repository_root: Path,
+    local_data_root: Path | None = None,
+    environment: Mapping[str, str] | None = None,
+) -> Path:
+    """Return the stable replay root for retained framework evidence."""
+
+    root = resolve_local_data_root(
+        repository_root,
+        explicit_root=local_data_root,
+        environment=environment,
+    )
+    return root / "replay" / FRAMEWORK_EVIDENCE_NAME
+
+
+def retrieval_work_runs_root(
+    repository_root: Path,
+    local_data_root: Path | None = None,
+    environment: Mapping[str, str] | None = None,
+) -> Path:
+    """Return the writable root for fresh retrieval comparison runs."""
+
+    root = resolve_local_data_root(
+        repository_root,
+        explicit_root=local_data_root,
+        environment=environment,
+    )
+    return root / "runs" / RETRIEVAL_WORK_RUNS_NAME
+
+
 __all__ = [
     "CANONICAL_FLOW_RUNS_NAME",
     "COMPONENT_EXAMPLES_NAME",
     "COMPONENT_REPORT_RUNS_NAME",
+    "FRAMEWORK_EVIDENCE_NAME",
     "GUISPECTOR_RUNTIME_NAME",
     "INSPECTOR_DRAFT_RUNS_NAME",
     "INSPECTOR_REPLAY_BUNDLE_NAME",
     "LOCAL_DATA_DIRECTORY_NAME",
     "LOCAL_DATA_ROOT_ENV",
+    "RETRIEVAL_WORK_RUNS_NAME",
     "SEMANTIC_ASSIST_RUNS_NAME",
     "canonical_flow_runs_root",
     "component_examples_root",
     "component_report_runs_root",
+    "framework_evidence_root",
     "guispector_runtime_root",
     "inspector_draft_runs_root",
     "inspector_release_candidate_root",
     "inspector_replay_bundle_root",
     "resolve_local_data_root",
+    "retrieval_work_runs_root",
     "semantic_assist_runs_root",
 ]

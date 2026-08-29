@@ -18,6 +18,10 @@ from req2web_rag.retrieval_experiment import (  # noqa: E402
     prepare_retrieval_experiment,
     validate_retrieval_experiment,
 )
+from req2web_inspector.local_data import (  # noqa: E402
+    framework_evidence_root,
+    retrieval_work_runs_root,
+)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -41,12 +45,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--comparison-root",
         type=Path,
-        default=ROOT / "outputs" / "phase6_retrieval_comparison_v3",
+        default=framework_evidence_root(ROOT) / "retrieval_comparison",
     )
     parser.add_argument(
         "--output-root",
         type=Path,
-        default=ROOT / "outputs" / "phase6_retrieval_experiment_v5",
+        default=retrieval_work_runs_root(ROOT) / "experiment",
     )
     parser.add_argument(
         "--validate-only",
