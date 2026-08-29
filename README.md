@@ -1,50 +1,105 @@
 # Req2Web
 
-Req2Web is an Agent + RAG prototype that turns a vague software requirement into a frontend prototype or webpage implementation, together with a concise explanation, UI references, and an interaction flow.
+Req2Web turns a vague software requirement into a traceable frontend prototype
+and a reviewable ResultPackage. The project combines retrieval, an optional
+semantic requirement assistant, the canonical B-to-F1-F4 Agent chain, PageSpec
+assembly, deterministic rendering, browser checks, semantic acceptance, and
+evidence packaging behind one local Inspector.
 
-Private project backup: `https://github.com/aszz007/Req2Web`.
+The workspace directory may remain named `CrowdMEP`; the project and public
+tool name is Req2Web.
 
-## Current Stage
+## Current capabilities
 
-The first traceable Demo corpus and the unified RAG indexing and retrieval skeleton are ready; the next step is the minimal Agent chain.
+- Accept a free-form requirement, infer basic device and task information, and
+  create a model-free deterministic draft.
+- Optionally run one advisory-only local Qwen requirement-assistance call. Its
+  suggestions never rewrite canonical B or enter F1-F4 automatically.
+- Explicitly run the existing canonical local-model flow from canonical B
+  through F1-F4, PageSpec, rendering, delivery, browser evidence, and semantic
+  evidence. The Inspector does not implement a second prompt or Agent loop.
+- Import an existing ResultPackage v1/v2 ZIP with bounded path, size, schema,
+  inventory, identity, and hash validation.
+- Replay twelve frozen English publication rows without a GPU or hidden model
+  call, inspect every intermediate artifact, and open the generated page.
+- Compare BM25, RRF, and TF-IDF retrieval using the frozen method-blind pool and
+  the owner-reviewed 420 relevance judgments. This remains secondary
+  exploratory evidence and does not change the active TF-IDF default.
+- Optionally prepare or import a GUISpector sidecar. It is disabled by default
+  and cannot change canonical Req2Web acceptance or delivery facts.
 
-- Vision2Web: 100 responsive webpage implementations and 93 requirement tasks retained.
-- RICO combined: 42 UI reference screens retained.
-- RICO filtered traces: 12 interaction flows retained.
-- Design2Code: 12 standard and 4 HARD implementation references retained.
-- Sketch2Code: 8 sketch-to-webpage pairs retained.
-- GitHub Issues / PRs: 12 validation cases retained from a 14,384-row inventory.
-- Topcoder: not downloaded yet and does not block the first Demo.
+The frozen publication evidence keeps separate ledgers: historical downstream
+first-pass delivery is 9/12; zero-model policy replay provides 12/12 deliverable
+packages without rewriting that history; objective Chrome and PageSpec checks
+passed 12/12 with 36 recorded interactions and no console or page errors; the
+separate semantic sidecar accepted 12/12 rows and supported 24/24 criteria.
 
-The manifest currently contains 283 unique records across requirement, UI reference, interaction flow, implementation, and validation roles.
+## Start the Inspector
 
-The authoritative screening decisions are stored in `data/processed/selection_manifest.csv`. Dataset audit and finalization scripts are in `scripts/`.
+The precomputed replay is local evidence and is intentionally not tracked in
+Git. By default it is read from the sibling directory
+`../Req2Web_LocalData/replay/inspector_replay_bundle_v1`. Set
+`REQ2WEB_LOCAL_DATA_ROOT` to use another local-data root.
 
-## Minimal RAG Retrieval
-
-Build the unified 283-document corpus and the offline TF-IDF index, then run the five-role retrieval smoke test:
+Validate the replay and start the model-free local Inspector:
 
 ```powershell
-.\.venv\Scripts\python.exe .\scripts\build_rag_index.py
-.\.venv\Scripts\python.exe .\scripts\search_rag.py
+.\.venv\Scripts\python.exe .\scripts\run_req2web_inspector.py --validate-only
+.\.venv\Scripts\python.exe .\scripts\run_req2web_inspector.py --port 8768
 ```
 
-The unified schema, index files, query options, and test command are documented in `docs/rag_retrieval.md`. The TF-IDF backend is intentionally dependency-free and can later be replaced by a multilingual embedding backend such as bge-m3 without changing the document envelope.
+The supported convenience launcher performs a model-free preflight and uses
+the repository virtual environment:
 
-## Repository Scope
+```powershell
+.\scripts\start_req2web_inspector.ps1 `
+  -ReplayBundleRoot ..\Req2Web_LocalData\replay\inspector_replay_bundle_v1 `
+  -Port 8768
+```
 
-Raw public datasets and downloaded archives are intentionally excluded from Git. The repository stores project documentation, processing scripts, lightweight inventories, screening decisions, and RAG-ready metadata. Raw files must be downloaded separately according to the dataset documentation in `docs/`.
+Local semantic assistance and the complete canonical model flow stay disabled
+unless the launcher or CLI receives the exact local model root, integrity
+evidence, and explicit enable flags. See
+`docs/phase6_release_foundation.md` for the low-GPU NF4 and high-GPU BF16
+profiles.
 
-## Project Documents
+## Repository and local data
 
-- `docs/project_framework.md`: overall product and technical framework.
-- `docs/demo_spec.md`: first Demo scope and acceptance criteria.
-- `docs/dataset_selection_workflow.md`: authoritative dataset-screening procedure.
-- `docs/project_memory.md`: current project state and decisions.
-- `docs/repository_hygiene_checklist.md`: evidence-based local workspace and
-  repository maintenance checklist.
+Git contains the current source, tests, contracts, lightweight fixtures,
+processed RAG corpus, frozen retrieval judgments, and mechanical metrics. Raw
+datasets, model weights, ResultPackages, browser runs, release candidates,
+Docker state, and other machine-specific outputs remain outside Git under
+`Req2Web_LocalData` or their documented owner-controlled locations.
+
+The current local-data roots include:
+
+- `replay/inspector_replay_bundle_v1`: frozen Inspector replay;
+- `replay/framework_evidence_v1`: retained deterministic, Phase 4, Phase 5,
+  and retrieval evidence used by optional replay tests;
+- `runs/`: new draft, semantic-assist, canonical-flow, report, and retrieval
+  runs;
+- `exports/`: handoff archives;
+- `optional_tools/`: pinned optional verifier runtimes.
+
+The repository does not include public-release license closure. RICO and other
+assets with unresolved redistribution rights remain reference-only. H1/gold,
+formal quality evaluation, training, LoRA, data expansion, production claims,
+and user studies are not part of the completed engineering evidence.
+
+## Main documents
+
+- `docs/project_framework.md`: product and technical framework.
+- `docs/active_flow_authority_registry.md`: current flow, prompt, and evidence
+  authorities.
+- `docs/phase6_release_foundation.md`: final Inspector behavior and runtime
+  commands.
+- `docs/dataset_selection_workflow.md`: dataset screening and corpus lineage.
+- `docs/repository_hygiene_checklist.md`: current local and Git maintenance
+  boundary.
 - `docs/repository_output_reference_manifest.md`: retained and archived output
-  roots after the bounded repository-hygiene audit.
-- `docs/local_environment_rebuild.md`: safe parallel `.venv` rebuild and
-  replacement checks.
+  roots.
+- `docs/local_environment_rebuild.md`: safe parallel virtual-environment
+  rebuild procedure.
+- `docs/project_memory.md`: chronological project decisions and evidence.
 
+The private backup remote is `https://github.com/aszz007/Req2Web`.
