@@ -203,6 +203,7 @@ class _InspectorHandler(SimpleHTTPRequestHandler):
     canonical_run_store: object | None = None
     model_dispatch_lock = threading.Lock()
     live_drafts_enabled = False
+    precomputed_replay_available = True
 
     def end_headers(self) -> None:
         self.send_header("X-Content-Type-Options", "nosniff")
@@ -250,7 +251,11 @@ class _InspectorHandler(SimpleHTTPRequestHandler):
         return {
             "schema_version": "req2web.inspector.capabilities.v1",
             "service_mode": "local_inspector",
-            "precomputed_replay": "available",
+            "precomputed_replay": (
+                "available"
+                if self.precomputed_replay_available
+                else "not_loaded_repository_demo"
+            ),
             "deterministic_guided_draft": (
                 "available" if self.live_drafts_enabled else "disabled_read_only"
             ),
@@ -530,6 +535,14 @@ def build_parser() -> argparse.ArgumentParser:
             "directory beside the repository when that variable is unset."
         ),
     )
+    parser.add_argument(
+        "--repository-demo",
+        action="store_true",
+        help=(
+            "Start the tracked, model-free maintenance surface without loading "
+            "the untracked historical replay. Replay-only sections stay hidden."
+        ),
+    )
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8765)
     parser.add_argument(
@@ -646,26 +659,35 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
-    try:
-        manifest = validate_phase6_reviewer_bundle(args.bundle_root)
-    except (OSError, ValueError, Phase6ReplayError) as exc:
+    if args.repository_demo and (args.read_only or args.validate_only):
         print(
-            json.dumps(
-                {
-                    "status": "failed_closed",
-                    "error_type": type(exc).__name__,
-                    "error_message": str(exc),
-                },
-                ensure_ascii=False,
-                sort_keys=True,
-                separators=(",", ":"),
-            ),
+            "[REQ2WEB-INSPECTOR] failed closed: repository demo requires live drafts "
+            "and does not validate historical replay",
             file=sys.stderr,
         )
         return 2
+    manifest: dict[str, object] | None = None
+    if not args.repository_demo:
+        try:
+            manifest = validate_phase6_reviewer_bundle(args.bundle_root)
+        except (OSError, ValueError, Phase6ReplayError) as exc:
+            print(
+                json.dumps(
+                    {
+                        "status": "failed_closed",
+                        "error_type": type(exc).__name__,
+                        "error_message": str(exc),
+                    },
+                    ensure_ascii=False,
+                    sort_keys=True,
+                    separators=(",", ":"),
+                ),
+                file=sys.stderr,
+            )
+            return 2
     summary = {
         "status": "validated_precomputed_replay",
-        "counts": manifest["counts"],
+        "counts": manifest["counts"] if manifest is not None else {},
         "bundle_root": str(args.bundle_root.resolve()),
     }
     if args.validate_only:
@@ -774,14 +796,21 @@ def main(argv: list[str] | None = None) -> int:
     _InspectorHandler.semantic_assist_store = semantic_assist_store
     _InspectorHandler.canonical_run_store = canonical_run_store
     _InspectorHandler.live_drafts_enabled = run_store is not None
-    handler = partial(_InspectorHandler, directory=str(args.bundle_root.resolve()))
+    _InspectorHandler.precomputed_replay_available = manifest is not None
+    serving_root = (
+        args.bundle_root.resolve()
+        if manifest is not None
+        else ROOT / ".req2web-repository-demo-no-static-root"
+    )
+    handler = partial(_InspectorHandler, directory=str(serving_root))
     try:
         server = ThreadingHTTPServer((args.host, args.port), handler)
     except OSError as exc:
         print(f"[REQ2WEB-INSPECTOR] failed closed: {exc}", file=sys.stderr)
         return 2
     print(
-        f"[REQ2WEB-INSPECTOR] validated {manifest['counts']['row_count']} rows; "
+        f"[REQ2WEB-INSPECTOR] "
+        f"{('validated ' + str(manifest['counts']['row_count']) + ' replay rows') if manifest is not None else 'repository demo active'}; "
         f"local drafts {'enabled' if run_store is not None else 'disabled'}; "
         f"semantic assist {'enabled' if semantic_assist_store is not None else 'disabled'}; "
         f"canonical model runs {'enabled' if canonical_run_store is not None else 'disabled'}; "

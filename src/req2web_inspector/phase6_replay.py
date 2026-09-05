@@ -515,11 +515,11 @@ _INDEX_HTML = """<!doctype html>
       <a href="#overview">Overview</a>
       <a href="#intake">Create</a>
       <a href="#run-history">Runs</a>
-      <a href="#case-inspector">Evidence</a>
-      <a href="#external-verification">Optional check</a>
-      <a href="#final-result">Result</a>
+      <a href="#case-inspector" data-replay-only>Evidence</a>
+      <a href="#external-verification" data-replay-only>Optional check</a>
+      <a href="#final-result" data-replay-only>Result</a>
     </nav>
-    <span class="local-status"><i></i> Local replay</span>
+    <span id="inspector-mode" class="local-status"><i></i> Local replay</span>
   </header>
 
   <div class="app-shell" id="top">
@@ -527,15 +527,15 @@ _INDEX_HTML = """<!doctype html>
       <div class="hero-copy">
         <p class="eyebrow">REQ2WEB INSPECTION CONSOLE</p>
         <h1>Trace a requirement into a runnable page.</h1>
-        <p class="lede">Use one console to check an irregular requirement, create a model-free draft, run the canonical local model flow when explicitly enabled, inspect every stage, or replay twelve frozen evaluation rows.</p>
+        <p id="hero-lede" class="lede">Use one console to check an irregular requirement, create a model-free draft, run the canonical local model flow when explicitly enabled, inspect every stage, or replay twelve frozen evaluation rows.</p>
         <div class="hero-actions">
           <a class="button" href="#intake">Create a local draft</a>
-          <a class="button secondary" href="#case-inspector">Replay frozen evidence</a>
+          <a class="button secondary" href="#case-inspector" data-replay-only>Replay frozen evidence</a>
         </div>
       </div>
       <aside class="release-card" aria-label="Current capability">
         <span class="section-kicker">Current capability</span>
-        <strong>Replay, drafts, optional canonical generation</strong>
+        <strong id="capability-summary">Replay, drafts, optional canonical generation</strong>
         <p>Deterministic controls call no model. Optional local-Qwen actions are single-flight, zero-retry, and keep requirement advice, F1-F4 generation, browser facts, and semantic acceptance separate.</p>
         <div class="status-line"><i></i> User actions are explicit and local-first</div>
       </aside>
@@ -617,19 +617,19 @@ _INDEX_HTML = """<!doctype html>
       <div id="run-list" class="run-list"><p class="muted">Local run history is loading.</p></div>
     </section>
 
-    <section class="metrics" id="metrics" aria-label="Evidence summary"></section>
-    <section class="separation-note">
+    <section class="metrics" id="metrics" aria-label="Evidence summary" data-replay-only></section>
+    <section class="separation-note" data-replay-only>
       <span class="notice-label">Accounting boundary</span>
       <div><strong>Three ledgers stay separate.</strong><p>Historical first-pass delivery, objective browser checks, and semantic alignment answer different questions and are never merged into one score.</p></div>
     </section>
 
-    <section class="case-toolbar" id="case-inspector">
+    <section class="case-toolbar" id="case-inspector" data-replay-only>
       <div class="toolbar-title"><span class="section-kicker">Evidence explorer</span><strong class="module-title">Select one frozen row <button class="info-tip" type="button" aria-label="About the evidence explorer" data-tooltip="Replays one of twelve immutable engineering rows. It does not regenerate, repair, or relabel the historical evidence.">!</button></strong></div>
       <label for="case-select"><span class="sr-only">Evidence row</span><select id="case-select"></select></label>
       <div id="case-badges" class="badges"></div>
     </section>
 
-    <section class="overview-grid">
+    <section class="overview-grid" data-replay-only>
       <article class="panel">
         <h2 class="module-title">Requirement <button class="info-tip" type="button" aria-label="About requirement evidence" data-tooltip="Shows the exact structured understanding used by the frozen row: the request summary, target device, task type, constraints, and user goals.">!</button></h2>
         <div id="requirement-summary" class="prose"></div>
@@ -642,7 +642,7 @@ _INDEX_HTML = """<!doctype html>
       </article>
     </section>
 
-    <section class="panel">
+    <section class="panel" data-replay-only>
       <div class="section-heading">
         <div><h2 class="module-title">F1-F4 structured outputs <button class="info-tip" type="button" aria-label="About F1 through F4" data-tooltip="F1 defines static page structure, F2 defines states and visibility, F3 defines interactions, and F4 defines candidate acceptance checks. These are exact frozen outputs and are never regenerated here.">!</button></h2><p class="muted">Exact frozen node outputs. Details remain collapsed into scrollable evidence blocks.</p></div>
         <div id="failure-location"></div>
@@ -650,7 +650,7 @@ _INDEX_HTML = """<!doctype html>
       <div id="node-grid" class="node-grid"></div>
     </section>
 
-    <section class="overview-grid">
+    <section class="overview-grid" data-replay-only>
       <article class="panel">
         <h2 class="module-title">Final PageSpec <button class="info-tip" type="button" aria-label="About the final PageSpec" data-tooltip="The machine-checkable page contract consumed by the Renderer. It binds sections, components, states, interactions, constraints, evidence references, and acceptance checks.">!</button></h2>
         <pre id="page-spec-json" class="tall"></pre>
@@ -669,7 +669,7 @@ _INDEX_HTML = """<!doctype html>
       </article>
     </section>
 
-    <section class="overview-grid">
+    <section class="overview-grid" data-replay-only>
       <article class="panel">
         <h2 class="module-title">Semantic sidecar <button class="info-tip" type="button" aria-label="About semantic evaluation" data-tooltip="A separately accounted evaluator checked whether concrete page evidence supported each abstract acceptance goal. Its verdicts cannot overwrite browser facts or historical first-pass accounting.">!</button></h2>
         <pre id="semantic-json"></pre>
@@ -681,7 +681,7 @@ _INDEX_HTML = """<!doctype html>
       </article>
     </section>
 
-    <section class="panel external-panel" id="external-verification">
+    <section class="panel external-panel" id="external-verification" data-replay-only>
       <div class="section-heading">
         <div>
           <span class="section-kicker">Optional external verification</span>
@@ -725,7 +725,7 @@ _INDEX_HTML = """<!doctype html>
       </div>
     </section>
 
-    <section class="panel page-panel" id="final-result">
+    <section class="panel page-panel" id="final-result" data-replay-only>
       <div class="section-heading">
         <div><h2 class="module-title">Final runnable page <button class="info-tip" type="button" aria-label="About the runnable page" data-tooltip="Loads the exact packaged HTML, CSS, and JavaScript. Prototype controls change the PageSpec state in place; they are not expected to navigate to a production backend or another application route.">!</button></h2><p class="muted">The exact packaged page used by the objective browser audit.</p></div>
         <a id="open-page" class="button" target="_blank" rel="noopener">Open exact package</a>
@@ -1395,8 +1395,10 @@ function setIntakeBusy(busy, label = '') {
 async function initializeLiveInspector() {
   const capability = byId('live-capability');
   const guispectorStatus = byId('guispector-runtime-status');
+  let serviceCapabilities = null;
   try {
     const value = await requestJson('/api/capabilities');
+    serviceCapabilities = value;
     const available = value.deterministic_guided_draft === 'available';
     const importAvailable = value.result_package_import === 'available';
     const semanticAvailable = value.semantic_requirement_assist === 'available_local_qwen';
@@ -1567,6 +1569,7 @@ async function initializeLiveInspector() {
       byId('run-list').innerHTML = `<div class="failure">${escapeHtml(error.message)}</div>`;
     }
   });
+  return serviceCapabilities;
 }
 
 let previewMode = 'fit';
@@ -1845,6 +1848,17 @@ async function showCase(item) {
 }
 
 async function main() {
+  const capabilities = await initializeLiveInspector();
+  const replayAvailable = capabilities?.precomputed_replay === 'available';
+  document.querySelectorAll('[data-replay-only]').forEach(element => {
+    element.hidden = !replayAvailable;
+  });
+  if (!replayAvailable) {
+    byId('inspector-mode').innerHTML = '<i></i> Repository demo';
+    byId('hero-lede').textContent = 'Use one console to check an irregular requirement, create a model-free draft and ResultPackage, import an existing package, or run the canonical local model flow when explicitly configured.';
+    byId('capability-summary').textContent = 'Drafts, package checks, optional canonical generation';
+    return;
+  }
   const catalog = await getJson('catalog.json');
   const guispector = await getJson(catalog.guispector_evaluation);
   renderMetrics(catalog.counts);
@@ -1862,7 +1876,6 @@ async function main() {
   byId('guispector-test-connection').addEventListener('click', testGuispectorConnection);
   window.addEventListener('resize', renderPreviewLayout);
   updateGuispectorProvider();
-  await initializeLiveInspector();
   await showCase(catalog.cases[0]);
 }
 

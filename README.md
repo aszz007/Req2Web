@@ -36,6 +36,18 @@ separate semantic sidecar accepted 12/12 rows and supported 24/24 criteria.
 
 ## Start the Inspector
 
+For a clean GitHub checkout or a hosted maintenance environment, start the
+tracked model-free surface without historical replay:
+
+```bash
+python scripts/run_req2web_inspector.py --repository-demo --port 8765
+```
+
+This mode accepts requirements, creates deterministic drafts and ResultPackage
+ZIPs, imports validated packages, and keeps local run history. Replay-only
+sections stay hidden so generated examples cannot be mistaken for the frozen
+publication evidence.
+
 The precomputed replay is local evidence and is intentionally not tracked in
 Git. By default it is read from the sibling directory
 `../Req2Web_LocalData/replay/inspector_replay_bundle_v1`. Set
@@ -62,6 +74,9 @@ unless the launcher or CLI receives the exact local model root, integrity
 evidence, and explicit enable flags. See
 `docs/phase6_release_foundation.md` for the low-GPU NF4 and high-GPU BF16
 profiles.
+
+For a clean hosted checkout, use the short setup and validation sequence in
+`docs/work_maintenance.md`.
 
 ## Repository and local data
 

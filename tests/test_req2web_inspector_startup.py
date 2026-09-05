@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 from pathlib import Path
 import unittest
 
@@ -71,6 +72,49 @@ class Req2WebInspectorStartupTests(unittest.TestCase):
         self.assertNotIn("Retrieval laboratory", page)
         self.assertIn("Copy selected advice into constraints", script)
         self.assertIn("Stop safely after the current stage", script)
+
+    def test_repository_demo_does_not_require_historical_replay(self) -> None:
+        args = self.runner.build_parser().parse_args(["--repository-demo"])
+
+        self.assertTrue(args.repository_demo)
+        self.assertFalse(args.read_only)
+        self.assertFalse(args.validate_only)
+
+        script = self.runner._CURRENT_UI_ASSETS["/app.js"][1].decode("utf-8")
+        page = self.runner._CURRENT_UI_ASSETS["/"][1].decode("utf-8")
+        previous = self.runner._InspectorHandler.precomputed_replay_available
+        try:
+            self.runner._InspectorHandler.precomputed_replay_available = False
+            handler = self.runner._InspectorHandler.__new__(
+                self.runner._InspectorHandler
+            )
+            self.assertEqual(
+                handler._capabilities()["precomputed_replay"],
+                "not_loaded_repository_demo",
+            )
+        finally:
+            self.runner._InspectorHandler.precomputed_replay_available = previous
+        self.assertIn("Repository demo", script)
+        self.assertIn("data-replay-only", page)
+
+    def test_hosted_dependency_lock_matches_runtime_receipt(self) -> None:
+        receipt = json.loads(
+            (ROOT / "docs" / "phase4_langgraph_dependency_acquisition_receipt.json")
+            .read_text(encoding="utf-8")
+        )
+        expected = [
+            f"{row['distribution']}=={row['version']}"
+            for row in receipt["resolved_closure"]
+        ]
+        actual = [
+            line
+            for line in (
+                ROOT / "requirements-phase4-agent-lock.txt"
+            ).read_text(encoding="utf-8").splitlines()
+            if line
+        ]
+
+        self.assertEqual(actual, expected)
 
 
 if __name__ == "__main__":
