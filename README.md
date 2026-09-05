@@ -6,6 +6,13 @@ semantic requirement assistant, the canonical B-to-F1-F4 Agent chain, PageSpec
 assembly, deterministic rendering, browser checks, semantic acceptance, and
 evidence packaging behind one local Inspector.
 
+> **Release status:** This repository is still private and pre-release. No
+> software or data license has been selected, so the tracked content is not yet
+> authorized for public redistribution. Internal provenance remains temporarily
+> tracked during preparation; see
+> [`docs/open_source_readiness.md`](docs/open_source_readiness.md) for the public
+> inventory, removal ledger, and release gates.
+
 The workspace directory may remain named `CrowdMEP`; the project and public
 tool name is Req2Web.
 
@@ -111,6 +118,11 @@ and user studies are not part of the completed engineering evidence.
 - `docs/dataset_selection_workflow.md`: dataset screening and corpus lineage.
 - `docs/repository_hygiene_checklist.md`: current local and Git maintenance
   boundary.
+- `docs/open_source_readiness.md`: future public inventory, removal ledger,
+  history-sanitization rule, and release gates.
+- `docs/phase6_license_and_material_decision_checklist.md`: owner decisions
+  required before redistribution.
+- `CONTRIBUTING.md`: clean-checkout development and review workflow.
 - `docs/repository_output_reference_manifest.md`: retained and archived output
   roots.
 - `docs/local_environment_rebuild.md`: safe parallel virtual-environment
