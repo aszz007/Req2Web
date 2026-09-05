@@ -12,6 +12,20 @@ __pycache__/
 .ruff_cache/
 .env
 .env.*
+!.env.example
+
+# Credentials and signing material
+*.pem
+*.key
+*.p12
+*.pfx
+id_rsa*
+id_ed25519*
+credentials*.json
+service-account*.json
+.netrc
+.npmrc
+.pypirc
 
 # Raw datasets and downloaded archives stay local
 data/raw/

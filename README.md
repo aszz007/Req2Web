@@ -85,6 +85,21 @@ profiles.
 For a clean hosted checkout, use the short setup and validation sequence in
 `docs/work_maintenance.md`.
 
+## Repository readiness audit
+
+The release-readiness audit reads the tracked tree, reports private cleanup
+candidates, missing public metadata, absolute machine paths, large or binary
+artifacts, and suspected credential locations without printing matched secret
+values:
+
+```bash
+python scripts/audit_open_source_readiness.py
+python scripts/audit_open_source_readiness.py --json
+```
+
+The current private tree is expected to report `blocked`. The final sanitized
+public tree must pass `--fail-on-blockers` before repository visibility changes.
+
 ## Repository and local data
 
 Git contains the current source, tests, contracts, lightweight fixtures,
@@ -110,6 +125,8 @@ and user studies are not part of the completed engineering evidence.
 
 ## Main documents
 
+- `docs/README.md`: short guide to current, evaluation, maintenance, and
+  historical documentation.
 - `docs/project_framework.md`: product and technical framework.
 - `docs/active_flow_authority_registry.md`: current flow, prompt, and evidence
   authorities.

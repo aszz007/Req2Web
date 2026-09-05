@@ -57,6 +57,20 @@ RICO and other unresolved third-party material as reference-only.
 The future public inventory and all material requiring removal or review are
 tracked in `docs/open_source_readiness.md`.
 
+## Release hygiene
+
+Run the tracked-tree readiness audit when a change adds documentation, data,
+fixtures, generated output, deployment code, or a new dependency:
+
+```bash
+python scripts/audit_open_source_readiness.py
+```
+
+The private repository is expected to remain blocked while its cleanup ledger
+is unresolved. The audit must not be used to delete or rewrite evidence. Update
+`docs/open_source_readiness.md` when a new artifact changes the future public
+inventory.
+
 ## Documentation and commits
 
 Keep maintained repository documentation and commit messages in English. Use a
