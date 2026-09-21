@@ -172,7 +172,7 @@ class PageRendererTest(unittest.TestCase):
             markup = result.index_html.read_text(encoding="utf-8")
             self.assertIn(f'data-renderer-kind="{component_type}"', markup)
 
-    def test_form_reports_empty_input_and_runs_pagespec_interaction(self) -> None:
+    def test_form_blocks_empty_input_before_pagespec_interaction(self) -> None:
         self.ecommerce_spec.components[0].component_type = "form"
         result = self.renderer.render(self.ecommerce_spec, self.root / "required-form")
         markup = result.index_html.read_text(encoding="utf-8")
@@ -183,8 +183,10 @@ class PageRendererTest(unittest.TestCase):
         self.assertIn("Enter the required information before submitting.", script)
         self.assertEqual(
             script.count("runForComponent(form.dataset.interactionForm)"),
-            2,
+            1,
         )
+        invalid_branch = script.split('if (requiredInput && !requiredInput.value.trim()) {', 1)[1].split('return;', 1)[0]
+        self.assertNotIn("runForComponent", invalid_branch)
 
     def test_interactions_states_and_feedback_are_in_runtime_logic(self) -> None:
         result = self.renderer.render(self.pet_spec, self.root / "runtime")
@@ -199,6 +201,14 @@ class PageRendererTest(unittest.TestCase):
         self.assertIn("feedback.textContent", script)
         self.assertIn("inlineFeedback.textContent", script)
         self.assertIn("applyState(interaction.target_state_id", script)
+        self.assertIn(
+            'document.querySelectorAll("[data-section-id]").forEach((section)',
+            script,
+        )
+        self.assertIn(
+            "section.hidden = !components.some((component) => !component.hidden)",
+            script,
+        )
 
     def test_error_and_recovery_controls_render_from_page_spec(self) -> None:
         result = self.renderer.render(

@@ -46,7 +46,15 @@ release/
 *.tmp
 /.tmp*/
 /tmp*/
+/.tmp-*.log
+/.e2_test_tmp/
+/docx_render_tmp_*/
 /.phase4-*/
 /.phase5-*/
 /p4-full-flow-*/
 /%SystemDrive%/
+
+# Local owner-facing documents and video-production media
+/docs/*.docx
+/docs/mermaid-diagram.svg
+/video_work/

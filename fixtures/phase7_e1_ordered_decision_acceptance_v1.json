@@ -1,0 +1,41 @@
+{
+  "schema_version": "req2web.phase7.e1.ordered_decision_acceptance_spec.v1",
+  "status": "local_strategy_frozen_no_action",
+  "analysis_role": "post_hoc_secondary_exploratory_then_new_holdout_confirmation",
+  "historical_source": {
+    "observation_sha256": "sha256:476bcd226bc30d376c5cfb77146e6f53548312435efa925ba51d3a4a779481f2",
+    "input_identity": "sha256:cfa73f7d3a95a8c2706b3d191c795d6f7d32d89551bcee182a67d5169ed6dd48",
+    "observer_identity": "sha256:df3de016c86653c3ad958d2acf153d65bf8d5951a06dc84de9e4eecb17d1e747",
+    "runtime_manifest_sha256": "sha256:059be05a037c0547c9abdce4bbcfa07b223ceaa001317a851a47a3358154728c"
+  },
+  "historical_ordered_decision_cases": [
+    "e1v2-exhibition-approval",
+    "e1v2-equipment-release",
+    "e1v2-translation-signoff"
+  ],
+  "criteria": [
+    "correct_initial_state",
+    "enter_review",
+    "approve_after_review",
+    "block_pre_review_approval",
+    "reject_from_review",
+    "reset_after_rejection_without_stale_success"
+  ],
+  "scoring": {
+    "weights": "equal_one_per_criterion",
+    "missing_or_rejected_delivery": "all_six_fail",
+    "unknown": "reported_as_lower_upper_bound_never_automatic_pass",
+    "case_is_independent_unit": true,
+    "primary_contrast": "A-B",
+    "arm_c": "secondary_does_not_block_complete_a_b_comparison"
+  },
+  "prospective_confirmation": {
+    "minimum_new_unseen_case_count": 12,
+    "minimum_mean_a_minus_b_passed_obligations_per_case": 1.0,
+    "maximum_exact_paired_sign_flip_two_sided_p": 0.05,
+    "unknown_rows_allowed": 0,
+    "case_omission_allowed": false,
+    "automatic_retry_count": 0
+  },
+  "claim_boundary": "ordered_decision_workflow_advantage_only_not_general_web_generation"
+}

@@ -10,13 +10,15 @@ from __future__ import annotations
 import copy
 import hashlib
 import json
+import re
 from typing import Mapping
+from req2web_capabilities import SUPPORTED_COMPONENT_TYPES, INTERACTIVE_COMPONENT_TYPES
 
 
 PROMPT_AUTHORITY_SCHEMA_VERSION = "req2web.agent.f1_f4_prompt_authority.v1"
 PROMPT_SCHEMA_VERSION = "req2web.agent.f1_f4_prompt.v1"
 PROMPT_AUTHORITY_REVISION = (
-    "f3_f4_explicit_actual_state_plan_a07a_direct_english_v17"
+    "negative_action_full_context_section_visibility_english_v21"
 )
 REGISTRY_REVISION = "req2web.phase4.registry.p4_02a.v1"
 NODE_ORDER = ("F1", "F2", "F3", "F4")
@@ -60,7 +62,7 @@ def _identity(raw: bytes, *, revision: str) -> dict[str, object]:
     }
 
 
-def _base_output_contracts() -> dict[str, dict[str, object]]:
+def _historical_v17_output_contracts() -> dict[str, dict[str, object]]:
     return {
         "F1": {
             "exact_top_level_keys": [
@@ -218,7 +220,7 @@ def _base_instructions() -> list[str]:
     ]
 
 
-def _node_specific_instructions() -> dict[str, list[str]]:
+def _historical_v17_node_instructions() -> dict[str, list[str]]:
     return {
         "F1": [
             (
@@ -318,6 +320,104 @@ def _node_specific_instructions() -> dict[str, list[str]]:
             ),
         ],
     }
+
+
+def _base_output_contracts() -> dict[str, dict[str, object]]:
+    contracts = _historical_v17_output_contracts()
+    contracts["F1"]["component_type_enum"] = list(SUPPORTED_COMPONENT_TYPES)
+    contracts["F1"]["invariants"].append(
+        "component_type must be one of component_type_enum; primary_action is an executable button and status_panel is display-only"
+    )
+    contracts["F3"]["invariants"] = [
+        "interactions is a non-empty array with unique non-empty local_id values",
+        "source_state_local_id and target_state_local_id name actual supplied F2 states",
+        "the first F2 state is initial; subsequent array positions do not prescribe transition order",
+        "trigger_component_local_id must be a supported interactive F1 component visible in the exact source state",
+        "each source-state and trigger-component pair occurs at most once",
+        "refs is []; do not add use-case reference fields",
+        "action and user_feedback are non-empty English text",
+        "implement the public requirement graph, including branches, return, cancellation, reset and recovery when requested",
+        "do not invent shortcuts or artificial self-loops; a terminal state may have zero outgoing interactions",
+        "required_interaction_plan enumerates allowed source/trigger/target choices, not mandatory edges",
+    ]
+    return contracts
+
+
+def _node_specific_instructions() -> dict[str, list[str]]:
+    instructions = _historical_v17_node_instructions()
+    instructions["F1"] = [instructions["F1"][0],
+        "Use primary_action for each separately named user action and status_panel for informational text. Use only the declared component types; never invent button, text_input, alert or other unsupported type names.",
+        "Use exact public action labels when supplied. Do not combine actions with different effects into one component. Do not describe unsupported data operations as implemented.",
+        "A reusable action is one F1 component with one section owner. List its local_id in exactly one section; F2 may make that same component visible in several states. Never duplicate a Reset, Back, Cancel, Next, or other shared action across section component_local_ids.",
+        "Place actions reused across differently named workflow states in a neutral workflow-actions or navigation section. Do not assign a shared Back, Next, Cancel, Reset, or Restart control to a section whose title names only one state or step, because that section may remain visible when the shared control is reused elsewhere.",
+        "Treat public_requirement_literal_contexts as a loss-prevention checklist derived only from the public requirement. Classify each literal from its surrounding sentence. Represent every explicitly required enabled user action as its own primary_action with the exact visible label; represent named visible states through F2 rather than inventing extra F1 action components. If the surrounding sentence says an action must be absent, disabled, unavailable, or must not restart or duplicate a terminal outcome, do not reinterpret that negative requirement as an enabled action.",
+        "After the components array is final, derive every section.component_local_ids by filtering the complete components array from left to right for rows whose section_local_id equals that section.local_id. Do not hand-order a section list from workflow chronology. Before returning JSON, concatenate the section lists in sections-array order and compare the result item-for-item with components[].local_id; if they differ, replace the section lists with the filtered lists without changing component content or ownership.",
+    ]
+    instructions["F2"] = [instructions["F2"][0],
+        "Put the actual initial workflow state first. Model all public workflow states, including distinct branches, errors and recovery where requested. Copy exact visible state names from the requirement when supplied.",
+        "Visibility determines which controls the user can reach. Show only appropriate actions for each state. Terminal states may contain only status panels. Do not expose actions from an alternative branch or an earlier step unless requested.",
+        "Create a distinct internal microstate whenever an action changes which controls are enabled, even when the public visible state name remains unchanged. The two microstates may deliberately have the same name but must have different local_id values and visibility lists. Examples include Ready before and after preparation, In review before and after a checkpoint, and an active branch before and after its prerequisite.",
+        "For a numbered walkthrough, use the exact required visible names such as Step 1 and Step 2 as state names. Put domain content such as welcome, safety, or preview in descriptions or status panels; it does not replace the required step name. Include explicit reset, cancelled, failure, completion, and restart targets when the public requirement calls for them.",
+        "When Reset is stated for the workflow without a narrower source, keep it visible in every active or terminal state from which a user may need to choose again. Likewise, keep Cancel visible in every active walkthrough step. Do not postpone a general Reset until only the terminal state.",
+        "A terminal state must not expose a control whose requirement context says it is absent, disabled, unavailable, or must not restart or duplicate the completed outcome. A negatively specified terminal action may remain an F1 component for structural traceability only if it is omitted from terminal visibility and receives no F3 edge.",
+    ]
+    instructions["F3"] = [
+        "Choose transitions from the public requirement, not from F2 array adjacency. Back/reset may target earlier states; branches may target nonadjacent states. Terminal states need no artificial work action.",
+        "Every trigger must be an interactive component visible in its source state; status_panel is display-only. Use distinct triggers for different choices in the same source state.",
+        "When an attempt must fail before retry succeeds, represent ready, failure and success as distinct states and expose retry only in the failure state. Visible state feedback must reflect the actual transition.",
+        "Emit an interaction for every explicitly required action that changes state or control availability, including preparation, checkpoint, Next, Back, Cancel, Reset, Retry, Confirm, and Restart. Preparation and checkpoint actions target a distinct microstate even if source and target use the same public visible name.",
+        "A protected action must not be visible in the precondition source state. Its prerequisite transition must target a later microstate where the protected action becomes visible. Do not claim gating only in action text or feedback; encode it in F2 visibility and F3 edges.",
+        "Honor negative terminal-action semantics before choosing edges. When the requirement says a terminal action must be absent or disabled, or that using it must leave one completion unchanged rather than restart or duplicate it, emit no state-changing interaction for that action from the terminal state. Prefer no outgoing edge over inventing a restart transition; a terminal state may have zero outgoing interactions.",
+    ]
+    return instructions
+
+
+_PUBLIC_LITERAL = re.compile(r"'([^'\r\n]+)'|\"([^\"\r\n]+)\"")
+_PUBLIC_LITERAL_CONTEXT_CHARS = 160
+
+
+def _public_requirement_literal_contexts(
+    input_value: Mapping[str, object],
+) -> list[dict[str, object]]:
+    """Project quoted public literals with bounded source context.
+
+    This is a deterministic attention aid, not evaluator data or a second
+    workflow schema. The values are copied only from the public requirement
+    already present in the node input.
+    """
+
+    projection = input_value.get("projection")
+    if not isinstance(projection, Mapping):
+        return []
+    requirement_view = projection.get("canonical_b_requirement_view")
+    if not isinstance(requirement_view, Mapping):
+        return []
+    requirement = requirement_view.get("requirement")
+    if not isinstance(requirement, str) or not requirement:
+        return []
+    rows: list[dict[str, object]] = []
+    for position, match in enumerate(_PUBLIC_LITERAL.finditer(requirement)):
+        literal = match.group(1) if match.group(1) is not None else match.group(2)
+        if not literal:
+            continue
+        left = requirement[
+            max(0, match.start() - _PUBLIC_LITERAL_CONTEXT_CHARS):match.start()
+        ].strip()
+        right = requirement[
+            match.end():min(
+                len(requirement),
+                match.end() + _PUBLIC_LITERAL_CONTEXT_CHARS,
+            )
+        ].strip()
+        rows.append(
+            {
+                "position": position,
+                "literal": literal,
+                "left_context": left,
+                "right_context": right,
+            }
+        )
+    return rows
 
 
 def prompt_authority_manifest() -> dict[str, object]:
@@ -601,7 +701,7 @@ def _f3_same_state_score(
     return score
 
 
-def build_canonical_f3_interaction_plan(
+def _historical_v17_linear_interaction_plan(
     *,
     f1_registered_structure_view: Mapping[str, object],
     f2_registered_state_visibility_view: Mapping[str, object],
@@ -721,6 +821,44 @@ def build_canonical_f3_interaction_plan(
                     "required_trigger_component_local_id": forward_trigger,
                 }
             )
+    return plan
+
+
+def build_canonical_f3_interaction_plan(
+    *, f1_registered_structure_view: Mapping[str, object],
+    f2_registered_state_visibility_view: Mapping[str, object],
+) -> list[dict[str, object]]:
+    """Return capability choices, without manufacturing requirement semantics."""
+    components = f1_registered_structure_view.get("components")
+    states = f2_registered_state_visibility_view.get("states")
+    if not isinstance(components, list) or not components or not isinstance(states, list) or not states:
+        raise PromptAuthorityError("F3 component/state inventory is missing")
+    types = {}
+    for row in components:
+        if not isinstance(row, Mapping):
+            raise PromptAuthorityError("F3 component row is invalid")
+        local_id = row.get("local_id")
+        if not isinstance(local_id, str) or not local_id or local_id in types:
+            raise PromptAuthorityError("F3 component identity is invalid")
+        if row.get("component_type") not in SUPPORTED_COMPONENT_TYPES:
+            raise PromptAuthorityError("F3 component capability is unsupported")
+        types[local_id] = row["component_type"]
+    if any(not isinstance(row, Mapping) for row in states):
+        raise PromptAuthorityError("F3 state row is invalid")
+    state_ids = [row.get("local_id") for row in states]
+    if any(not isinstance(s, str) or not s for s in state_ids) or len(set(state_ids)) != len(state_ids):
+        raise PromptAuthorityError("F3 state identities are invalid")
+    plan = []
+    for position, row in enumerate(states):
+        visible = row.get("visible_component_local_ids")
+        if not isinstance(visible, list) or any(v not in types for v in visible) or len(set(visible)) != len(visible):
+            raise PromptAuthorityError("F3 visibility is invalid")
+        plan.append({
+            "position": position, "source_state_local_id": row["local_id"],
+            "allowed_trigger_component_local_ids": [v for v in visible if types[v] in INTERACTIVE_COMPONENT_TYPES],
+            "allowed_target_state_local_ids": list(state_ids),
+            "mandatory_interaction_count": 0,
+        })
     return plan
 
 
@@ -924,6 +1062,10 @@ def build_canonical_f1_f4_prompt(
         }[node_id],
         "exact_output_contract": _base_output_contracts()[node_id],
     }
+    if node_id in {"F1", "F2", "F3"}:
+        payload["public_requirement_literal_contexts"] = (
+            _public_requirement_literal_contexts(input_value)
+        )
     if node_id == "F2":
         component_order = _required_f1_component_order(input_value)
         payload["required_f1_component_order"] = component_order
@@ -957,12 +1099,12 @@ def build_canonical_f1_f4_prompt(
         payload["instructions"] = [
             *instructions,
             (
-                "Copy every source state, target state, row position, and "
-                "required_trigger_component_local_id from "
-                "required_interaction_plan. Each allowed trigger list is a "
-                "singleton containing that exact required trigger. Emit "
-                "exactly one interaction for every plan row in the same order; "
-                "do not substitute a trigger, omit, merge, or add rows."
+                "Use required_interaction_plan as a capability boundary only. "
+                "For each actual required transition, choose a source row, "
+                "one allowed trigger and one allowed target. Emit only edges "
+                "supported by the public requirement. A plan row may have "
+                "zero or several interactions; each source/trigger pair must "
+                "be unique. Do not emit plan metadata in the output."
             ),
         ]
     if acceptance_plan is not None:

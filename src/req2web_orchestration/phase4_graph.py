@@ -27,6 +27,7 @@ from packaging.requirements import Requirement
 from packaging.utils import canonicalize_name
 
 from req2web_agent import AgentContextBundle, UseCase
+from req2web_capabilities import SUPPORTED_COMPONENT_TYPES, INTERACTIVE_COMPONENT_TYPES
 from req2web_generation import RetrievalGuidanceBuilder
 from req2web_provider.semantic_candidate import (
     CanonicalPageSpecAssembler,
@@ -41,7 +42,7 @@ LANGGRAPH_VERSION = "1.2.9"
 LANGGRAPH_CHECKPOINT_VERSION = "4.1.1"
 STATE_SCHEMA_VERSION = "req2web.phase4.graph_state.p4_02a.v1"
 GRAPH_REVISION = "req2web.phase4.graph.p4_02a.v1"
-CONTRACT_REVISION = "req2web.phase4.contract.p4_01.v1"
+CONTRACT_REVISION = "req2web.phase4.contract.executable_workflow.v2"
 REGISTRY_REVISION = "req2web.phase4.registry.p4_02a.v1"
 MAPPING_REVISION = "req2web.phase4.mapping.p4_02a.v1"
 COMPOSITION_PROFILE = "p4_01_empty_constraints_edges_v1"
@@ -1005,6 +1006,8 @@ def _validate_f1(output: object) -> dict[str, object]:
         if section_id not in section_components or component_id not in section_components[section_id]:
             raise Phase4ContractError("F1 component ownership is invalid")
         _text(row["component_type"], "F1.component.component_type")
+        if row["component_type"] not in SUPPORTED_COMPONENT_TYPES:
+            raise Phase4ContractError("F1 component type has no executable renderer")
         _text(row["label"], "F1.component.label")
         _text(row["purpose"], "F1.component.purpose")
         seen_components.append(component_id)
@@ -1061,6 +1064,10 @@ def _validate_f3(output: object, state: Mapping[str, object]) -> dict[str, objec
     if not isinstance(data["interactions"], list) or not data["interactions"]:
         raise Phase4ContractError("F3.interactions must be non-empty")
     _, component_ids = _f1_ids(state)
+    component_types = {
+        row["local_id"]: row["component_type"]
+        for row in state["node_results"]["F1"]["payload"]["node_output"]["components"]
+    }
     f2_states = state["node_results"]["F2"]["payload"]["node_output"]["states"]
     state_ids = [str(item["local_id"]) for item in f2_states]
     visible_components_by_state = {
@@ -1086,6 +1093,8 @@ def _validate_f3(output: object, state: Mapping[str, object]) -> dict[str, objec
         interaction_ids.append(str(row["local_id"]))
         if row["trigger_component_local_id"] not in component_ids:
             raise Phase4ContractError("F3 trigger component ref is invalid")
+        if component_types[row["trigger_component_local_id"]] not in INTERACTIVE_COMPONENT_TYPES:
+            raise Phase4ContractError("F3 trigger component is display-only or unsupported")
         if row["source_state_local_id"] not in state_ids or row["target_state_local_id"] not in state_ids:
             raise Phase4ContractError("F3 state ref is invalid")
         if (
@@ -1180,9 +1189,9 @@ def _happy_f1(_: Mapping[str, object]) -> dict[str, object]:
         ],
         "components": [
             {"local_id": "component-search", "entity_type": "component", "component_type": "search_input", "section_local_id": "section-products", "label": "Search products", "purpose": "Enter and filter a product query", "refs": []},
-            {"local_id": "component-cart", "entity_type": "component", "component_type": "cart_panel", "section_local_id": "section-products", "label": "Cart", "purpose": "Review selected products", "refs": []},
+            {"local_id": "component-cart", "entity_type": "component", "component_type": "primary_action", "section_local_id": "section-products", "label": "Cart", "purpose": "Review selected products", "refs": []},
             {"local_id": "component-form", "entity_type": "component", "component_type": "form", "section_local_id": "section-checkout", "label": "Delivery details", "purpose": "Collect valid delivery input", "refs": []},
-            {"local_id": "component-submit", "entity_type": "component", "component_type": "button", "section_local_id": "section-checkout", "label": "Submit order", "purpose": "Submit checkout for validation", "refs": []},
+            {"local_id": "component-submit", "entity_type": "component", "component_type": "primary_action", "section_local_id": "section-checkout", "label": "Submit order", "purpose": "Submit checkout for validation", "refs": []},
         ],
     }
 

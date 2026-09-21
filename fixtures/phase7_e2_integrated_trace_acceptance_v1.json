@@ -1,0 +1,50 @@
+{
+  "schema_version": "req2web.phase7.e2.integrated_trace_acceptance_spec.v1",
+  "status": "frozen_historical_secondary_analysis_no_action",
+  "analysis_role": "post_hoc_complete_family_exploratory",
+  "historical_sources": {
+    "local_observations_sha256": "sha256:1f12205b892d1798bcf1a0bacd069b3e6847fde8bbf1b8ee2de58cdafb3a048d",
+    "external_epsilon_observations_sha256": "sha256:2c87af6800ed7d2d5f81916bfde8b6f6c7010e8c5e2bb375d3e7574eae7d24da"
+  },
+  "selected_family": "inspector_trace_relation_removed",
+  "case_ids": [
+    "p7-e2-expense",
+    "p7-e2-enrollment",
+    "p7-e2-directory",
+    "p7-e2-review",
+    "p7-e2-notice",
+    "p7-e2-booking"
+  ],
+  "conditions": [
+    "C0",
+    "C1",
+    "C2",
+    "EVL-local",
+    "EVL-cross"
+  ],
+  "criteria": [
+    "trace_fault_detected",
+    "exact_trace_target_present",
+    "paired_clean_control_has_no_alarm"
+  ],
+  "scoring": {
+    "weights": "equal_one_per_criterion",
+    "criteria_per_case": 3,
+    "case_is_independent_unit": true,
+    "missing_or_invalid_row": "fail_closed_analysis_error",
+    "unknown_is_pass": false,
+    "case_omission_allowed": false
+  },
+  "primary_contrast": "C2_minus_EVL-local",
+  "required_disclosure": "EVL-cross uses experiment-authored Req2Web-equivalent cross-artifact constraints and ties C2",
+  "historical_interpretation": "bounded_integrated_trace_checking_advantage_observed_not_unique",
+  "prospective_confirmation": {
+    "minimum_new_unseen_case_count": 12,
+    "retain_all_three_criteria": true,
+    "retain_equivalent_external_cross_rule_condition": true,
+    "case_omission_allowed": false
+  },
+  "claim_boundary": "integrated_cross_artifact_trace_checking_advantage_over_integrity_and_intra_artifact_rules_not_unique_external_rule_expressiveness",
+  "runtime_action_authorized_by_this_file": false,
+  "historical_results_mutable": false
+}

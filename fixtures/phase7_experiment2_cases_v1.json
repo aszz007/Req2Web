@@ -1,0 +1,48 @@
+{
+  "cases": [
+    {
+      "case_id": "p7-e2-expense",
+      "constraints": ["Require a description and a positive amount", "Show saved expense details"],
+      "requirement": "Create a responsive expense-entry page that validates a description and positive amount, then shows the saved claim details.",
+      "target_device": "responsive web",
+      "task_type": "form"
+    },
+    {
+      "case_id": "p7-e2-enrollment",
+      "constraints": ["Filter courses by subject", "Show enrollment confirmation"],
+      "requirement": "Create a desktop course-enrollment page that filters available courses by subject and confirms enrollment in a selected course.",
+      "target_device": "desktop",
+      "task_type": "catalog"
+    },
+    {
+      "case_id": "p7-e2-directory",
+      "constraints": ["Search by employee name", "Filter by department", "Provide an empty state"],
+      "requirement": "Create a responsive employee directory with name search, department filtering, result cards, and a clear empty-result state.",
+      "target_device": "responsive web",
+      "task_type": "directory"
+    },
+    {
+      "case_id": "p7-e2-review",
+      "constraints": ["Show submitted and approved states", "Approve only after review starts"],
+      "requirement": "Create a desktop editorial-review board where submitted articles can enter review and then be approved in the required order.",
+      "target_device": "desktop",
+      "task_type": "workflow"
+    },
+    {
+      "case_id": "p7-e2-notice",
+      "constraints": ["Preserve title and body after a failed save", "Allow retry"],
+      "requirement": "Create a responsive notice editor with title and body fields, a visible simulated save failure, preserved input, and a retry action.",
+      "target_device": "responsive web",
+      "task_type": "form"
+    },
+    {
+      "case_id": "p7-e2-booking",
+      "constraints": ["Require room and date", "Preserve selections after a failed submission", "Show booking confirmation after retry"],
+      "requirement": "Create a mobile room-booking request page that validates room and date, preserves selections after a simulated submission failure, and supports retry.",
+      "target_device": "mobile",
+      "task_type": "booking"
+    }
+  ],
+  "experiment_id": "phase7-experiment2-v1",
+  "schema_version": "req2web.phase7_experiment2_cases.v1"
+}

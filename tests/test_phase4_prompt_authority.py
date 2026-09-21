@@ -23,6 +23,9 @@ from req2web_agent import (  # noqa: E402
     prompt_authority_manifest,
     validate_canonical_prompt,
 )
+from req2web_agent.prompt_authority import (  # noqa: E402
+    _historical_v17_linear_interaction_plan,
+)
 from req2web_runtime import (  # noqa: E402
     phase4_remote_qwen_fresh_integrated as historical_runtime,
 )
@@ -73,38 +76,13 @@ class Phase4PromptAuthorityTest(unittest.TestCase):
         f1_instructions = "\n".join(
             manifest["node_specific_instructions"]["F1"]
         )
-        self.assertIn(
-            "explicit button or action component",
-            f1_instructions,
-        )
-        self.assertIn(
-            "finalize the complete components array",
-            f1_instructions,
-        )
-        self.assertIn(
-            "place every component local_id exactly once",
-            f1_instructions,
-        )
-        self.assertIn(
-            "every submit, retry, and feedback component",
-            f1_instructions,
-        )
-        self.assertIn(
-            "concatenation of sections[].component_local_ids must exactly "
-            "equal the components array local_id order",
-            f1_instructions,
-        )
-        self.assertIn(
-            "dedicated advancement control",
-            f1_instructions,
-        )
-        self.assertIn(
-            "Proceed to Checkout",
-            f1_instructions,
-        )
-        self.assertIn(
-            "does not replace a dedicated control",
-            f1_instructions,
+        self.assertIn("Use primary_action", f1_instructions)
+        self.assertEqual(
+            manifest["output_contracts"]["F1"]["component_type_enum"],
+            [
+                "primary_action", "media_input", "search_input", "form",
+                "data_view", "location_picker", "status_panel",
+            ],
         )
         self.assertIn("required_f1_component_order", f2_instructions)
         self.assertIn("exact subsequence", f2_instructions)
@@ -120,6 +98,105 @@ class Phase4PromptAuthorityTest(unittest.TestCase):
             "across canonical use-case order",
             f4_invariants,
         )
+        self.assertIn(
+            "distinct internal microstate",
+            "\n".join(manifest["node_specific_instructions"]["F2"]),
+        )
+        self.assertIn(
+            "every explicitly required action",
+            "\n".join(manifest["node_specific_instructions"]["F3"]),
+        )
+        self.assertEqual(
+            manifest["revision"],
+            "negative_action_full_context_section_visibility_english_v21",
+        )
+        self.assertIn(
+            "filtering the complete components array from left to right",
+            f1_instructions,
+        )
+        self.assertIn(
+            "do not reinterpret that negative requirement as an enabled action",
+            f1_instructions,
+        )
+        self.assertIn(
+            "neutral workflow-actions or navigation section",
+            f1_instructions,
+        )
+        self.assertIn(
+            "emit no state-changing interaction",
+            "\n".join(manifest["node_specific_instructions"]["F3"]),
+        )
+
+    def test_public_requirement_literals_are_projected_with_context(self) -> None:
+        requirement = (
+            "The initial state is 'Ready'. 'Prepare transfer' keeps Ready "
+            "visible and enables 'Attempt'. 'Retry' is available only after "
+            "'Attempt failed'."
+        )
+        input_bytes = _canonical(
+            {
+                "schema_version": "test.input.v1",
+                "node_id": "F1",
+                "projection": {
+                    "canonical_b_requirement_view": {
+                        "requirement": requirement,
+                    }
+                },
+            }
+        )
+        value = validate_canonical_prompt(
+            build_canonical_f1_f4_prompt(
+                node_id="F1",
+                input_bytes=input_bytes,
+            ),
+            node_id="F1",
+            input_bytes=input_bytes,
+        )
+        self.assertEqual(
+            [row["literal"] for row in value["public_requirement_literal_contexts"]],
+            ["Ready", "Prepare transfer", "Attempt", "Retry", "Attempt failed"],
+        )
+        self.assertTrue(
+            all(row["left_context"] or row["right_context"] for row in value["public_requirement_literal_contexts"])
+        )
+        instructions = "\n".join(value["instructions"])
+        self.assertIn("one F1 component with one section owner", instructions)
+        self.assertIn("loss-prevention checklist", instructions)
+        self.assertIn("absent, disabled, unavailable", instructions)
+
+    def test_negative_terminal_action_keeps_its_prohibiting_context(self) -> None:
+        requirement = (
+            "The terminal state is 'Completed'. In that terminal state, "
+            "'Repeat' must be absent or disabled, or using it must leave one "
+            "completion unchanged rather than restarting or duplicating it."
+        )
+        input_bytes = _canonical(
+            {
+                "schema_version": "test.input.v1",
+                "node_id": "F1",
+                "projection": {
+                    "canonical_b_requirement_view": {
+                        "requirement": requirement,
+                    }
+                },
+            }
+        )
+        value = validate_canonical_prompt(
+            build_canonical_f1_f4_prompt(
+                node_id="F1",
+                input_bytes=input_bytes,
+            ),
+            node_id="F1",
+            input_bytes=input_bytes,
+        )
+        repeat = next(
+            row
+            for row in value["public_requirement_literal_contexts"]
+            if row["literal"] == "Repeat"
+        )
+        context = f"{repeat['left_context']} {repeat['right_context']}"
+        self.assertIn("absent or disabled", context)
+        self.assertIn("unchanged rather than restarting", context)
 
     def test_f2_prompt_exposes_one_required_f1_component_order(self) -> None:
         input_bytes = _canonical(
@@ -184,11 +261,8 @@ class Phase4PromptAuthorityTest(unittest.TestCase):
             "Never regroup components by section",
             instructions,
         )
-        self.assertIn(
-            "emit both a separate error state",
-            instructions,
-        )
-        self.assertIn("error state must not be the final state", instructions)
+        self.assertIn("actual initial workflow state first", instructions)
+        self.assertIn("including distinct branches, errors and recovery", instructions)
         self.assertIn(
             "position numbers in each emitted visible_component_local_ids "
             "array must be strictly increasing",
@@ -259,29 +333,12 @@ class Phase4PromptAuthorityTest(unittest.TestCase):
             ],
         )
         instructions = "\n".join(value["instructions"])
-        self.assertIn(
-            "successful recovery must target the later non-error state",
-            instructions,
-        )
-        self.assertIn(
-            "never represent successful recovery as a self-loop",
-            instructions,
-        )
-        self.assertIn(
-            "choose distinct visible trigger components",
-            instructions,
-        )
-        self.assertIn(
-            "absent from that exact source-state list",
-            instructions,
-        )
-        self.assertIn(
-            "required_trigger_component_local_id",
-            instructions,
-        )
+        self.assertIn("transitions from the public requirement", instructions)
+        self.assertIn("capability boundary only", instructions)
+        self.assertIn("source/trigger pair must be unique", instructions)
 
     def test_shared_f3_plan_assigns_distinct_exact_triggers(self) -> None:
-        plan = build_canonical_f3_interaction_plan(
+        plan = _historical_v17_linear_interaction_plan(
             f1_registered_structure_view={
                 "components": [
                     {
@@ -359,7 +416,7 @@ class Phase4PromptAuthorityTest(unittest.TestCase):
     def test_shared_f3_plan_uses_one_forward_row_for_one_visible_non_final_state(
         self,
     ) -> None:
-        plan = build_canonical_f3_interaction_plan(
+        plan = _historical_v17_linear_interaction_plan(
             f1_registered_structure_view={
                 "components": [
                     {
@@ -437,7 +494,7 @@ class Phase4PromptAuthorityTest(unittest.TestCase):
             PromptAuthorityError,
             "visibility is invalid",
         ):
-            build_canonical_f3_interaction_plan(
+            _historical_v17_linear_interaction_plan(
                 f1_registered_structure_view={
                     "components": [
                         {
@@ -463,7 +520,7 @@ class Phase4PromptAuthorityTest(unittest.TestCase):
     def test_shared_f3_plan_does_not_treat_active_validation_as_error(
         self,
     ) -> None:
-        plan = build_canonical_f3_interaction_plan(
+        plan = _historical_v17_linear_interaction_plan(
             f1_registered_structure_view={
                 "components": [
                     {

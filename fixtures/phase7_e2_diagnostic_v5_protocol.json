@@ -1,0 +1,54 @@
+{
+  "schema_version": "req2web.phase7.e2_protocol.v5",
+  "status": "local_candidate_no_execution",
+  "source_development_result": "req2web.phase7.e2_runtime_result.v4",
+  "preserved": {
+    "public_manifest_sha256": "824f0d119f3ad5ac25e9579e4ae8eccd51a55845a790695001c3753ebec40574",
+    "model_id": "Qwen/Qwen3.5-9B",
+    "model_revision": "c202236235762e1c871ad0ccb60c8ee5ba337b9a",
+    "reads_per_session": 5,
+    "provider_turns_per_session": 6,
+    "input_tokens_per_session": 12000,
+    "output_tokens_per_reply": 2048,
+    "session_seconds": 120,
+    "automatic_retries": 0,
+    "scoring_semantics": "unchanged_v3_complete_supported_diagnosis",
+    "acceptance_thresholds": "unchanged_trace_navigation_v1"
+  },
+  "treatment": {
+    "arm_a": "raw_artifacts_only",
+    "arm_b": "raw_artifacts_plus_exactly_one_agent_selected_grounded_trace_lookup",
+    "mandatory_after_first_grounded_index_entity": true,
+    "final_before_successful_lookup_allowed": false,
+    "second_trace_lookup_allowed": false,
+    "host_selects_entity": false,
+    "verdict_or_gold_exposed": false
+  },
+  "wire_protocol": {
+    "actions": ["read", "trace_lookup", "final"],
+    "direct_trace_index_read_allowed": false,
+    "final": {
+      "shape": {
+        "action": "final",
+        "status": "fault",
+        "origins": ["artifact.json::/path/to/origin"],
+        "use_cases": ["EXACT-USE-CASE-ID"],
+        "edge_from": ["artifact.json::/path/to/source"],
+        "edge_to": ["other.json::/path/to/target"],
+        "uncertainty": "concise"
+      },
+      "example_values_are_non_packet_placeholders": true,
+      "translation": "strict_pairwise_parallel_endpoint_translation_to_v3_answer",
+      "malformed_json_repair_allowed": false,
+      "heuristic_normalization_allowed": false,
+      "same_for_both_arms": true
+    }
+  },
+  "execution_authority": {
+    "model_load_authorized": false,
+    "gpu_authorized": false,
+    "remote_action_authorized": false,
+    "development_run_authorized": false,
+    "measured_run_authorized": false
+  }
+}

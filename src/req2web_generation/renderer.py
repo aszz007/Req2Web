@@ -7,18 +7,10 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from .schema import PAGE_SPEC_SCHEMA_VERSION, ComponentSpec, PageSpec
+from req2web_capabilities import SUPPORTED_COMPONENT_TYPES
 
 
 RENDER_MANIFEST_SCHEMA_VERSION = "req2web.render_manifest.v1"
-SUPPORTED_COMPONENT_TYPES = (
-    "primary_action",
-    "media_input",
-    "search_input",
-    "form",
-    "data_view",
-    "location_picker",
-    "status_panel",
-)
 
 
 @dataclass(frozen=True)
@@ -382,12 +374,38 @@ function applyState(stateId, message) {{
   const visible = new Set(state.visible_component_ids);
   document.querySelectorAll("[data-component-id]").forEach((element) => {{
     element.hidden = !visible.has(element.dataset.componentId);
+    const enabled = PAGE_DATA.interactions.some((interaction) =>
+      interaction.source_state_id === stateId &&
+      interaction.trigger_component_id === element.dataset.componentId);
+    element.querySelectorAll("[data-interaction-trigger], button[type=submit]").forEach((control) => {{
+      control.disabled = !enabled;
+    }});
+    element.querySelectorAll(".action-feedback").forEach((feedback) => {{
+      feedback.textContent = "";
+      delete feedback.dataset.interactionId;
+    }});
+    element.querySelectorAll(".component-feedback").forEach((feedback) => {{
+      feedback.textContent = feedback.dataset.defaultFeedback || "";
+      delete feedback.dataset.interactionId;
+    }});
+  }});
+  document.querySelectorAll("[data-section-id]").forEach((section) => {{
+    const components = Array.from(
+      section.querySelectorAll("[data-component-id]"),
+    );
+    section.hidden = !components.some((component) => !component.hidden);
   }});
 }}
 
 function runInteraction(interaction) {{
-  updateFeedback(interaction);
+  const state = statesById.get(currentStateId);
+  if (interaction.source_state_id !== currentStateId ||
+      !state.visible_component_ids.includes(interaction.trigger_component_id)) {{
+    return false;
+  }}
   applyState(interaction.target_state_id, interaction.user_feedback);
+  updateFeedback(interaction);
+  return true;
 }}
 
 function runForComponent(componentId) {{
@@ -395,8 +413,7 @@ function runForComponent(componentId) {{
     (interaction) => interaction.trigger_component_id === componentId,
   );
   const interaction =
-    candidates.find((candidate) => candidate.source_state_id === currentStateId) ||
-    candidates[0];
+    candidates.find((candidate) => candidate.source_state_id === currentStateId);
   if (interaction) {{
     runInteraction(interaction);
   }}
@@ -433,7 +450,6 @@ document.addEventListener("submit", (event) => {{
       inlineFeedback.textContent = "Enter the required information before submitting.";
     }}
     requiredInput.focus();
-    runForComponent(form.dataset.interactionForm);
     return;
   }}
   if (requiredInput) {{

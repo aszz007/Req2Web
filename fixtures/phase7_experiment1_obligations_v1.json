@@ -1,0 +1,20 @@
+{
+  "schema_version": "req2web.phase7.experiment1.obligations.v1",
+  "evaluator_only": true,
+  "labels": ["pass", "fail", "unknown", "not_supported"],
+  "limits": {"max_actions_per_obligation": 12, "max_seconds_per_obligation": 90, "reset_before_each_obligation": true},
+  "cases": {
+    "p7-e1-expense-entry":["reject_missing_description","reject_non_positive_amount","save_valid_claim_with_entered_values","correct_invalid_input_and_save_without_reload"],
+    "p7-e1-workshop-enrollment":["require_name","reject_malformed_email","confirm_selected_session_and_name","correct_invalid_email_and_complete"],
+    "p7-e1-maintenance-ticket":["require_location","require_description","show_submitted_category_location_description","recover_from_validation_error_to_success"],
+    "p7-e1-room-directory":["show_declared_records","capacity_filter_changes_matches","combined_filters_show_meaningful_empty_state","reset_restores_all_records"],
+    "p7-e1-supply-catalogue":["show_declared_records","name_search_narrows_records","category_and_search_combine","clear_no_match_search_restores_records"],
+    "p7-e1-course-directory":["show_declared_courses","subject_filter_works","delivery_mode_further_narrows","reset_empty_combination_restores_records"],
+    "p7-e1-editorial-review":["show_both_articles_and_statuses","start_review_for_one_article","approve_only_after_review","other_article_unchanged"],
+    "p7-e1-parcel-handover":["show_both_parcels_and_statuses","mark_one_ready","collect_through_ordered_workflow","other_parcel_unchanged"],
+    "p7-e1-volunteer-assignment":["show_both_tasks","assign_named_volunteer_to_one","complete_assigned_task","reopen_without_changing_other"],
+    "p7-e1-draft-notice":["enter_title_and_body","first_save_shows_failure","failure_preserves_entered_values","retry_shows_saved_title_and_body"],
+    "p7-e1-booking-request":["require_room_and_date","first_valid_submit_shows_failure","failure_preserves_room_and_date","retry_confirms_matching_booking"],
+    "p7-e1-bulk-tag-edit":["select_two_leave_one_unselected","first_apply_reports_failure","failure_changes_no_tags","retry_updates_only_selected_records"]
+  }
+}

@@ -278,6 +278,13 @@ def _normalize(text: str) -> str:
     return re.sub(r"\s+", " ", text).strip()
 
 
+def _keyword_present(text: str, keyword: str) -> bool:
+    """Match English words, not accidental substrings such as order/ordered."""
+    if re.fullmatch(r"[a-zA-Z0-9 _-]+", keyword):
+        return re.search(r"(?<!\w)" + re.escape(keyword) + r"(?!\w)", text) is not None
+    return keyword in text
+
+
 def _infer(
     value: str,
     rules: tuple[tuple[str, tuple[str, ...]], ...],
@@ -285,7 +292,7 @@ def _infer(
 ) -> str:
     lowered = f" {value.casefold()} "
     for label, keywords in rules:
-        if any(keyword in lowered for keyword in keywords):
+        if any(_keyword_present(lowered, keyword) for keyword in keywords):
             return label
     return fallback
 
@@ -305,7 +312,7 @@ def _build_use_cases(requirement: str) -> list[UseCase]:
     lowered = requirement.casefold()
     selected: list[tuple[str, str]] = []
     for title, keywords, outcome in FEATURE_RULES:
-        if any(keyword in lowered for keyword in keywords):
+        if any(_keyword_present(lowered, keyword) for keyword in keywords):
             selected.append((title, outcome))
         if len(selected) == 4:
             break

@@ -1,0 +1,72 @@
+{
+  "schema_version": "req2web.phase7.e2.trace_navigation_acceptance_spec.v1",
+  "status": "local_strategy_frozen_no_action",
+  "analysis_role": "historical_structural_context_plus_prospective_paired_agent_acceptance",
+  "historical_sources": {
+    "local_comparison_summary_sha256": "sha256:a2c96d242728a91c12d5598cb71e5537503f0872d03bbdfaaf8e9e70e96c179b",
+    "external_epsilon_summary_sha256": "sha256:b834ca225fcd58efc7362e9f2c89bae76fee320c068684e7ebb93d2f820e8e04"
+  },
+  "diagnostic_protocol": {
+    "public_manifest_sha256": "sha256:824f0d119f3ad5ac25e9579e4ae8eccd51a55845a790695001c3753ebec40574",
+    "private_gold_sha256": "sha256:779f1e7bc054c0105689957256423179d37552a414c2a77ebdc1c500408087e5",
+    "paired_conditions": {
+      "A": "same diagnostic agent with raw artifacts only",
+      "B": "same diagnostic agent with identical raw artifacts plus a verdict-free exact source-occurrence index"
+    },
+    "development_sessions": 4,
+    "measured_sessions": 40,
+    "measured_packet_pairs": 20,
+    "automatic_retry_count": 0
+  },
+  "development_gate": {
+    "purpose": "protocol_and_manipulation_check_only_not_threshold_tuning",
+    "all_four_sessions_required": true,
+    "invalid_or_missing_sessions_allowed": 0,
+    "minimum_grounded_exact_index_lookups_in_eligible_b_sessions": 1,
+    "measured_run_allowed_after_failure": false
+  },
+  "measured_acceptance": {
+    "primary_population": "all 12 measured packet pairs in wrong_relation, stale_revision, and two_defects",
+    "primary_metric": "paired_complete_supported_diagnosis",
+    "complete_supported_diagnosis_definition": "exact status, exact origin set, every required raw-evidence group supported, no unsupported evidence edge, and all cited pointers resolvable",
+    "minimum_net_additional_complete_trace_packets_for_b": 3,
+    "minimum_b_only_trace_packet_wins": 3,
+    "maximum_trace_lookup_protocol_violations": 0,
+    "minimum_grounded_index_lookup_rate_in_index_eligible_b_trace_sessions": 0.5,
+    "index_eligible_families": [
+      "wrong_relation",
+      "two_defects"
+    ],
+    "clean_false_alarms_b_must_not_exceed_a": true,
+    "maximum_clean_false_alarms_b": 0,
+    "invalid_or_noncompleted_sessions_b_must_not_exceed_a": true,
+    "maximum_invalid_or_noncompleted_sessions_per_arm": 2,
+    "missing_pairs_allowed": 0,
+    "unknown_or_unsupported_is_never_a_pass": true
+  },
+  "secondary_metrics": [
+    "micro_exact_origin_recall",
+    "micro_required_evidence_group_recall",
+    "all_family_complete_supported_diagnosis",
+    "clean_correct_no_fault_rate",
+    "total_reads",
+    "raw_artifact_reads",
+    "index_reads",
+    "provider_turns",
+    "input_tokens",
+    "elapsed_seconds"
+  ],
+  "efficiency_label_rule": {
+    "requires_primary_acceptance": true,
+    "b_mean_raw_artifact_reads_must_not_exceed_a": true,
+    "b_mean_total_reads_may_exceed_a_by_at_most": 1.0
+  },
+  "reporting": {
+    "case_cluster_is_primary_independent_unit": true,
+    "inferential_superiority_claim_allowed": false,
+    "external_equivalence_must_be_disclosed": true,
+    "singleton_candidate_count_is_not_primary": true,
+    "all_families_and_failures_must_be_reported": true
+  },
+  "claim_boundary": "bounded_source_grounded_trace_navigation_assistance_only_not_general_root_cause_or_external_tool_superiority"
+}

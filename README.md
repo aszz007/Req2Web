@@ -41,6 +41,33 @@ packages without rewriting that history; objective Chrome and PageSpec checks
 passed 12/12 with 36 recorded interactions and no console or page errors; the
 separate semantic sidecar accepted 12/12 rows and supported 24/24 criteria.
 
+## Phase 7 exploratory tool-effectiveness evidence
+
+The completed Phase 7 experiments add two bounded comparisons without changing
+the earlier frozen evidence:
+
+- In three ordered-decision workflows, Req2Web passed 16/18 browser-behavior
+  obligations, compared with 8/18 for direct HTML generation and 5/18 for a
+  structured one-call baseline. The paired value is `p=0.25`, so this is an
+  exploratory workflow-specific advantage rather than a general superiority
+  claim.
+- In six controlled cross-artifact trace cases, the integrated Req2Web check
+  passed 18/18 criteria, compared with 6/18 for integrity/intra-artifact checks
+  and the executed EVL-local condition. EVL-cross also passed 18/18 after
+  equivalent cross-artifact rules were authored, showing that Req2Web's benefit
+  is native integration rather than unique external-rule expressiveness.
+
+Start with the concise status and method documents:
+
+- [`docs/phase7_experiment_execution_status.md`](docs/phase7_experiment_execution_status.md)
+- [`docs/phase7_e1_ordered_decision_acceptance_strategy.md`](docs/phase7_e1_ordered_decision_acceptance_strategy.md)
+- [`docs/phase7_e2_integrated_trace_acceptance_strategy.md`](docs/phase7_e2_integrated_trace_acceptance_strategy.md)
+- [`docs/phase7_demo_video_production_plan.md`](docs/phase7_demo_video_production_plan.md)
+
+The experiment phase is closed. These results do not establish formal H1/gold
+quality, general web-generation superiority, a user study, or production
+readiness.
+
 ## Start the Inspector
 
 For a clean GitHub checkout or a hosted maintenance environment, start the
@@ -132,6 +159,10 @@ and user studies are not part of the completed engineering evidence.
   authorities.
 - `docs/phase6_release_foundation.md`: final Inspector behavior and runtime
   commands.
+- `docs/phase7_experiment_execution_status.md`: frozen Phase 7 experiment
+  results and limitations.
+- `docs/phase7_demo_video_production_plan.md`: the current ICSE demonstration
+  video storyboard and production workflow.
 - `docs/dataset_selection_workflow.md`: dataset screening and corpus lineage.
 - `docs/repository_hygiene_checklist.md`: current local and Git maintenance
   boundary.

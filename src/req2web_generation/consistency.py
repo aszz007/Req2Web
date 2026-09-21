@@ -1490,10 +1490,10 @@ class MinimalConsistencyChecker:
         for component in page_spec.components:
             if component.component_type not in SUPPORTED_COMPONENT_TYPES:
                 add(
-                    f"warning.fallback-component:{component.component_id}",
+                    f"error.unsupported-component:{component.component_id}",
                     "capability_boundary",
-                    "warning",
-                    f"Component {component.component_id} uses the visible generic fallback renderer.",
+                    "fail",
+                    f"Component {component.component_id} has no executable renderer; generic fallback is not executable delivery.",
                     [component.component_id, component.component_type],
                 )
 

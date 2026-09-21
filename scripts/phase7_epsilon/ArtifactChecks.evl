@@ -1,0 +1,34 @@
+// Author-supplied domain constraints executed by unmodified Eclipse Epsilon.
+// No Req2Web detector verdicts, mutation labels, fixes, or model calls.
+context M!t_binding {
+    constraint DeclaredDigestMatches {
+        check : self.a_declared = self.a_computed
+        message : 'file|' + self.a_target
+    }
+}
+context M!t_ref {
+    constraint LocalReferenceResolves {
+        check : M!t_entity.all.exists(e | e.a_scope = self.a_scope and e.a_kind = self.a_kind and e.a_key = self.a_target)
+        message : 'entity|' + self.a_target
+    }
+}
+context M!t_entity {
+    constraint UniqueLocalIdentity {
+        check : M!t_entity.all.select(e | e.a_scope = self.a_scope and e.a_kind = self.a_kind and e.a_key = self.a_key).size() = 1
+        message : 'entity|' + self.a_key
+    }
+}
+context M!t_component {
+    constraint ComponentPresentInRenderedDOM {
+        guard : crossArtifact
+        check : M!t_dom.all.exists(e | e.a_key = self.a_key)
+        message : 'entity|' + self.a_key
+    }
+}
+context M!t_affected {
+    constraint DecisionFieldHasInspectorRelation {
+        guard : crossArtifact
+        check : M!t_link.all.exists(e | e.a_decision = self.a_decision and e.a_entity = self.a_entity and e.a_field = self.a_field)
+        message : 'relation|' + self.a_decision + '|' + self.a_entity + '|' + self.a_field
+    }
+}
