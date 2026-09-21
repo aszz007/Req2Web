@@ -1,0 +1,8 @@
+# Canonical lightweight development environment.
+#
+# This installs the pinned data stack and the tested LangGraph dependency
+# closure. GPU/model packages and browser binaries remain platform-specific and
+# are documented separately in docs/dependency_management.md.
+
+-r requirements-data.txt
+-r requirements-phase4-agent-lock.txt

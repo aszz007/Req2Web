@@ -25,6 +25,7 @@ ROOT_FILES = (
     ".gitignore",
     "CONTRIBUTING.md",
     "README.md",
+    "requirements.txt",
     "requirements-data.txt",
     "requirements-phase4-agent-lock.txt",
     "requirements-phase4-agent.txt",

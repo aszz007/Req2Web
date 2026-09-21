@@ -70,6 +70,17 @@ readiness.
 
 ## Start the Inspector
 
+Create a Python 3.12 virtual environment and install the canonical lightweight
+dependency set:
+
+```bash
+python -m pip install -r requirements.txt
+```
+
+The individual data and Agent lock files remain available for specialized
+environments. Their roles and update rules are documented in
+[`docs/dependency_management.md`](docs/dependency_management.md).
+
 For a clean GitHub checkout or a hosted maintenance environment, start the
 tracked model-free surface without historical replay:
 
@@ -163,6 +174,8 @@ and user studies are not part of the completed engineering evidence.
   results and limitations.
 - `docs/phase7_demo_video_production_plan.md`: the current ICSE demonstration
   video storyboard and production workflow.
+- `docs/dependency_management.md`: canonical installation entry point and the
+  purpose of each requirement layer.
 - `docs/dataset_selection_workflow.md`: dataset screening and corpus lineage.
 - `docs/repository_hygiene_checklist.md`: current local and Git maintenance
   boundary.

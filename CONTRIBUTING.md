@@ -12,14 +12,17 @@ Use Python 3.12 from a clean checkout:
 ```bash
 python -m venv .venv
 . .venv/bin/activate
-python -m pip install -r requirements-data.txt
-python -m pip install -r requirements-phase4-agent-lock.txt
+python -m pip install -r requirements.txt
 python scripts/run_req2web_inspector.py --repository-demo --port 8765
 ```
 
 Repository demo mode is the portable, model-free development surface. It must
 work without model weights, API credentials, historical run bundles, or a
 sibling local-data directory.
+
+The dependency files are layered intentionally. See
+`docs/dependency_management.md` before changing package pins or the
+receipt-bound Phase 4 direct declaration.
 
 ## Change scope
 
