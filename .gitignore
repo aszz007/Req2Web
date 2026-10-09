@@ -2,6 +2,9 @@
 !/.github/
 # Local development environments
 .venv/
+/.venv-*/
+/.tox/
+/.nox/
 node_modules/
 
 # Python caches and local secrets
@@ -10,6 +13,13 @@ __pycache__/
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
+/.coverage
+/.coverage.*
+/coverage.xml
+/htmlcov/
+/build/
+/dist/
+*.egg-info/
 .env
 .env.*
 !.env.example

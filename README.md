@@ -77,8 +77,10 @@ dependency set:
 python -m pip install -r requirements.txt
 ```
 
-The individual data and Agent lock files remain available for specialized
-environments. Their roles and update rules are documented in
+Install this entry point only; do not install all four requirements files in
+sequence. It already includes the data stack and the Agent lock. The one-line
+Phase 4 declaration is retained for runtime provenance, not a second setup
+step. File roles and update rules are documented in
 [`docs/dependency_management.md`](docs/dependency_management.md).
 
 For a clean GitHub checkout or a hosted maintenance environment, start the

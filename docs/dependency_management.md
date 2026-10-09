@@ -11,6 +11,14 @@ python -m pip install -r requirements.txt
 
 This entry point is sufficient for the model-free Inspector, deterministic
 framework code, data utilities, and the local LangGraph orchestration layer.
+Do not install the four requirements files sequentially: the root entry point
+already includes both installable layers.
+
+For data-screening utilities alone, install `requirements-data.txt`. For an
+Agent-only environment, install `requirements-phase4-agent-lock.txt`. Neither
+specialized choice replaces the full lightweight Inspector setup. The direct
+`requirements-phase4-agent.txt` declaration is not an additional installation
+step; installing it alone lets pip resolve a different transitive closure.
 
 ## File roles
 
@@ -25,6 +33,27 @@ The direct declaration and lock file intentionally coexist. The first records
 the single dependency requested by the architecture. The second records the
 complete resolved environment used by runtime integrity checks and historical
 experiments.
+
+## Why the four files are retained
+
+The hygiene review on 2026-10-10 found no unused requirements file. The root
+file contains includes only, and the two included layers have no duplicate
+distribution pins. The apparent repetition of `langgraph` in the direct
+declaration and lock is intentional: the declaration's path and canonical
+bytes are checked against the acquisition receipt, while the lock must match
+that receipt's complete resolved closure. Bundle builders and startup tests
+also consume these paths. Deleting or relocating them would change setup or
+reproduction behavior, rather than merely removing clutter.
+
+Keep their paths and bytes unchanged during ordinary hygiene. Package updates
+remain a separate reviewed change. The model-free dependency hygiene tests
+check the include-only entry point, unique pins, declaration identity, and
+local-artifact exclusions; the Inspector startup tests check the lock against
+the receipt. These static checks do not prove a fresh installation succeeds.
+
+Parallel environments such as `.venv-rebuild`, root build/coverage output, and
+Python package metadata are ignored. Ignore rules prevent accidental staging;
+they do not delete existing environments, evidence, or security backups.
 
 ## Optional platform-specific layers
 
@@ -41,7 +70,8 @@ The canonical file deliberately excludes large or task-specific dependencies:
   not Python runtime dependencies.
 
 The tested local versions and the parallel environment rebuild procedure are
-recorded in `local_environment_rebuild.md`. Do not add GPU packages to the
+recorded in [`local_environment_rebuild.md`](local_environment_rebuild.md).
+Do not add GPU packages to the
 lightweight root file, because a platform-neutral `pip install -r
 requirements.txt` must not unexpectedly download multi-gigabyte model
 runtimes.
