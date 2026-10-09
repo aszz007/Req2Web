@@ -1,0 +1,7 @@
+cff-version: 1.2.0
+message: "Please cite the accompanying Req2Web paper when available, or this software."
+title: Req2Web
+type: software
+authors:
+  - name: Req2Web contributors
+license: Apache-2.0

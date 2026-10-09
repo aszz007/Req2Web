@@ -39,6 +39,7 @@ service-account*.json
 
 # Raw datasets and downloaded archives stay local
 data/raw/
+/data/public_demo_index/
 *.zip
 *.tar
 *.tar.gz

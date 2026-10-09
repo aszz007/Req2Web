@@ -6,12 +6,14 @@ semantic requirement assistant, the canonical B-to-F1-F4 Agent chain, PageSpec
 assembly, deterministic rendering, browser checks, semantic acceptance, and
 evidence packaging behind one local Inspector.
 
-> **Release status:** This repository is still private and pre-release. No
-> software or data license has been selected, so the tracked content is not yet
-> authorized for public redistribution. Internal provenance remains temporarily
+> **Release status:** This repository is still private and pre-release. The
+> project-authored software uses Apache-2.0, but external datasets are not
+> relicensed and the full tracked tree is not approved for public redistribution.
+> Internal provenance remains temporarily
 > tracked during preparation; see
 > [`docs/open_source_readiness.md`](docs/open_source_readiness.md) for the public
-> inventory, removal ledger, and release gates.
+> inventory, removal ledger, and release gates. License scope is defined in
+> [LICENSING.md](LICENSING.md).
 
 The workspace directory may remain named `CrowdMEP`; the project and public
 tool name is Req2Web.
@@ -94,6 +96,20 @@ This mode accepts requirements, creates deterministic drafts and ResultPackage
 ZIPs, imports validated packages, and keeps local run history. Replay-only
 sections stay hidden so generated examples cannot be mistaken for the frozen
 publication evidence.
+
+A separate five-record, project-authored portability example is available when
+the historical corpus is intentionally excluded:
+
+```bash
+python scripts/build_public_demo_index.py
+python scripts/run_req2web_inspector.py --repository-demo --index-dir data/public_demo_index
+```
+
+This explicitly selected synthetic index is not a replacement for the frozen
+283-record corpus, regression set, or E1/E2 data. It supplies no quality result.
+Existing indexes are not overwritten. Inspector previews now use response-level
+origin isolation; see [SECURITY.md](SECURITY.md) for supported local interactions
+and intentionally blocked backend/storage/network behavior.
 
 The precomputed replay is local evidence and is intentionally not tracked in
 Git. By default it is read from the sibling directory

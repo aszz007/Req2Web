@@ -70,6 +70,17 @@ _CURRENT_UI_ASSETS = {
     "/app.js": ("text/javascript; charset=utf-8", _APP_JS),
 }
 
+# ResultPackage integrity is not a trust decision about its JavaScript. This
+# response-level sandbox also applies when a preview is opened in a new tab.
+# Do not add allow-same-origin: previews must not inherit Inspector API access.
+_ARTIFACT_CSP = (
+    "sandbox allow-scripts allow-forms; "
+    "default-src 'none'; script-src 'self' 'unsafe-inline'; "
+    "style-src 'self' 'unsafe-inline'; img-src 'self' data:; "
+    "connect-src 'none'; object-src 'none'; frame-src 'none'; "
+    "worker-src 'none'; base-uri 'none'; form-action 'none'"
+)
+
 
 def _startup_preflight(args: argparse.Namespace) -> dict[str, object]:
     """Check the selected local runtime without loading a model or calling a service."""
@@ -204,11 +215,18 @@ class _InspectorHandler(SimpleHTTPRequestHandler):
     model_dispatch_lock = threading.Lock()
     live_drafts_enabled = False
     precomputed_replay_available = True
+    _artifact_response = False
 
     def end_headers(self) -> None:
         self.send_header("X-Content-Type-Options", "nosniff")
         self.send_header("Referrer-Policy", "no-referrer")
         self.send_header("Cache-Control", "no-store")
+        if self._artifact_response:
+            self.send_header("Content-Security-Policy", _ARTIFACT_CSP)
+            self.send_header(
+                "Permissions-Policy",
+                "camera=(), microphone=(), geolocation=(), payment=()",
+            )
         super().end_headers()
 
     def log_message(self, format: str, *args: object) -> None:
@@ -228,14 +246,16 @@ class _InspectorHandler(SimpleHTTPRequestHandler):
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(content)))
         self.end_headers()
-        self.wfile.write(content)
+        if self.command != "HEAD":
+            self.wfile.write(content)
 
     def _asset_response(self, content_type: str, content: bytes) -> None:
         self.send_response(200)
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(content)))
         self.end_headers()
-        self.wfile.write(content)
+        if self.command != "HEAD":
+            self.wfile.write(content)
 
     def _error(self, status: int, exc: Exception) -> None:
         self._json_response(
@@ -311,6 +331,7 @@ class _InspectorHandler(SimpleHTTPRequestHandler):
 
     def _send_file(self, path: Path, *, download_name: str | None = None) -> None:
         content = path.read_bytes()
+        self._artifact_response = True
         content_type = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
         self.send_response(200)
         self.send_header("Content-Type", content_type)
@@ -321,7 +342,8 @@ class _InspectorHandler(SimpleHTTPRequestHandler):
                 f'attachment; filename="{download_name}"',
             )
         self.end_headers()
-        self.wfile.write(content)
+        if self.command != "HEAD":
+            self.wfile.write(content)
 
     def _api_get(self, path: str) -> bool:
         if path == "/api/capabilities":
@@ -396,6 +418,7 @@ class _InspectorHandler(SimpleHTTPRequestHandler):
         return False
 
     def do_GET(self) -> None:
+        self._artifact_response = False
         path = unquote(urlsplit(self.path).path)
         current_asset = _CURRENT_UI_ASSETS.get(path)
         if current_asset is not None:
@@ -409,7 +432,16 @@ class _InspectorHandler(SimpleHTTPRequestHandler):
             except (OSError, ValueError, json.JSONDecodeError) as exc:
                 self._error(404, exc)
             return
-        super().do_GET()
+        # Historical replay files are artifacts too, not privileged UI assets.
+        self._artifact_response = True
+        if self.command == "HEAD":
+            super().do_HEAD()
+        else:
+            super().do_GET()
+
+    def do_HEAD(self) -> None:
+        # Use the same routing and isolation policy as GET, without a body.
+        self.do_GET()
 
     def _read_body(self, *, maximum: int, allowed_content_types: tuple[str, ...]) -> bytes:
         content_type = self.headers.get("Content-Type", "")
