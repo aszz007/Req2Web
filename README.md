@@ -1,211 +1,103 @@
 # Req2Web
 
-Req2Web turns a vague software requirement into a traceable frontend prototype
-and a reviewable ResultPackage. The project combines retrieval, an optional
-semantic requirement assistant, the canonical B-to-F1-F4 Agent chain, PageSpec
-assembly, deterministic rendering, browser checks, semantic acceptance, and
-evidence packaging behind one local Inspector.
+Req2Web is a research prototype that turns requirements into traceable web
+prototypes. It connects requirement processing, retrieval, structured page
+contracts, rendering, consistency checks, acceptance evidence, and delivery.
+The Inspector lets users inspect these artifacts and their relationships.
 
-> **Release status:** This repository is still private and pre-release. The
-> project-authored software uses Apache-2.0, but external datasets are not
-> relicensed and the full tracked tree is not approved for public redistribution.
-> Internal provenance remains temporarily
-> tracked during preparation; see
-> [`docs/open_source_readiness.md`](docs/open_source_readiness.md) for the public
-> inventory, removal ledger, and release gates. License scope is defined in
-> [LICENSING.md](LICENSING.md).
+This distribution retains the development commit history with private and
+unapproved material excluded. It includes current and historical project
+source, experiment-method definitions, and selected technical documentation.
+It is not a complete dataset, model-weight, or historical-result release.
 
-The workspace directory may remain named `CrowdMEP`; the project and public
-tool name is Req2Web.
+## Quick start: model-free demo
 
-## Current capabilities
-
-- Accept a free-form requirement, infer basic device and task information, and
-  create a model-free deterministic draft.
-- Optionally run one advisory-only local Qwen requirement-assistance call. Its
-  suggestions never rewrite canonical B or enter F1-F4 automatically.
-- Explicitly run the existing canonical local-model flow from canonical B
-  through F1-F4, PageSpec, rendering, delivery, browser evidence, and semantic
-  evidence. The Inspector does not implement a second prompt or Agent loop.
-- Import an existing ResultPackage v1/v2 ZIP with bounded path, size, schema,
-  inventory, identity, and hash validation.
-- Replay twelve frozen English publication rows without a GPU or hidden model
-  call, inspect every intermediate artifact, and open the generated page.
-- Compare BM25, RRF, and TF-IDF retrieval using the frozen method-blind pool and
-  the owner-reviewed 420 relevance judgments. This remains secondary
-  exploratory evidence and does not change the active TF-IDF default.
-- Optionally prepare or import a GUISpector sidecar. It is disabled by default
-  and cannot change canonical Req2Web acceptance or delivery facts.
-
-The frozen publication evidence keeps separate ledgers: historical downstream
-first-pass delivery is 9/12; zero-model policy replay provides 12/12 deliverable
-packages without rewriting that history; objective Chrome and PageSpec checks
-passed 12/12 with 36 recorded interactions and no console or page errors; the
-separate semantic sidecar accepted 12/12 rows and supported 24/24 criteria.
-
-## Phase 7 exploratory tool-effectiveness evidence
-
-The completed Phase 7 experiments add two bounded comparisons without changing
-the earlier frozen evidence:
-
-- In three ordered-decision workflows, Req2Web passed 16/18 browser-behavior
-  obligations, compared with 8/18 for direct HTML generation and 5/18 for a
-  structured one-call baseline. The paired value is `p=0.25`, so this is an
-  exploratory workflow-specific advantage rather than a general superiority
-  claim.
-- In six controlled cross-artifact trace cases, the integrated Req2Web check
-  passed 18/18 criteria, compared with 6/18 for integrity/intra-artifact checks
-  and the executed EVL-local condition. EVL-cross also passed 18/18 after
-  equivalent cross-artifact rules were authored, showing that Req2Web's benefit
-  is native integration rather than unique external-rule expressiveness.
-
-Start with the concise status and method documents:
-
-- [`docs/phase7_experiment_execution_status.md`](docs/phase7_experiment_execution_status.md)
-- [`docs/phase7_e1_ordered_decision_acceptance_strategy.md`](docs/phase7_e1_ordered_decision_acceptance_strategy.md)
-- [`docs/phase7_e2_integrated_trace_acceptance_strategy.md`](docs/phase7_e2_integrated_trace_acceptance_strategy.md)
-- [`docs/phase7_demo_video_production_plan.md`](docs/phase7_demo_video_production_plan.md)
-
-The experiment phase is closed. These results do not establish formal H1/gold
-quality, general web-generation superiority, a user study, or production
-readiness.
-
-## Start the Inspector
-
-Create a Python 3.12 virtual environment and install the canonical lightweight
-dependency set:
+Use Python 3.12 in a fresh virtual environment:
 
 ```bash
+python -m venv .venv
+# Windows: .venv\Scripts\activate
+# Linux/macOS: source .venv/bin/activate
 python -m pip install -r requirements.txt
-```
-
-Install this entry point only; do not install all four requirements files in
-sequence. It already includes the data stack and the Agent lock. The one-line
-Phase 4 declaration is retained for runtime provenance, not a second setup
-step. File roles and update rules are documented in
-[`docs/dependency_management.md`](docs/dependency_management.md).
-
-For a clean GitHub checkout or a hosted maintenance environment, start the
-tracked model-free surface without historical replay:
-
-```bash
-python scripts/run_req2web_inspector.py --repository-demo --port 8765
-```
-
-This mode accepts requirements, creates deterministic drafts and ResultPackage
-ZIPs, imports validated packages, and keeps local run history. Replay-only
-sections stay hidden so generated examples cannot be mistaken for the frozen
-publication evidence.
-
-A separate five-record, project-authored portability example is available when
-the historical corpus is intentionally excluded:
-
-```bash
 python scripts/build_public_demo_index.py
-python scripts/run_req2web_inspector.py --repository-demo --index-dir data/public_demo_index
+python scripts/run_req2web_inspector.py --repository-demo --index-dir data/public_demo_index --run-root .local-runs
 ```
 
-This explicitly selected synthetic index is not a replacement for the frozen
-283-record corpus, regression set, or E1/E2 data. It supplies no quality result.
-Existing indexes are not overwritten. Inspector previews now use response-level
-origin isolation; see [SECURITY.md](SECURITY.md) for supported local interactions
-and intentionally blocked backend/storage/network behavior.
+Open `http://127.0.0.1:8765/`. Enter an English requirement, create a
+deterministic draft, inspect its trace, open the preview, and download its ZIP.
+Example: "Build a responsive equipment service page where users submit a
+problem and confirm its status."
 
-The precomputed replay is local evidence and is intentionally not tracked in
-Git. By default it is read from the sibling directory
-`../Req2Web_LocalData/replay/inspector_replay_bundle_v1`. Set
-`REQ2WEB_LOCAL_DATA_ROOT` to use another local-data root.
+The five newly authored text records are startup examples, not the historical
+283-record retrieval corpus or a benchmark. The builder refuses to overwrite
+existing data. This explicit demo route runs no model and does not execute
+F1-F4, paid APIs, or browser acceptance. Do not substitute it for historical
+experiment data or report its outputs as raw-model success.
 
-Validate the replay and start the model-free local Inspector:
+## Architecture and optional runtimes
 
-```powershell
-.\.venv\Scripts\python.exe .\scripts\run_req2web_inspector.py --validate-only
-.\.venv\Scripts\python.exe .\scripts\run_req2web_inspector.py --port 8768
-```
+The canonical model flow starts with the raw requirement, builds a shared
+requirement/context representation, and calls the shared F1-F4 orchestration.
+Req2Web owns the contracts, stable IDs, composition, PageSpec assembly,
+Renderer, checks, repair limit, fallback, and ResultPackage semantics.
+LangGraph is the orchestration substrate, not a second domain authority.
 
-The supported convenience launcher performs a model-free preflight and uses
-the repository virtual environment:
+The deterministic draft/G0 route is distinct from model generation. Optional
+GPU/model, semantic, browser, and external-GUI verification routes need their
+own configured runtimes and explicit operator actions. The lightweight
+requirements do not install model weights or GPU packages. The public smoke
+check verifies the model-free route, not every historical/optional entry point.
+See [architecture](docs/public_architecture.md) and
+[dependencies](docs/dependency_management.md).
 
-```powershell
-.\scripts\start_req2web_inspector.ps1 `
-  -ReplayBundleRoot ..\Req2Web_LocalData\replay\inspector_replay_bundle_v1 `
-  -Port 8768
-```
+## Experiments
 
-Local semantic assistance and the complete canonical model flow stay disabled
-unless the launcher or CLI receives the exact local model root, integrity
-evidence, and explicit enable flags. See
-`docs/phase6_release_foundation.md` for the low-GPU NF4 and high-GPU BF16
-profiles.
+The frozen E1 ordered-decision secondary analysis reports Req2Web 16/18,
+direct HTML 8/18, and structured one-call 5/18 across three cases. This is an
+exploratory post-hoc result; the paired exact p-value is 0.25, not confirmation
+of a general advantage.
 
-For a clean hosted checkout, use the short setup and validation sequence in
-`docs/work_maintenance.md`.
+The frozen E2 trace-relation analysis reports Req2Web C2 18/18,
+C0/C1/EVL-local 6/18, and EVL-cross 18/18. It supports native integrated
+trace checking, not unique rule expressiveness: externally authored equivalent
+cross-artifact rules restore parity. All six workflows are retained.
 
-## Repository readiness audit
+Scoring code, authored cases, and method definitions are included. Historical
+observation/result payloads are excluded, so the startup examples do not
+reproduce those numbers. See [methods and limitations](docs/experiments.md).
+Experiments are closed; this release does not rerun or relabel them.
 
-The release-readiness audit reads the tracked tree, reports private cleanup
-candidates, missing public metadata, absolute machine paths, large or binary
-artifacts, and suspected credential locations without printing matched secret
-values:
+## Focused validation
 
 ```bash
-python scripts/audit_open_source_readiness.py
-python scripts/audit_open_source_readiness.py --json
+python -m unittest discover -s tests -p test_public_demo_index.py
+python -m unittest discover -s tests -p test_req2web_inspector_preview_security.py
+python -m unittest discover -s tests -p test_repository_secret_hygiene.py
+python -m unittest discover -s tests -p test_open_source_readiness_audit.py
+python -m unittest discover -s tests -p test_dependency_hygiene.py
+python scripts/run_req2web_inspector.py --repository-demo --index-dir data/public_demo_index --preflight-only
+python scripts/audit_repository_secrets.py --source history
 ```
 
-The current private tree is expected to report `blocked`. The final sanitized
-public tree must pass `--fail-on-blockers` before repository visibility changes.
+Legacy integration tests and historical runners may refer to deliberately
+excluded private fixtures, corpus data, policies, or result packages. Their
+presence is source provenance, not a claim that full-suite or old-run
+reproduction works from this distribution. Do not enable a legacy run to
+compensate for missing artifacts or silently manufacture passing evidence.
 
-## Repository and local data
+## Security, license, and citation
 
-Git contains the current source, tests, contracts, lightweight fixtures,
-processed RAG corpus, frozen retrieval judgments, and mechanical metrics. Raw
-datasets, model weights, ResultPackages, browser runs, release candidates,
-Docker state, and other machine-specific outputs remain outside Git under
-`Req2Web_LocalData` or their documented owner-controlled locations.
+Run the Inspector on loopback only. Package hashes establish integrity, not
+trust in executable content. Artifact previews use an opaque-origin sandbox
+that blocks Inspector API/storage access and network-backed behavior while
+retaining local scripts and client-side form interaction. Downloads opened
+elsewhere do not inherit these HTTP restrictions. See [SECURITY.md](SECURITY.md).
 
-The current local-data roots include:
+Project-authored software and the five synthetic examples use
+[Apache-2.0](LICENSE). [LICENSING.md](LICENSING.md) records excluded material;
+third-party datasets are not relicensed. Please cite the accompanying paper
+when available, or this software using [CITATION.cff](CITATION.cff).
 
-- `replay/inspector_replay_bundle_v1`: frozen Inspector replay;
-- `replay/framework_evidence_v1`: retained deterministic, Phase 4, Phase 5,
-  and retrieval evidence used by optional replay tests;
-- `runs/`: new draft, semantic-assist, canonical-flow, report, and retrieval
-  runs;
-- `exports/`: handoff archives;
-- `optional_tools/`: pinned optional verifier runtimes.
-
-The repository does not include public-release license closure. RICO and other
-assets with unresolved redistribution rights remain reference-only. H1/gold,
-formal quality evaluation, training, LoRA, data expansion, production claims,
-and user studies are not part of the completed engineering evidence.
-
-## Main documents
-
-- `docs/README.md`: short guide to current, evaluation, maintenance, and
-  historical documentation.
-- `docs/project_framework.md`: product and technical framework.
-- `docs/active_flow_authority_registry.md`: current flow, prompt, and evidence
-  authorities.
-- `docs/phase6_release_foundation.md`: final Inspector behavior and runtime
-  commands.
-- `docs/phase7_experiment_execution_status.md`: frozen Phase 7 experiment
-  results and limitations.
-- `docs/phase7_demo_video_production_plan.md`: the current ICSE demonstration
-  video storyboard and production workflow.
-- `docs/dependency_management.md`: canonical installation entry point and the
-  purpose of each requirement layer.
-- `docs/dataset_selection_workflow.md`: dataset screening and corpus lineage.
-- `docs/repository_hygiene_checklist.md`: current local and Git maintenance
-  boundary.
-- `docs/open_source_readiness.md`: future public inventory, removal ledger,
-  history-sanitization rule, and release gates.
-- `docs/phase6_license_and_material_decision_checklist.md`: owner decisions
-  required before redistribution.
-- `CONTRIBUTING.md`: clean-checkout development and review workflow.
-- `docs/repository_output_reference_manifest.md`: retained and archived output
-  roots.
-- `docs/local_environment_rebuild.md`: safe parallel virtual-environment
-  rebuild procedure.
-- `docs/project_memory.md`: chronological project decisions and evidence.
-
-The private backup remote is `https://github.com/aszz007/Req2Web`.
+Existing clones from before the history cleanup must not merge or push their
+old ancestry into this repository. Use a fresh clone for maintenance. See
+[contributing](CONTRIBUTING.md).

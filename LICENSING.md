@@ -1,35 +1,28 @@
 # Licensing Scope
 
-The project owner selected Apache-2.0 on 2026-10-10, following the existing
-Req2Inst repositories. The standard terms are in [LICENSE](LICENSE), with the
-project attribution in [NOTICE](NOTICE).
+Project-authored software, technical documentation, tests, and the five newly
+authored synthetic text examples in `fixtures/public_demo/` are distributed
+under [Apache-2.0](LICENSE). [NOTICE](NOTICE) contains project attribution.
 
-Apache-2.0 covers project-authored software, documentation, tests, and the five
-newly authored text examples in `fixtures/public_demo/`. It does not grant
-rights in material owned by third parties or authorize publication of private
-operational records. The full development repository remains private pending
-review and explicit approval of an exact sanitized public distribution.
+The development history is retained after excluding private/unapproved material.
+This license does not grant rights in third-party material or convert a
+historical dataset, model response, image, or dependency into project property.
 
-## Material not relicensed by the project
+## Not distributed
 
-- External datasets and transformed records or indexes derived from them.
-- RICO and other reference-only images, hierarchy records, and screen assets.
-- Third-party issue/PR text, model weights, and provider/model responses.
-- Third-party dependencies, fonts, images, and separately licensed code.
+- External datasets and derived records, selection inventories, and indexes.
+- RICO/reference-only screenshots, hierarchy records, and review sheets.
+- Private annotation applications, raw model outputs, host policies and logs.
+- Owner-custody/H1/gold material, credentials, weights, and runtime caches.
+- Historical delivery archives and experiment observation payloads.
 
-These materials retain their upstream terms; unresolved redistribution rights
-mean exclusion from the public export, not replacement of their license with
-Apache-2.0. Historical private files are preserved for provenance.
+Source references to those artifacts remain provenance; obtain any necessary
+materials separately under their actual upstream terms. The synthetic startup
+examples do not replace the historical corpus or reproduce experimental scores.
 
-The lightweight requirements install dependencies from their upstream
-distributions rather than bundling their source or binary wheels. Upstream
-license and notice obligations still apply if dependencies are later vendored
-or distributed in a packaged runtime. A metadata inventory is useful but is
-not a substitute for reviewing actual license files for that distribution.
+Dependencies are installed from upstream distributions, not bundled here.
+Their licenses and notices still apply. A packaged runtime or vendored
+dependency distribution needs its own attribution review.
 
-## Citation
-
-Please cite the accompanying paper when available, or acknowledge Req2Web when
-using it in research. This is a scholarly request, not an added license
-condition. Apache-2.0 itself requires preservation of applicable license,
-copyright and attribution notices, not mandatory academic paper citation.
+Please cite the paper when available or acknowledge Req2Web in research.
+This scholarly request is not an added license condition.

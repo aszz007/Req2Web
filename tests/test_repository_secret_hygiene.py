@@ -73,6 +73,10 @@ class CredentialRuleTests(unittest.TestCase):
         self.assertEqual(redact_credential_literals(row["body"]), row["body"])
         self.assertEqual(find_secret_locations(row["body"]), [])
 
+    @unittest.skipUnless(
+        (ROOT / "data/processed/github_issues_prs_review_candidates.csv").is_file(),
+        "Private historical dataset is not distributed in the sanitized repository",
+    )
     def test_existing_selected_records_do_not_require_redaction(self):
         path = ROOT / "data/processed/github_issues_prs_review_candidates.csv"
         with path.open(encoding="utf-8-sig", newline="") as stream:

@@ -69,12 +69,12 @@ The canonical file deliberately excludes large or task-specific dependencies:
 - Eclipse Epsilon and its Java dependencies are isolated experiment tooling,
   not Python runtime dependencies.
 
-The tested local versions and the parallel environment rebuild procedure are
-recorded in [`local_environment_rebuild.md`](local_environment_rebuild.md).
-Do not add GPU packages to the
-lightweight root file, because a platform-neutral `pip install -r
-requirements.txt` must not unexpectedly download multi-gigabyte model
-runtimes.
+Historical machine-specific environment records are not distributed. The
+[repository README](../README.md) describes the supported lightweight demo;
+optional model and evaluation runtimes require a separately configured
+environment. Do not add GPU packages to the lightweight root file, because a
+platform-neutral `pip install -r requirements.txt` must not unexpectedly
+download multi-gigabyte model runtimes.
 
 ## Update procedure
 

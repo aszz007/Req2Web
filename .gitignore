@@ -69,3 +69,16 @@ release/
 /docs/*.docx
 /docs/mermaid-diagram.svg
 /video_work/
+
+# Excluded historical material and private recovery records
+/data/processed/
+/fixtures/phase4/
+/p4-05-stability-full-direct-*/
+/phase4_*savepoint*/
+/.local-runs/
+/docs/project_memory.md
+/docs/delegated_task_acceptance_log.md
+/docs/repository_output_reference_manifest.md
+/docs/work_maintenance.md
+*.bundle
+*commit-map*
