@@ -6,6 +6,8 @@ from collections import Counter
 from pathlib import Path
 from typing import Any
 
+from repository_secret_rules import redact_credential_literals
+
 
 REPOSITORIES = {
     "20580498": "kubernetes/kubernetes",
@@ -158,7 +160,9 @@ def main() -> int:
                     "issue_number": issue_number,
                     "pull_number": pull_number,
                     "issue_title": row["issue_title"],
-                    "issue_body_plain": row["issue_body_plain"],
+                    # Third-party issue text is untrusted and can contain real
+                    # passwords. Retain source references, not literal secrets.
+                    "issue_body_plain": redact_credential_literals(row["issue_body_plain"] or ""),
                     "chinese_summary": summary,
                     "validation_focus": focus,
                     "pull_comments": number(row["pull_comments"]),

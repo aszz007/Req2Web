@@ -15,6 +15,8 @@ import subprocess
 import sys
 from typing import Iterable
 
+from repository_secret_rules import SECRET_PATTERNS, find_secret_locations
+
 
 ROOT = Path(__file__).resolve().parents[1]
 SCHEMA_VERSION = "req2web.open_source_readiness_audit.v1"
@@ -63,18 +65,6 @@ REVIEW_SUFFIXES = (
     ".zip",
     ".tar",
     ".gz",
-)
-
-SECRET_PATTERNS = (
-    ("private_key", re.compile(r"-----BEGIN (?:[A-Z0-9 ]+ )?PRIVATE KEY-----")),
-    ("github_token", re.compile(r"\bgh(?:p|o|u|s|r)_[A-Za-z0-9]{20,}\b")),
-    ("openai_key", re.compile(r"\bsk-[A-Za-z0-9_-]{20,}\b")),
-    ("aws_access_key", re.compile(r"\b(?:AKIA|ASIA)[A-Z0-9]{16}\b")),
-    ("google_api_key", re.compile(r"\bAIza[A-Za-z0-9_-]{30,}\b")),
-    (
-        "bearer_token",
-        re.compile(r"\bBearer\s+[A-Za-z0-9._~+/-]{24,}={0,2}\b", re.IGNORECASE),
-    ),
 )
 
 ABSOLUTE_PATH_PATTERNS = (
@@ -183,7 +173,10 @@ def audit_repository(
         text = _read_scannable_text(file_path, size)
         if text is None:
             continue
-        secret_findings.extend(_pattern_findings(relative_path, text, SECRET_PATTERNS))
+        secret_findings.extend(
+            {"path": relative_path, **finding}
+            for finding in find_secret_locations(text)
+        )
         absolute_path_findings.extend(
             _pattern_findings(relative_path, text, ABSOLUTE_PATH_PATTERNS)
         )

@@ -89,3 +89,13 @@ A reviewable change should state:
 
 Before submitting a change, inspect the diff for private paths, credentials,
 unrelated generated files, and accidental changes to frozen evidence.
+
+Also check the exact staged Git blobs locally (not just the working-tree copy):
+
+```bash
+python scripts/audit_repository_secrets.py --source index
+```
+
+Review every reported location before committing. Do not paste matched values
+into an issue, pull request, report, or external scanner. See `SECURITY.md` for
+history-scan limits and incident handling.
