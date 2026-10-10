@@ -8,6 +8,8 @@ The Inspector lets users inspect these artifacts and their relationships.
 This distribution retains the development commit history with private and
 unapproved material excluded. It includes current and historical project
 source, experiment-method definitions, and selected technical documentation.
+Private annotation, owner-evaluation, and training-data preparation utilities
+are kept outside this distribution.
 It is not a complete dataset, model-weight, or historical-result release.
 
 ## Quick start: model-free demo
